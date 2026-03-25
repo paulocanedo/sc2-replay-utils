@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process;
 
 use crate::replay::parse_replay;
-use crate::utils::{list_replays, prepare_out_dir, race_letter, resolve_dir, sanitize};
+use crate::utils::{list_replays, prepare_out_dir, race_letter, resolve_dir, resolve_path, sanitize};
 
 pub fn cmd_rename(dir: Option<PathBuf>) {
     let input_dir = resolve_dir(dir);
@@ -56,54 +56,78 @@ pub fn cmd_rename(dir: Option<PathBuf>) {
     println!("Concluído.");
 }
 
-pub fn cmd_dump(dir: Option<PathBuf>, output: Option<PathBuf>, stdout: bool) {
-    let input_dir = resolve_dir(dir);
+enum DumpDest {
+    Stdout,
+    Dir(PathBuf),
+}
 
-    let replays = list_replays(&input_dir);
-    if replays.is_empty() {
-        eprintln!("Nenhum arquivo .SC2Replay encontrado em '{}'", input_dir.display());
-        process::exit(1);
-    }
-    println!("Encontrados {} replays", replays.len());
-
-    let out_dir = if stdout {
-        None
-    } else {
-        let d = output.unwrap_or_else(|| input_dir.join("out"));
-        prepare_out_dir(&d);
-        Some(d)
+fn dump_one(replay_path: &std::path::Path, dest: &DumpDest) {
+    let data = match parse_replay(replay_path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("  SKIP {}: {}", replay_path.display(), e);
+            return;
+        }
     };
 
-    for replay_path in &replays {
-        let data = match parse_replay(replay_path) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("  SKIP {}: {}", replay_path.display(), e);
-                continue;
-            }
-        };
+    let yaml = match serde_yml::to_string(&data) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("  ERRO ao serializar {}: {}", replay_path.display(), e);
+            return;
+        }
+    };
 
-        let yaml = match serde_yml::to_string(&data) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("  ERRO ao serializar {}: {}", replay_path.display(), e);
-                continue;
-            }
-        };
-
-        if stdout {
+    match dest {
+        DumpDest::Stdout => {
             println!("---");
             print!("{}", yaml);
-        } else {
+        }
+        DumpDest::Dir(dir) => {
             let stem = replay_path
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "replay".to_string());
-            let out_file = out_dir.as_ref().unwrap().join(format!("{}.yaml", stem));
+            let out_file = dir.join(format!("{}.yaml", stem));
             match fs::write(&out_file, &yaml) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
                 Err(e) => eprintln!("  ERRO ao gravar {}: {}", out_file.display(), e),
             }
+        }
+    }
+}
+
+pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool) {
+    let path = resolve_path(path);
+
+    if path.is_file() {
+        let dest = if stdout {
+            DumpDest::Stdout
+        } else {
+            let dir = output.unwrap_or_else(|| {
+                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+            });
+            DumpDest::Dir(dir)
+        };
+        dump_one(&path, &dest);
+    } else {
+        let replays = list_replays(&path);
+        if replays.is_empty() {
+            eprintln!("Nenhum arquivo .SC2Replay encontrado em '{}'", path.display());
+            process::exit(1);
+        }
+        println!("Encontrados {} replays", replays.len());
+
+        let dest = if stdout {
+            DumpDest::Stdout
+        } else {
+            let dir = output.unwrap_or_else(|| path.join("out"));
+            prepare_out_dir(&dir);
+            DumpDest::Dir(dir)
+        };
+
+        for replay_path in &replays {
+            dump_one(replay_path, &dest);
         }
     }
 

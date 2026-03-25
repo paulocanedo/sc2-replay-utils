@@ -42,6 +42,27 @@ pub fn sanitize(s: &str) -> String {
 
 // ── Helpers de filesystem ────────────────────────────────────────────────────
 
+/// Resolve um caminho (arquivo ou diretório): usa `opt` se fornecido, senão busca `DEFAULT_DIR_NAME`.
+pub fn resolve_path(opt: Option<PathBuf>) -> PathBuf {
+    if let Some(p) = opt {
+        if !p.exists() {
+            eprintln!("Erro: '{}' não encontrado", p.display());
+            process::exit(1);
+        }
+        return p;
+    }
+    let candidate = Path::new(DEFAULT_DIR_NAME);
+    if candidate.is_dir() {
+        println!("Usando diretório encontrado: {}", candidate.display());
+        return candidate.to_path_buf();
+    }
+    eprintln!(
+        "Nenhum argumento fornecido e '{}' não encontrado no diretório atual.",
+        DEFAULT_DIR_NAME
+    );
+    process::exit(1);
+}
+
 /// Resolve o diretório de entrada: usa `opt` se fornecido, senão busca `DEFAULT_DIR_NAME`.
 pub fn resolve_dir(opt: Option<PathBuf>) -> PathBuf {
     if let Some(p) = opt {
