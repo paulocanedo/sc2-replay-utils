@@ -71,12 +71,14 @@ pub struct ReplayData {
     pub datetime: String,
     pub game_loops: u32,
     pub duration_seconds: u32,
+    /// Limite de coleta de eventos em minutos. 0 indica sem limite.
+    pub max_time_minutes: u32,
     pub players: Vec<PlayerData>,
 }
 
 // ── Parser principal ─────────────────────────────────────────────────────────
 
-pub fn parse_replay(path: &Path) -> Result<ReplayData, String> {
+pub fn parse_replay(path: &Path, max_time_minutes: u32) -> Result<ReplayData, String> {
     let path_str = path.to_str().unwrap_or_default();
 
     let (mpq, file_contents) =
@@ -125,7 +127,8 @@ pub fn parse_replay(path: &Path) -> Result<ReplayData, String> {
         })
         .collect();
 
-    process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players)?;
+    let max_loops = max_time_minutes.saturating_mul(60 * 16);
+    process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players, max_loops)?;
 
     let file = path
         .file_name()
@@ -138,6 +141,7 @@ pub fn parse_replay(path: &Path) -> Result<ReplayData, String> {
         datetime,
         game_loops,
         duration_seconds: game_loops / 16,
+        max_time_minutes,
         players,
     })
 }
@@ -150,6 +154,7 @@ fn process_tracker_events(
     file_contents: &[u8],
     player_idx: &HashMap<u8, usize>,
     players: &mut Vec<PlayerData>,
+    max_loops: u32,
 ) -> Result<(), String> {
     let tracker_events = s2protocol::read_tracker_events(path_str, mpq, file_contents)
         .map_err(|e| format!("{:?}", e))?;
@@ -162,6 +167,9 @@ fn process_tracker_events(
 
     for ev in tracker_events {
         game_loop += ev.delta;
+        if max_loops != 0 && game_loop > max_loops {
+            break;
+        }
 
         match ev.event {
             ReplayTrackerEvent::PlayerStats(e) => {

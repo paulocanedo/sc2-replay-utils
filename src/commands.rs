@@ -18,7 +18,7 @@ pub fn cmd_rename(dir: Option<PathBuf>) {
     println!("Encontrados {} replays", replays.len());
 
     for replay_path in &replays {
-        let data = match parse_replay(replay_path) {
+        let data = match parse_replay(replay_path, 0) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -61,8 +61,8 @@ enum DumpDest {
     Dir(PathBuf),
 }
 
-fn dump_one(replay_path: &std::path::Path, dest: &DumpDest) {
-    let data = match parse_replay(replay_path) {
+fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32) {
+    let data = match parse_replay(replay_path, max_time) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -97,7 +97,7 @@ fn dump_one(replay_path: &std::path::Path, dest: &DumpDest) {
     }
 }
 
-pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool) {
+pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool, max_time: u32) {
     let path = resolve_path(path);
 
     if path.is_file() {
@@ -109,7 +109,7 @@ pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool) {
             });
             DumpDest::Dir(dir)
         };
-        dump_one(&path, &dest);
+        dump_one(&path, &dest, max_time);
     } else {
         let replays = list_replays(&path);
         if replays.is_empty() {
@@ -127,7 +127,7 @@ pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool) {
         };
 
         for replay_path in &replays {
-            dump_one(replay_path, &dest);
+            dump_one(replay_path, &dest, max_time);
         }
     }
 

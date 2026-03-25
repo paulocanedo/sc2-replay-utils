@@ -30,6 +30,9 @@ enum Commands {
         /// Imprime todos os YAMLs no stdout em vez de gravar arquivos
         #[arg(long)]
         stdout: bool,
+        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5)
+        #[arg(long, default_value_t = 5)]
+        max_time: u32,
     },
 }
 
@@ -37,6 +40,6 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Rename { dir } => commands::cmd_rename(dir),
-        Commands::Dump { path, output, stdout } => commands::cmd_dump(path, output, stdout),
+        Commands::Dump { path, output, stdout, max_time } => commands::cmd_dump(path, output, stdout, max_time),
     }
 }
