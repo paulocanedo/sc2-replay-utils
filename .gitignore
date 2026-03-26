@@ -3,3 +3,4 @@
 /.claude
 .env
 !.env.example
+*.yaml
