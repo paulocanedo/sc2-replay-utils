@@ -35,6 +35,9 @@ enum Commands {
         /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
         #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
         max_time: u32,
+        /// Omite campos de localização (pos_x, pos_y) dos eventos [env: SC2RU_NO_LOCATION]
+        #[arg(long, env = "SC2RU_NO_LOCATION")]
+        no_location: bool,
         /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
         #[arg(long, env = "SC2RU_LATEST")]
         latest: bool,
@@ -49,8 +52,8 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Rename { dir } => commands::cmd_rename(dir),
-        Commands::Dump { path, output, stdout, max_time, latest, sc2_replay_dir } => {
-            commands::cmd_dump(path, output, stdout, max_time, latest, sc2_replay_dir)
+        Commands::Dump { path, output, stdout, max_time, no_location, latest, sc2_replay_dir } => {
+            commands::cmd_dump(path, output, stdout, max_time, !no_location, latest, sc2_replay_dir)
         }
     }
 }

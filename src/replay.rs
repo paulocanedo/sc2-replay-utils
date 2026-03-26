@@ -39,8 +39,10 @@ pub struct UnitEntry {
     pub game_loop: u32,
     pub event: &'static str, // "born" | "init" | "done"
     pub unit_type: String,
-    pub x: u8,
-    pub y: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pos_x: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pos_y: Option<u8>,
 }
 
 #[derive(serde::Serialize)]
@@ -48,8 +50,10 @@ pub struct UnitLossEntry {
     #[serde(rename = "loop")]
     pub game_loop: u32,
     pub unit_type: String,
-    pub x: u8,
-    pub y: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pos_x: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pos_y: Option<u8>,
     pub killer_player_id: Option<u8>,
 }
 
@@ -78,7 +82,7 @@ pub struct ReplayData {
 
 // ── Parser principal ─────────────────────────────────────────────────────────
 
-pub fn parse_replay(path: &Path, max_time_minutes: u32) -> Result<ReplayData, String> {
+pub fn parse_replay(path: &Path, max_time_minutes: u32, include_location: bool) -> Result<ReplayData, String> {
     let path_str = path.to_str().unwrap_or_default();
 
     let (mpq, file_contents) =
@@ -128,7 +132,7 @@ pub fn parse_replay(path: &Path, max_time_minutes: u32) -> Result<ReplayData, St
         .collect();
 
     let max_loops = max_time_minutes.saturating_mul(60 * 16);
-    process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players, max_loops)?;
+    process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players, max_loops, include_location)?;
 
     let file = path
         .file_name()
@@ -155,6 +159,7 @@ fn process_tracker_events(
     player_idx: &HashMap<u8, usize>,
     players: &mut Vec<PlayerData>,
     max_loops: u32,
+    include_location: bool,
 ) -> Result<(), String> {
     let tracker_events = s2protocol::read_tracker_events(path_str, mpq, file_contents)
         .map_err(|e| format!("{:?}", e))?;
@@ -209,8 +214,8 @@ fn process_tracker_events(
                     game_loop,
                     event: "born",
                     unit_type: e.unit_type_name,
-                    x: e.x,
-                    y: e.y,
+                    pos_x: include_location.then_some(e.x),
+                    pos_y: include_location.then_some(e.y),
                 });
             }
 
@@ -222,8 +227,8 @@ fn process_tracker_events(
                     game_loop,
                     event: "init",
                     unit_type: e.unit_type_name,
-                    x: e.x,
-                    y: e.y,
+                    pos_x: include_location.then_some(e.x),
+                    pos_y: include_location.then_some(e.y),
                 });
             }
 
@@ -235,8 +240,8 @@ fn process_tracker_events(
                     game_loop,
                     event: "done",
                     unit_type: unit_type.clone(),
-                    x: *x,
-                    y: *y,
+                    pos_x: include_location.then_some(*x),
+                    pos_y: include_location.then_some(*y),
                 });
             }
 
@@ -247,8 +252,8 @@ fn process_tracker_events(
                 players[idx].unit_losses.push(UnitLossEntry {
                     game_loop,
                     unit_type: unit_type.clone(),
-                    x: e.x,
-                    y: e.y,
+                    pos_x: include_location.then_some(e.x),
+                    pos_y: include_location.then_some(e.y),
                     killer_player_id: e.killer_player_id,
                 });
             }
