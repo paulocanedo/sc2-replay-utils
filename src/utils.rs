@@ -104,6 +104,49 @@ pub fn list_replays(dir: &Path) -> Vec<PathBuf> {
     replays
 }
 
+// ── Descoberta de replay mais recente ────────────────────────────────────────
+
+/// Retorna o diretório padrão de replays do StarCraft II, se existir.
+/// Windows: `%USERPROFILE%\Documents\StarCraft II`
+/// outros:  `$HOME/Documents/StarCraft II`
+pub fn sc2_default_dir() -> Option<PathBuf> {
+    let base = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()?;
+    let p = PathBuf::from(base).join("Documents").join("StarCraft II");
+    p.is_dir().then_some(p)
+}
+
+/// Busca recursivamente em `base` o arquivo `.SC2Replay` modificado mais recentemente.
+pub fn find_latest_replay(base: &Path) -> Option<PathBuf> {
+    let mut latest: Option<(PathBuf, std::time::SystemTime)> = None;
+    let mut queue = vec![base.to_path_buf()];
+
+    while let Some(dir) = queue.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                queue.push(path);
+            } else if path
+                .extension()
+                .map_or(false, |e| e.eq_ignore_ascii_case("SC2Replay"))
+            {
+                let modified = entry.metadata().ok()?.modified().ok()?;
+                let is_newer = latest.as_ref().map_or(true, |(_, t)| modified > *t);
+                if is_newer {
+                    latest = Some((path, modified));
+                }
+            }
+        }
+    }
+
+    latest.map(|(p, _)| p)
+}
+
 /// Garante que `out_dir` existe e está vazio. Cria se necessário, aborta se tiver arquivos.
 pub fn prepare_out_dir(out_dir: &Path) {
     if out_dir.exists() {

@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::process;
 
 use crate::replay::parse_replay;
-use crate::utils::{list_replays, prepare_out_dir, race_letter, resolve_dir, resolve_path, sanitize};
+use crate::utils::{
+    find_latest_replay, list_replays, prepare_out_dir, race_letter, resolve_dir, resolve_path,
+    sanitize, sc2_default_dir,
+};
 
 pub fn cmd_rename(dir: Option<PathBuf>) {
     let input_dir = resolve_dir(dir);
@@ -61,6 +64,40 @@ enum DumpDest {
     Dir(PathBuf),
 }
 
+fn resolve_dump_path(
+    path: Option<PathBuf>,
+    latest: bool,
+    sc2_dir: Option<PathBuf>,
+) -> PathBuf {
+    // Caminho explícito tem prioridade sobre --latest
+    if let Some(p) = path {
+        if !p.exists() {
+            eprintln!("Erro: '{}' não encontrado", p.display());
+            process::exit(1);
+        }
+        return p;
+    }
+
+    if latest {
+        let base = sc2_dir
+            .or_else(sc2_default_dir)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "Erro: diretório do SC2 não encontrado. Use --sc2-dir ou SC2RU_SC2_DIR."
+                );
+                process::exit(1);
+            });
+
+        return find_latest_replay(&base).unwrap_or_else(|| {
+            eprintln!("Nenhum replay encontrado em '{}'", base.display());
+            process::exit(1);
+        });
+    }
+
+    // Fallback padrão
+    resolve_path(None)
+}
+
 fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32) {
     let data = match parse_replay(replay_path, max_time) {
         Ok(d) => d,
@@ -97,8 +134,15 @@ fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32) {
     }
 }
 
-pub fn cmd_dump(path: Option<PathBuf>, output: Option<PathBuf>, stdout: bool, max_time: u32) {
-    let path = resolve_path(path);
+pub fn cmd_dump(
+    path: Option<PathBuf>,
+    output: Option<PathBuf>,
+    stdout: bool,
+    max_time: u32,
+    latest: bool,
+    sc2_dir: Option<PathBuf>,
+) {
+    let path = resolve_dump_path(path, latest, sc2_dir);
 
     if path.is_file() {
         let dest = if stdout {
