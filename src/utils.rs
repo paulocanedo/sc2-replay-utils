@@ -107,13 +107,10 @@ pub fn list_replays(dir: &Path) -> Vec<PathBuf> {
 // ── Descoberta de replay mais recente ────────────────────────────────────────
 
 /// Retorna o diretório padrão de replays do StarCraft II, se existir.
-/// Windows: `%USERPROFILE%\Documents\StarCraft II`
-/// outros:  `$HOME/Documents/StarCraft II`
+/// Usa a pasta de Documentos real do sistema (resolve corretamente nomes
+/// localizados como "Documentos" no Windows em português).
 pub fn sc2_default_dir() -> Option<PathBuf> {
-    let base = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .ok()?;
-    let p = PathBuf::from(base).join("Documents").join("StarCraft II");
+    let p = dirs::document_dir()?.join("StarCraft II");
     p.is_dir().then_some(p)
 }
 
