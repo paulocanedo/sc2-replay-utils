@@ -149,9 +149,7 @@ pub fn cmd_dump(
         let dest = if stdout {
             DumpDest::Stdout
         } else {
-            let dir = output.unwrap_or_else(|| {
-                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
-            });
+            let dir = output.unwrap_or_else(|| PathBuf::from("."));
             DumpDest::Dir(dir)
         };
         dump_one(&path, &dest, max_time);
@@ -166,7 +164,7 @@ pub fn cmd_dump(
         let dest = if stdout {
             DumpDest::Stdout
         } else {
-            let dir = output.unwrap_or_else(|| path.join("out"));
+            let dir = output.unwrap_or_else(|| PathBuf::from("out"));
             prepare_out_dir(&dir);
             DumpDest::Dir(dir)
         };
