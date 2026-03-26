@@ -17,26 +17,29 @@ struct Cli {
 enum Commands {
     /// Renomeia replays copiando para out/
     Rename {
-        /// Diretório com os replays (padrão: sc2replays-pack)
+        /// Diretório com os replays (padrão: sc2replays-pack) [env: SC2RU_DIR]
+        #[arg(env = "SC2RU_DIR")]
         dir: Option<PathBuf>,
     },
     /// Exporta metadados de replays para YAML (um arquivo por replay)
     Dump {
-        /// Arquivo .SC2Replay ou diretório com replays (padrão: sc2replays-pack)
+        /// Arquivo .SC2Replay ou diretório com replays (padrão: sc2replays-pack) [env: SC2RU_PATH]
+        #[arg(env = "SC2RU_PATH")]
         path: Option<PathBuf>,
-        /// Diretório de saída para os YAMLs (padrão: <dir>/out/)
-        #[arg(long)]
+        /// Diretório de saída para os YAMLs (padrão: <dir>/out/) [env: SC2RU_OUTPUT]
+        #[arg(long, env = "SC2RU_OUTPUT")]
         output: Option<PathBuf>,
-        /// Imprime todos os YAMLs no stdout em vez de gravar arquivos
-        #[arg(long)]
+        /// Imprime todos os YAMLs no stdout em vez de gravar arquivos [env: SC2RU_STDOUT]
+        #[arg(long, env = "SC2RU_STDOUT")]
         stdout: bool,
-        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5)
-        #[arg(long, default_value_t = 5)]
+        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
         max_time: u32,
     },
 }
 
 fn main() {
+    dotenvy::dotenv().ok();
     let cli = Cli::parse();
     match cli.command {
         Commands::Rename { dir } => commands::cmd_rename(dir),

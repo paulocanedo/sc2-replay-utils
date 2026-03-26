@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 s2protocol = "3.5"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_yml = "0.0"
+dotenvy = "0.15"
