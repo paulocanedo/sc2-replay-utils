@@ -67,7 +67,7 @@ enum DumpDest {
 fn resolve_dump_path(
     path: Option<PathBuf>,
     latest: bool,
-    sc2_dir: Option<PathBuf>,
+    sc2_replay_dir: Option<PathBuf>,
 ) -> PathBuf {
     // Caminho explícito tem prioridade sobre --latest
     if let Some(p) = path {
@@ -79,11 +79,12 @@ fn resolve_dump_path(
     }
 
     if latest {
-        let base = sc2_dir
+        let base = sc2_replay_dir
             .or_else(sc2_default_dir)
             .unwrap_or_else(|| {
                 eprintln!(
-                    "Erro: diretório do SC2 não encontrado. Use --sc2-dir ou SC2RU_SC2_DIR."
+                    "Erro: diretório de replays do SC2 não encontrado. \
+                     Use --sc2-replay-dir ou SC2_REPLAY_DIR."
                 );
                 process::exit(1);
             });
@@ -140,9 +141,9 @@ pub fn cmd_dump(
     stdout: bool,
     max_time: u32,
     latest: bool,
-    sc2_dir: Option<PathBuf>,
+    sc2_replay_dir: Option<PathBuf>,
 ) {
-    let path = resolve_dump_path(path, latest, sc2_dir);
+    let path = resolve_dump_path(path, latest, sc2_replay_dir);
 
     if path.is_file() {
         let dest = if stdout {
