@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+mod army_value;
+mod army_value_image;
 mod build_order;
 mod build_order_image;
 mod commands;
@@ -70,6 +72,27 @@ enum Commands {
         #[arg(long, env = "SC2RU_IMAGE")]
         image: bool,
     },
+    /// Gráfico de valor de exército e gás ao longo do tempo
+    ArmyValue {
+        /// Arquivo .SC2Replay ou diretório com replays (padrão: sc2replays-pack) [env: SC2RU_PATH]
+        #[arg(env = "SC2RU_PATH")]
+        path: Option<PathBuf>,
+        /// Diretório de saída para os CSVs (padrão: ./ para arquivo, ./out/ para diretório) [env: SC2RU_OUTPUT]
+        #[arg(long, env = "SC2RU_OUTPUT")]
+        output: Option<PathBuf>,
+        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 0) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 0, env = "SC2RU_MAX_TIME")]
+        max_time: u32,
+        /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
+        #[arg(long, env = "SC2RU_LATEST")]
+        latest: bool,
+        /// Diretório onde o SC2 salva os replays, usado com --latest [env: SC2_REPLAY_DIR]
+        #[arg(long, env = "SC2_REPLAY_DIR")]
+        sc2_replay_dir: Option<PathBuf>,
+        /// Gera também imagem PNG com o gráfico combinado dos dois jogadores [env: SC2RU_IMAGE]
+        #[arg(long, env = "SC2RU_IMAGE")]
+        image: bool,
+    },
     /// Extrai a Build Order e grava CSV por jogador (<stem>_p1.csv, <stem>_p2.csv)
     BuildOrder {
         /// Arquivo .SC2Replay ou diretório com replays (padrão: sc2replays-pack) [env: SC2RU_PATH]
@@ -103,6 +126,9 @@ fn main() {
         }
         Commands::SupplyBlock { path, output, max_time, latest, sc2_replay_dir, image } => {
             commands::cmd_supply_block(path, output, max_time, latest, sc2_replay_dir, image)
+        }
+        Commands::ArmyValue { path, output, max_time, latest, sc2_replay_dir, image } => {
+            commands::cmd_army_value(path, output, max_time, latest, sc2_replay_dir, image)
         }
         Commands::BuildOrder { path, output, max_time, latest, sc2_replay_dir, image } => {
             commands::cmd_build_order(path, output, max_time, latest, sc2_replay_dir, image)
