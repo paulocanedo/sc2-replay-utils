@@ -3,7 +3,9 @@ use std::path::Path;
 
 use s2protocol::tracker_events::ReplayTrackerEvent;
 
-// ── Struct de saída ───────────────────────────────────────────────────────────
+use crate::utils::extract_clan_and_name;
+
+// ── Structs de saída ──────────────────────────────────────────────────────────
 
 pub struct BuildOrderEntry {
     pub supply: u8,
@@ -12,14 +14,23 @@ pub struct BuildOrderEntry {
     pub count: u32,
 }
 
+pub struct PlayerBuildOrder {
+    pub name: String,
+    pub race: String,
+    pub entries: Vec<BuildOrderEntry>,
+}
+
+pub struct BuildOrderResult {
+    pub players: Vec<PlayerBuildOrder>,
+}
+
 // ── Extração ──────────────────────────────────────────────────────────────────
 
 /// Extrai a Build Order de cada jogador ativo.
-/// Retorna um Vec por jogador (índice 0 = p1, 1 = p2, ...).
 pub fn extract_build_order(
     path: &Path,
     max_time_minutes: u32,
-) -> Result<Vec<Vec<BuildOrderEntry>>, String> {
+) -> Result<BuildOrderResult, String> {
     let path_str = path.to_str().unwrap_or_default();
 
     let (mpq, file_contents) =
@@ -120,7 +131,27 @@ pub fn extract_build_order(
         }
     }
 
-    Ok(raw.into_iter().map(deduplicate).collect())
+    let player_meta: Vec<(String, String)> = details
+        .player_list
+        .iter()
+        .filter(|p| p.observe == 0)
+        .map(|p| {
+            let (_, name) = extract_clan_and_name(&p.name);
+            (name, p.race.clone())
+        })
+        .collect();
+
+    let players = raw
+        .into_iter()
+        .map(deduplicate)
+        .enumerate()
+        .map(|(i, entries)| {
+            let (name, race) = player_meta.get(i).cloned().unwrap_or_default();
+            PlayerBuildOrder { name, race, entries }
+        })
+        .collect();
+
+    Ok(BuildOrderResult { players })
 }
 
 /// Funde entradas consecutivas com a mesma ação em uma única com `count` incrementado.
@@ -137,7 +168,7 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
 
 // ── Formatação CSV de largura fixada ─────────────────────────────────────────
 
-fn format_time(game_loop: u32) -> String {
+pub fn format_time(game_loop: u32) -> String {
     let total_secs = game_loop / 16;
     format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
 }

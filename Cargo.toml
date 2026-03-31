@@ -11,3 +11,6 @@ serde = { version = "1", features = ["derive"] }
 serde_yml = "0.0"
 dotenvy = "0.15"
 dirs = "5"
+image     = { version = "0.25", default-features = false, features = ["png"] }
+imageproc = "0.25"
+ab_glyph  = "0.2"
