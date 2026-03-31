@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 
+use crate::build_order::{extract_build_order, to_fixed_csv};
 use crate::replay::parse_replay;
 use crate::utils::{
     find_latest_replay, list_replays, prepare_out_dir, race_letter, resolve_dir, resolve_path,
@@ -64,7 +65,7 @@ enum DumpDest {
     Dir(PathBuf),
 }
 
-fn resolve_dump_path(
+pub(crate) fn resolve_dump_path(
     path: Option<PathBuf>,
     latest: bool,
     sc2_replay_dir: Option<PathBuf>,
@@ -172,6 +173,61 @@ pub fn cmd_dump(
 
         for replay_path in &replays {
             dump_one(replay_path, &dest, max_time, include_location);
+        }
+    }
+
+    println!("Concluído.");
+}
+
+fn build_order_one(replay_path: &std::path::Path, out_dir: &std::path::Path, max_time: u32) {
+    let players = match extract_build_order(replay_path, max_time) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("  SKIP {}: {}", replay_path.display(), e);
+            return;
+        }
+    };
+
+    let stem = replay_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "replay".to_string());
+
+    for (i, entries) in players.iter().enumerate() {
+        let out_file = out_dir.join(format!("{}_p{}.csv", stem, i + 1));
+        let csv = to_fixed_csv(entries);
+        match fs::write(&out_file, &csv) {
+            Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
+            Err(e) => eprintln!("  ERRO ao gravar {}: {}", out_file.display(), e),
+        }
+    }
+}
+
+pub fn cmd_build_order(
+    path: Option<PathBuf>,
+    output: Option<PathBuf>,
+    max_time: u32,
+    latest: bool,
+    sc2_replay_dir: Option<PathBuf>,
+) {
+    let path = resolve_dump_path(path, latest, sc2_replay_dir);
+
+    if path.is_file() {
+        let out_dir = output.unwrap_or_else(|| PathBuf::from("."));
+        build_order_one(&path, &out_dir, max_time);
+    } else {
+        let replays = list_replays(&path);
+        if replays.is_empty() {
+            eprintln!("Nenhum arquivo .SC2Replay encontrado em '{}'", path.display());
+            process::exit(1);
+        }
+        println!("Encontrados {} replays", replays.len());
+
+        let out_dir = output.unwrap_or_else(|| PathBuf::from("out"));
+        prepare_out_dir(&out_dir);
+
+        for replay_path in &replays {
+            build_order_one(replay_path, &out_dir, max_time);
         }
     }
 

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+mod build_order;
 mod commands;
 mod replay;
 mod utils;
@@ -45,6 +46,24 @@ enum Commands {
         #[arg(long, env = "SC2_REPLAY_DIR")]
         sc2_replay_dir: Option<PathBuf>,
     },
+    /// Extrai a Build Order e grava CSV por jogador (<stem>_p1.csv, <stem>_p2.csv)
+    BuildOrder {
+        /// Arquivo .SC2Replay ou diretório com replays (padrão: sc2replays-pack) [env: SC2RU_PATH]
+        #[arg(env = "SC2RU_PATH")]
+        path: Option<PathBuf>,
+        /// Diretório de saída para os CSVs (padrão: ./ para arquivo, ./out/ para diretório) [env: SC2RU_OUTPUT]
+        #[arg(long, env = "SC2RU_OUTPUT")]
+        output: Option<PathBuf>,
+        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
+        max_time: u32,
+        /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
+        #[arg(long, env = "SC2RU_LATEST")]
+        latest: bool,
+        /// Diretório onde o SC2 salva os replays, usado com --latest [env: SC2_REPLAY_DIR]
+        #[arg(long, env = "SC2_REPLAY_DIR")]
+        sc2_replay_dir: Option<PathBuf>,
+    },
 }
 
 fn main() {
@@ -54,6 +73,9 @@ fn main() {
         Commands::Rename { dir } => commands::cmd_rename(dir),
         Commands::Dump { path, output, stdout, max_time, no_location, latest, sc2_replay_dir } => {
             commands::cmd_dump(path, output, stdout, max_time, !no_location, latest, sc2_replay_dir)
+        }
+        Commands::BuildOrder { path, output, max_time, latest, sc2_replay_dir } => {
+            commands::cmd_build_order(path, output, max_time, latest, sc2_replay_dir)
         }
     }
 }
