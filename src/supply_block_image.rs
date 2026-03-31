@@ -35,6 +35,7 @@ const BAR_BLOCKED: Rgba<u8> = Rgba([200, 40, 40, 255]);
 const TICK_COL: Rgba<u8> = Rgba([100, 120, 180, 255]);
 const TIME_COL: Rgba<u8> = Rgba([140, 160, 200, 255]);
 const TITLE_COL: Rgba<u8> = Rgba([220, 180, 60, 255]);
+const SUPPLY_LABEL_COL: Rgba<u8> = Rgba([255, 255, 255, 255]);
 
 // ── API pública ───────────────────────────────────────────────────────────────
 
@@ -101,7 +102,11 @@ pub fn write_supply_block_png(
         BAR_NORMAL,
     );
 
-    // ── Trechos vermelhos (supply block) ──────────────────────────────────────
+    // ── Trechos vermelhos (supply block) + rótulo de supply ──────────────────
+    let label_scale = PxScale::from(FONT_SIZE);
+    let char_h = FONT_SIZE.ceil() as u32;
+    let label_y = (bar_y + (BAR_H.saturating_sub(char_h)) / 2) as i32;
+
     for entry in entries {
         let x_start = LEFT_MARGIN as f32
             + (entry.start_loop as f32 / game_loops as f32) * axis_width;
@@ -113,6 +118,14 @@ pub fn write_supply_block_png(
             Rect::at(x_start as i32, bar_y as i32).of_size(w, BAR_H),
             BAR_BLOCKED,
         );
+
+        // Rótulo do supply centralizado dentro do trecho, se couber
+        let label = entry.supply.to_string();
+        let label_w = text_size(label_scale, &font, &label).0;
+        if label_w + 4 <= w {
+            let label_x = x_start as i32 + (w as i32 - label_w as i32) / 2;
+            draw_text_mut(&mut img, SUPPLY_LABEL_COL, label_x, label_y, label_scale, &font, &label);
+        }
     }
 
     // ── Marcas e rótulos de tempo abaixo da barra ─────────────────────────────
