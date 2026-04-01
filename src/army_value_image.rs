@@ -224,9 +224,9 @@ fn draw_army_curve(
         let ay = army_y(a.army_total, max_army, axis_y, CHART_H).max(chart_top as f32);
         let by = army_y(b.army_total, max_army, axis_y, CHART_H).max(chart_top as f32);
 
-        // 3 px de espessura por deslocamento vertical
+        // 3 px de espessura com antialiasing (Wu)
         for dy in [-1i32, 0, 1] {
-            draw_line_segment_mut(img, (ax, ay + dy as f32), (bx, by + dy as f32), col);
+            draw_line_aa(img, ax, ay + dy as f32, bx, by + dy as f32, col);
         }
     }
 }
@@ -340,6 +340,72 @@ fn nice_time_interval(total_secs: u32) -> u32 {
         301..=600 => 60,
         _ => 120,
     }
+}
+
+// ── Antialiasing (algoritmo de Xiaolin Wu) ────────────────────────────────────
+
+/// Linha antialiasada usando o algoritmo de Wu.
+/// Usa composição alfa sobre o conteúdo já presente no buffer.
+fn draw_line_aa(img: &mut RgbaImage, x0: f32, y0: f32, x1: f32, y1: f32, col: Rgba<u8>) {
+    let steep = (y1 - y0).abs() > (x1 - x0).abs();
+
+    let (mut x0, mut y0, mut x1, mut y1) = if steep {
+        (y0, x0, y1, x1)
+    } else {
+        (x0, y0, x1, y1)
+    };
+    if x0 > x1 {
+        std::mem::swap(&mut x0, &mut x1);
+        std::mem::swap(&mut y0, &mut y1);
+    }
+
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let gradient = if dx.abs() < f32::EPSILON { 1.0 } else { dy / dx };
+
+    // Primeiro endpoint
+    let xend = x0.round();
+    let yend = y0 + gradient * (xend - x0);
+    let xgap = 1.0 - (x0 + 0.5).fract();
+    let xpxl1 = xend as i32;
+    let ypxl1 = yend.floor() as i32;
+    plot_aa(img, xpxl1, ypxl1,     (1.0 - yend.fract()) * xgap, col, steep);
+    plot_aa(img, xpxl1, ypxl1 + 1,        yend.fract()  * xgap, col, steep);
+    let mut intery = yend + gradient;
+
+    // Segundo endpoint
+    let xend = x1.round();
+    let yend = y1 + gradient * (xend - x1);
+    let xgap = (x1 + 0.5).fract();
+    let xpxl2 = xend as i32;
+    let ypxl2 = yend.floor() as i32;
+    plot_aa(img, xpxl2, ypxl2,     (1.0 - yend.fract()) * xgap, col, steep);
+    plot_aa(img, xpxl2, ypxl2 + 1,        yend.fract()  * xgap, col, steep);
+
+    // Loop principal
+    for x in (xpxl1 + 1)..xpxl2 {
+        plot_aa(img, x, intery.floor() as i32,     1.0 - intery.fract(), col, steep);
+        plot_aa(img, x, intery.floor() as i32 + 1,       intery.fract(), col, steep);
+        intery += gradient;
+    }
+}
+
+/// Plota um pixel com cobertura parcial (passo interno do Wu).
+/// `swap_xy` inverte os eixos quando a linha é íngreme.
+fn plot_aa(img: &mut RgbaImage, x: i32, y: i32, coverage: f32, col: Rgba<u8>, swap_xy: bool) {
+    let (px, py) = if swap_xy { (y, x) } else { (x, y) };
+    if px < 0 || py < 0 || px as u32 >= img.width() || py as u32 >= img.height() {
+        return;
+    }
+    let a = (coverage * col[3] as f32 / 255.0).clamp(0.0, 1.0);
+    if a <= 0.0 {
+        return;
+    }
+    let dst = *img.get_pixel(px as u32, py as u32);
+    let r = (a * col[0] as f32 + (1.0 - a) * dst[0] as f32) as u8;
+    let g = (a * col[1] as f32 + (1.0 - a) * dst[1] as f32) as u8;
+    let b = (a * col[2] as f32 + (1.0 - a) * dst[2] as f32) as u8;
+    img.put_pixel(px as u32, py as u32, Rgba([r, g, b, 255]));
 }
 
 fn blit(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
