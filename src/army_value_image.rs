@@ -2,7 +2,8 @@ use std::path::Path;
 
 use ab_glyph::{FontRef, PxScale};
 use image::{Rgba, RgbaImage};
-use imageproc::drawing::{draw_line_segment_mut, draw_text_mut, text_size};
+use imageproc::drawing::{draw_filled_rect_mut, draw_line_segment_mut, draw_text_mut, text_size};
+use imageproc::rect::Rect;
 
 use crate::army_value::{PlayerArmyValue, UpgradeKind};
 use crate::build_order::format_time;
@@ -164,10 +165,19 @@ pub fn write_army_value_png(
     let title_w = text_size(title_scale, &font, &title).0 as i32;
     let legend_y = TITLE_TOP as i32;
     let sep = 18i32;
+    let sq = 14i32; // tamanho do quadrado colorido
+    let sq_gap = 5i32;
+    // Posição Y centralizada em relação ao texto (FONT_SIZE ≈ 22px)
+    let sq_y = legend_y + ((FONT_SIZE as i32 - sq) / 2);
     let legend_x = LEFT_MARGIN as i32 + title_w + sep;
-    draw_text_mut(&mut img, P1_LINE, legend_x, legend_y, scale, &font, &format!("■ {}", p1_label));
-    let p1_w = text_size(scale, &font, &format!("■ {}", p1_label)).0 as i32;
-    draw_text_mut(&mut img, P2_LINE, legend_x + p1_w + sep, legend_y, scale, &font, &format!("■ {}", p2_label));
+
+    draw_filled_rect_mut(&mut img, Rect::at(legend_x, sq_y).of_size(sq as u32, sq as u32), P1_LINE);
+    draw_text_mut(&mut img, TITLE_COL, legend_x + sq + sq_gap, legend_y, scale, &font, &p1_label);
+    let p1_w = sq + sq_gap + text_size(scale, &font, &p1_label).0 as i32;
+
+    let p2_x = legend_x + p1_w + sep;
+    draw_filled_rect_mut(&mut img, Rect::at(p2_x, sq_y).of_size(sq as u32, sq as u32), P2_LINE);
+    draw_text_mut(&mut img, TITLE_COL, p2_x + sq + sq_gap, legend_y, scale, &font, &p2_label);
 
     // ── Rótulos de tempo ──────────────────────────────────────────────────────
     let total_secs = max_loop / 16;

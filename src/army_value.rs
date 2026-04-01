@@ -53,7 +53,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
             let mut upgrade_events: Vec<ArmyUpgradeEvent> = player
                 .upgrades
                 .iter()
-                .filter(|u| !u.name.contains("Spray"))
+                .filter(|u| !u.name.contains("Spray") && u.game_loop > 0)
                 .map(|u| {
                     let (kind, level) = classify_upgrade(&u.name);
                     let name = abbreviate_upgrade(&u.name);
