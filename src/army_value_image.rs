@@ -27,8 +27,8 @@ const TITLE_H: u32 = 60;
 
 /// Altura da área do gráfico de army value
 const CHART_H: u32 = 340;
-/// Altura da área de rótulos de upgrade abaixo do eixo (P2)
-const LABEL_BELOW_H: u32 = 160;
+/// Altura da faixa de upgrades/pesquisas — usada tanto acima do gráfico (P2) quanto abaixo do eixo (P1)
+const UPGRADE_LABEL_H: u32 = 160;
 /// Espaço para rótulos de tempo na base
 const TIME_AREA: u32 = 44;
 
@@ -51,11 +51,12 @@ const P2_LINE: Rgba<u8> = Rgba([255, 160, 60, 255]);
 /// Renderiza o gráfico de valor de exército de ambos os jogadores em um único PNG.
 ///
 /// Layout vertical:
-///   TITLE_H  — título
-///   CHART_H  — curvas de army value + linhas verticais de upgrade + rótulos P1 (acima)
-///   axis     — eixo de tempo
-///   LABEL_BELOW_H — rótulos de upgrade P2 (abaixo)
-///   TIME_AREA — rótulos MM:SS
+///   TITLE_H        — título
+///   UPGRADE_LABEL_H — upgrades/pesquisas do P2 (acima do gráfico, descendo)
+///   CHART_H        — curvas de army value
+///   axis_y         — eixo de tempo
+///   UPGRADE_LABEL_H — upgrades/pesquisas do P1 (abaixo do eixo, descendo)
+///   TIME_AREA      — rótulos MM:SS
 pub fn write_army_value_png(
     p1: &PlayerArmyValue,
     p2: &PlayerArmyValue,
@@ -70,10 +71,14 @@ pub fn write_army_value_png(
     let label_scale = PxScale::from(LABEL_FONT_SIZE);
 
     // ── Dimensões ─────────────────────────────────────────────────────────────
-    let img_height = TITLE_H + CHART_H + LABEL_BELOW_H + TIME_AREA;
-    let axis_y = TITLE_H + CHART_H;           // linha horizontal do eixo de tempo
-    let chart_top = TITLE_H;                  // topo da área do gráfico
-    let label_bottom = axis_y + LABEL_BELOW_H; // base dos rótulos de upgrade P2
+    // P2 upgrades ficam na faixa [TITLE_H … TITLE_H + UPGRADE_LABEL_H)
+    // P1 upgrades ficam na faixa [axis_y … axis_y + UPGRADE_LABEL_H)
+    let chart_top = TITLE_H + UPGRADE_LABEL_H; // gráfico começa após a faixa do P2
+    let axis_y = chart_top + CHART_H;           // linha horizontal do eixo de tempo
+    let p2_label_top = TITLE_H;                 // início da faixa de upgrades do P2
+    let p1_label_top = axis_y + 6;              // início da faixa de upgrades do P1
+    let time_label_y = axis_y + UPGRADE_LABEL_H + 6; // rótulos de tempo ao final
+    let img_height = TITLE_H + UPGRADE_LABEL_H + CHART_H + UPGRADE_LABEL_H + TIME_AREA;
 
     let axis_width = (IMG_WIDTH - LEFT_MARGIN - RIGHT_MARGIN) as f32;
 
@@ -122,21 +127,17 @@ pub fn write_army_value_png(
     // Cada upgrade gera uma linha vertical que corta todo o gráfico (chart_top → label_bottom).
     draw_upgrade_verticals(
         &mut img, &font, label_scale,
-        &p1.upgrade_events,
-        &p1.race,
-        chart_top, label_bottom, axis_y,
+        &p1.upgrade_events, &p1.race,
+        chart_top, axis_y, p1_label_top,
         axis_width, max_loop,
-        true,  // P1 → rótulo acima do eixo
         upgrade_vline_color_p1,
         upgrade_label_color_p1,
     );
     draw_upgrade_verticals(
         &mut img, &font, label_scale,
-        &p2.upgrade_events,
-        &p2.race,
-        chart_top, label_bottom, axis_y,
+        &p2.upgrade_events, &p2.race,
+        chart_top, axis_y, p2_label_top,
         axis_width, max_loop,
-        false, // P2 → rótulo abaixo do eixo
         upgrade_vline_color_p2,
         upgrade_label_color_p2,
     );
@@ -185,7 +186,7 @@ pub fn write_army_value_png(
             &mut img,
             TIME_COL,
             x as i32 - time_w / 2,
-            (label_bottom + 6) as i32,
+            time_label_y as i32,
             scale,
             &font,
             &time_str,
@@ -240,11 +241,10 @@ fn draw_upgrade_verticals<Fv, Fl>(
     events: &[crate::army_value::ArmyUpgradeEvent],
     race: &str,
     chart_top: u32,
-    label_bottom: u32,
     axis_y: u32,
+    label_top: u32,    // posição Y onde o rótulo/ícone começa (desce a partir daqui)
     axis_width: f32,
     max_loop: u32,
-    above: bool,       // true = label acima do eixo (P1); false = abaixo (P2)
     vline_color: Fv,
     label_color: Fl,
 ) where
@@ -252,7 +252,6 @@ fn draw_upgrade_verticals<Fv, Fl>(
     Fl: Fn(&crate::army_value::ArmyUpgradeEvent) -> Rgba<u8>,
 {
     let char_h = (LABEL_FONT_SIZE.ceil() as u32) + 4;
-    let label_gap: u32 = 6;
 
     for ev in events {
         let x = LEFT_MARGIN as f32 + (ev.game_loop as f32 / max_loop as f32) * axis_width;
@@ -260,41 +259,24 @@ fn draw_upgrade_verticals<Fv, Fl>(
 
         let lcol = label_color(ev);
 
-        // Linha vertical contínua apenas para upgrades de ataque / defesa / escudo
+        // Linha vertical através da área do gráfico (apenas para ataque / armadura)
         if matches!(ev.kind, UpgradeKind::Attack | UpgradeKind::Armor) {
             let vcol = vline_color(ev);
-            draw_line_segment_mut(
-                img,
-                (x, chart_top as f32),
-                (x, label_bottom as f32),
-                vcol,
-            );
+            draw_line_segment_mut(img, (x, chart_top as f32), (x, axis_y as f32), vcol);
         }
 
-        // Ícone quando disponível (sempre abaixo do eixo); rótulo de texto como fallback
+        // Ícone quando disponível; rótulo de texto como fallback — ambos descem a partir de label_top
         if let Some(icon) = icons::lookup(race, &ev.raw_name) {
             let icon_rgba = icon.to_rgba8();
             let paste_x = xi - (ICON_SIZE as i32 / 2);
-            let paste_y = (axis_y + label_gap) as i32;
-            blit_alpha(img, &icon_rgba, paste_x, paste_y);
+            blit_alpha(img, &icon_rgba, paste_x, label_top as i32);
         } else {
             let label_w = text_size(label_scale, font, &ev.name).0.max(1);
             let mut buf = RgbaImage::from_pixel(label_w, char_h.max(1), BG);
             draw_text_mut(&mut buf, lcol, 0, 0, label_scale, font, &ev.name);
-
-            if above {
-                // Label rotacionada 270° — texto sobe a partir do eixo
-                let rotated = image::imageops::rotate270(&buf);
-                let paste_x = xi - (rotated.width() as i32 / 2);
-                let paste_y = (axis_y - label_gap) as i32 - rotated.height() as i32;
-                blit(img, &rotated, paste_x, paste_y);
-            } else {
-                // Label rotacionada 90° — texto desce a partir do eixo
-                let rotated = image::imageops::rotate90(&buf);
-                let paste_x = xi - (rotated.width() as i32 / 2);
-                let paste_y = (axis_y + label_gap) as i32;
-                blit(img, &rotated, paste_x, paste_y);
-            }
+            let rotated = image::imageops::rotate90(&buf);
+            let paste_x = xi - (rotated.width() as i32 / 2);
+            blit(img, &rotated, paste_x, label_top as i32);
         }
     }
 }
