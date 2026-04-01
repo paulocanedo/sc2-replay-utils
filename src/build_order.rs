@@ -3,7 +3,7 @@ use std::path::Path;
 
 use s2protocol::tracker_events::ReplayTrackerEvent;
 
-use crate::utils::extract_clan_and_name;
+use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
 
@@ -12,6 +12,7 @@ pub struct BuildOrderEntry {
     pub game_loop: u32,
     pub action: String,
     pub count: u32,
+    pub is_upgrade: bool,
 }
 
 pub struct PlayerBuildOrder {
@@ -24,6 +25,7 @@ pub struct BuildOrderResult {
     pub players: Vec<PlayerBuildOrder>,
     pub datetime: String,
     pub map_name: String,
+    pub loops_per_second: f64,
 }
 
 // ── Extração ──────────────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ pub fn extract_build_order(
         .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S").to_string())
         .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
     let map_name = details.title.clone();
+    let loops_per_second = game_speed_to_loops_per_second(&details.game_speed);
 
     // player_id (1-indexado no player_list completo) → índice no vec de jogadores ativos
     let player_idx: HashMap<u8, usize> = details
@@ -63,7 +66,7 @@ pub fn extract_build_order(
     let tracker_events = s2protocol::read_tracker_events(path_str, &mpq, &file_contents)
         .map_err(|e| format!("{:?}", e))?;
 
-    let max_loops = max_time_seconds.saturating_mul(16);
+    let max_loops = if max_time_seconds == 0 { 0 } else { (max_time_seconds as f64 * loops_per_second).round() as u32 };
 
     // supply atual por player_id (atualizado em cada PlayerStats)
     let mut supply_now: HashMap<u8, u8> = HashMap::new();
@@ -102,6 +105,7 @@ pub fn extract_build_order(
                     game_loop,
                     action: e.unit_type_name,
                     count: 1,
+                    is_upgrade: false,
                 });
             }
 
@@ -117,6 +121,7 @@ pub fn extract_build_order(
                     game_loop,
                     action: e.unit_type_name,
                     count: 1,
+                    is_upgrade: false,
                 });
             }
 
@@ -131,6 +136,7 @@ pub fn extract_build_order(
                     game_loop,
                     action: e.upgrade_type_name,
                     count: 1,
+                    is_upgrade: true,
                 });
             }
 
@@ -158,7 +164,7 @@ pub fn extract_build_order(
         })
         .collect();
 
-    Ok(BuildOrderResult { players, datetime, map_name })
+    Ok(BuildOrderResult { players, datetime, map_name, loops_per_second })
 }
 
 /// Funde entradas consecutivas com a mesma ação em uma única com `count` incrementado.
@@ -175,14 +181,14 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
 
 // ── Formatação CSV de largura fixada ─────────────────────────────────────────
 
-pub fn format_time(game_loop: u32) -> String {
-    let total_secs = game_loop / 16;
+pub fn format_time(game_loop: u32, lps: f64) -> String {
+    let total_secs = (game_loop as f64 / lps).round() as u32;
     format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
 }
 
 /// Serializa entradas como CSV de largura fixada.
 /// Colunas: supply, time, action (largura calculada a partir dos dados).
-pub fn to_fixed_csv(entries: &[BuildOrderEntry]) -> String {
+pub fn to_fixed_csv(entries: &[BuildOrderEntry], lps: f64) -> String {
     // Constrói as strings de cada coluna para calcular larguras
     let rows: Vec<(String, String, String)> = entries
         .iter()
@@ -192,7 +198,7 @@ pub fn to_fixed_csv(entries: &[BuildOrderEntry]) -> String {
             } else {
                 e.action.clone()
             };
-            (e.supply.to_string(), format_time(e.game_loop), action)
+            (e.supply.to_string(), format_time(e.game_loop, lps), action)
         })
         .collect();
 

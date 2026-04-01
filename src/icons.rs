@@ -45,6 +45,37 @@ fn terran_bytes(action: &str) -> Option<&'static [u8]> {
         "SCV"                 => include_bytes!("images/terran/scv.png"),
         "MULE" | "Mule"       => include_bytes!("images/terran/mule.png"),
 
+        // ── Construções — base ────────────────────────────────────────────────
+        "CommandCenter"                   => include_bytes!("images/structures/command_center.png"),
+        "OrbitalCommand"                  => include_bytes!("images/structures/orbital_command.png"),
+        "PlanetaryFortress"               => include_bytes!("images/structures/planetary_fortress.png"),
+        "SupplyDepot" | "SupplyDepotLowered" => include_bytes!("images/structures/supply_depot.png"),
+        "Refinery"                        => include_bytes!("images/structures/refinery.png"),
+
+        // ── Construções — produção ────────────────────────────────────────────
+        "Barracks"  => include_bytes!("images/structures/barracks.png"),
+        "Factory"   => include_bytes!("images/structures/factory.png"),
+        "Starport"  => include_bytes!("images/structures/starport.png"),
+
+        // ── Construções — tecnologia ──────────────────────────────────────────
+        "EngineeringBay" => include_bytes!("images/structures/engineering_bay.png"),
+        "Armory"         => include_bytes!("images/structures/armory.png"),
+        "FusionCore"     => include_bytes!("images/structures/fusion_core.png"),
+        "GhostAcademy"   => include_bytes!("images/structures/ghost_academy.png"),
+
+        // ── Construções — defesa ──────────────────────────────────────────────
+        "Bunker"       => include_bytes!("images/structures/bunker.png"),
+        "MissileTurret"=> include_bytes!("images/structures/missile_turret.png"),
+        "SensorTower"  => include_bytes!("images/structures/sensor_tower.png"),
+
+        // ── Construções — add-ons ─────────────────────────────────────────────
+        "BarracksTechLab"
+        | "FactoryTechLab"
+        | "StarportTechLab" => include_bytes!("images/structures/tech_lab.png"),
+        "BarracksReactor"
+        | "FactoryReactor"
+        | "StarportReactor" => include_bytes!("images/structures/reactor.png"),
+
         // ── Upgrades — armas de infantaria ───────────────────────────────────
         "TerranInfantryWeaponsLevel1" => include_bytes!("images/terran/infantry_weapons_1.png"),
         "TerranInfantryWeaponsLevel2" => include_bytes!("images/terran/infantry_weapons_2.png"),
@@ -75,17 +106,17 @@ fn terran_bytes(action: &str) -> Option<&'static [u8]> {
 
         // ── Upgrades — habilidades de infantaria ─────────────────────────────
         "Stimpack"         => include_bytes!("images/terran/stimpack.png"),
-        "CombatShield"     => include_bytes!("images/terran/combat_shield.png"),
+        "ShieldWall"       => include_bytes!("images/terran/combat_shield.png"),
         "ConcussiveShells" => include_bytes!("images/terran/concussive_shells.png"),
-        "PersonalCloaking" => include_bytes!("images/terran/cloaking.png"),
-        "BansheeCloak" => include_bytes!("images/terran/cloaking.png"),
+        "PersonalCloaking"
+        | "BansheeCloak"   => include_bytes!("images/terran/cloaking.png"),
 
         // ── Upgrades — habilidades de veículos ───────────────────────────────
         "InfernalPreIgniter"  => include_bytes!("images/terran/infernal_pre_igniter.png"),
         "MagFieldAccelerator" => include_bytes!("images/terran/mag_field_accelerator.png"),
 
         // ── Upgrades — estruturas ─────────────────────────────────────────────
-        "HiSecAutoTracking"            => include_bytes!("images/terran/hi_sec_auto_tracking.png"),
+        "HiSecAutoTracking"               => include_bytes!("images/terran/hi_sec_auto_tracking.png"),
         "NeosteelFrame" | "NeosteelArmor" => include_bytes!("images/terran/neosteel_armor.png"),
 
         _ => return None,
