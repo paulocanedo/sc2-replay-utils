@@ -203,36 +203,67 @@ pub fn render_build_order(
         ((IMG_WIDTH - RIGHT_MARGIN) as f32, supply_axis_y as f32),
         SUPPLY_AXIS_COL,
     );
-    // Ticks e rótulos: um por mudança de supply, sem sobrepor o anterior
-    let mut prev_supply: Option<u8> = None;
+
+    // Faixa de supply: do valor inicial até o máximo atingido na partida.
+    // Para cada unidade N nessa faixa, interpola o game_loop em que supply
+    // primeiro atingiu N e desenha um tick — maior em múltiplos de 5,
+    // menor nos demais — e um rótulo a cada 10 unidades.
+    let s_min = entries.first().map(|e| e.supply).unwrap_or(0);
+    let s_max = entries.iter().map(|e| e.supply).max().unwrap_or(0);
     let mut last_label_right: i32 = i32::MIN;
-    for entry in entries {
-        if prev_supply == Some(entry.supply) {
-            continue; // supply não mudou, não há nada novo a mostrar
+
+    'tick: for n in s_min..=s_max {
+        // Percorre os entries procurando onde supply atinge n pela 1ª vez.
+        // Quando supply passa de prev_s para entry.supply com prev_s < n ≤ entry.supply,
+        // interpola linearmente o game_loop correspondente.
+        let mut prev_gl = entries[0].game_loop;
+        let mut prev_s  = entries[0].supply;
+        for entry in entries {
+            if entry.supply >= n {
+                let gl = if prev_s >= n {
+                    // Primeiro entry já tem supply ≥ n (n = s_min)
+                    entry.game_loop
+                } else {
+                    let frac = (n as f32 - prev_s as f32)
+                        / (entry.supply as f32 - prev_s as f32);
+                    (prev_gl as f32 + frac * (entry.game_loop as f32 - prev_gl as f32))
+                        .round() as u32
+                };
+                let x  = LEFT_MARGIN as f32 + (gl as f32 / max_game_loop as f32) * axis_width;
+                let xi = x as i32;
+
+                // Tick: maior em múltiplos de 5, menor nos demais
+                let tick_h = if n % 5 == 0 { SUPPLY_TICK_H } else { SUPPLY_TICK_H / 2 };
+                draw_line_segment_mut(
+                    &mut img,
+                    (x, supply_axis_y as f32),
+                    (x, (supply_axis_y + tick_h) as f32),
+                    SUPPLY_AXIS_COL,
+                );
+
+                // Rótulo a cada 10 unidades, evitando sobreposição
+                if n % 10 == 0 {
+                    let label   = n.to_string();
+                    let label_w = text_size(scale, &font, &label).0 as i32;
+                    let label_x = xi - label_w / 2;
+                    if label_x >= last_label_right + 4 {
+                        draw_text_mut(
+                            &mut img,
+                            SUPPLY_LBL_COL,
+                            label_x,
+                            supply_label_y,
+                            scale,
+                            &font,
+                            &label,
+                        );
+                        last_label_right = label_x + label_w;
+                    }
+                }
+                continue 'tick;
+            }
+            prev_gl = entry.game_loop;
+            prev_s  = entry.supply;
         }
-        let x = LEFT_MARGIN as f32
-            + (entry.game_loop as f32 / max_game_loop as f32) * axis_width;
-        let xi = x as i32;
-        let label = entry.supply.to_string();
-        let label_w = text_size(scale, &font, &label).0 as i32;
-        let label_x = xi - label_w / 2;
-        if label_x < last_label_right + 4 {
-            // Sobreporia o rótulo anterior — pula, mas registra que o supply mudou
-            // para que a próxima posição livre mostre o valor atualizado
-            prev_supply = Some(entry.supply);
-            continue;
-        }
-        // Tick curto descendo da linha de supply
-        draw_line_segment_mut(
-            &mut img,
-            (x, supply_axis_y as f32),
-            (x, (supply_axis_y + SUPPLY_TICK_H) as f32),
-            SUPPLY_AXIS_COL,
-        );
-        // Rótulo do valor de supply
-        draw_text_mut(&mut img, SUPPLY_LBL_COL, label_x, supply_label_y, scale, &font, &label);
-        last_label_right = label_x + label_w;
-        prev_supply = Some(entry.supply);
     }
 
     // ── Linha do eixo ─────────────────────────────────────────────────────────
