@@ -7,6 +7,7 @@ mod army_value_image;
 mod build_order;
 mod build_order_image;
 mod commands;
+mod icons;
 mod replay;
 mod supply_block;
 mod supply_block_image;

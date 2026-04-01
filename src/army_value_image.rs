@@ -6,6 +6,7 @@ use imageproc::drawing::{draw_line_segment_mut, draw_text_mut, text_size};
 
 use crate::army_value::{PlayerArmyValue, UpgradeKind};
 use crate::build_order::format_time;
+use crate::icons::{self, ICON_SIZE};
 
 // ── Fonte embutida ────────────────────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ pub fn write_army_value_png(
     draw_upgrade_verticals(
         &mut img, &font, label_scale,
         &p1.upgrade_events,
+        &p1.race,
         chart_top, label_bottom, axis_y,
         axis_width, max_loop,
         true,  // P1 → rótulo acima do eixo
@@ -131,6 +133,7 @@ pub fn write_army_value_png(
     draw_upgrade_verticals(
         &mut img, &font, label_scale,
         &p2.upgrade_events,
+        &p2.race,
         chart_top, label_bottom, axis_y,
         axis_width, max_loop,
         false, // P2 → rótulo abaixo do eixo
@@ -235,6 +238,7 @@ fn draw_upgrade_verticals<Fv, Fl>(
     font: &FontRef,
     label_scale: PxScale,
     events: &[crate::army_value::ArmyUpgradeEvent],
+    race: &str,
     chart_top: u32,
     label_bottom: u32,
     axis_y: u32,
@@ -267,23 +271,34 @@ fn draw_upgrade_verticals<Fv, Fl>(
             );
         }
 
-        // Rótulo rotacionado
-        let label_w = text_size(label_scale, font, &ev.name).0.max(1);
-        let mut buf = RgbaImage::from_pixel(label_w, char_h.max(1), BG);
-        draw_text_mut(&mut buf, lcol, 0, 0, label_scale, font, &ev.name);
-
-        if above {
-            // Label rotacionada 270° — texto sobe a partir do eixo
-            let rotated = image::imageops::rotate270(&buf);
-            let paste_x = xi - (rotated.width() as i32 / 2);
-            let paste_y = (axis_y - label_gap) as i32 - rotated.height() as i32;
-            blit(img, &rotated, paste_x, paste_y);
+        // Ícone quando disponível; rótulo de texto como fallback
+        if let Some(icon) = icons::lookup(race, &ev.raw_name) {
+            let icon_rgba = icon.to_rgba8();
+            let paste_x = xi - (ICON_SIZE as i32 / 2);
+            let paste_y = if above {
+                (axis_y - label_gap) as i32 - ICON_SIZE as i32
+            } else {
+                (axis_y + label_gap) as i32
+            };
+            blit_alpha(img, &icon_rgba, paste_x, paste_y);
         } else {
-            // Label rotacionada 90° — texto desce a partir do eixo
-            let rotated = image::imageops::rotate90(&buf);
-            let paste_x = xi - (rotated.width() as i32 / 2);
-            let paste_y = (axis_y + label_gap) as i32;
-            blit(img, &rotated, paste_x, paste_y);
+            let label_w = text_size(label_scale, font, &ev.name).0.max(1);
+            let mut buf = RgbaImage::from_pixel(label_w, char_h.max(1), BG);
+            draw_text_mut(&mut buf, lcol, 0, 0, label_scale, font, &ev.name);
+
+            if above {
+                // Label rotacionada 270° — texto sobe a partir do eixo
+                let rotated = image::imageops::rotate270(&buf);
+                let paste_x = xi - (rotated.width() as i32 / 2);
+                let paste_y = (axis_y - label_gap) as i32 - rotated.height() as i32;
+                blit(img, &rotated, paste_x, paste_y);
+            } else {
+                // Label rotacionada 90° — texto desce a partir do eixo
+                let rotated = image::imageops::rotate90(&buf);
+                let paste_x = xi - (rotated.width() as i32 / 2);
+                let paste_y = (axis_y + label_gap) as i32;
+                blit(img, &rotated, paste_x, paste_y);
+            }
         }
     }
 }
@@ -355,6 +370,24 @@ fn blit(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
         let by = y + oy as i32;
         if bx >= 0 && by >= 0 && (bx as u32) < dst.width() && (by as u32) < dst.height() {
             dst.put_pixel(bx as u32, by as u32, *pixel);
+        }
+    }
+}
+
+fn blit_alpha(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
+    for (ox, oy, pixel) in src.enumerate_pixels() {
+        let bx = x + ox as i32;
+        let by = y + oy as i32;
+        if bx >= 0 && by >= 0 && (bx as u32) < dst.width() && (by as u32) < dst.height() {
+            let a = pixel.0[3] as f32 / 255.0;
+            if a == 0.0 {
+                continue;
+            }
+            let bg = dst.get_pixel(bx as u32, by as u32);
+            let r = (a * pixel.0[0] as f32 + (1.0 - a) * bg.0[0] as f32) as u8;
+            let g = (a * pixel.0[1] as f32 + (1.0 - a) * bg.0[1] as f32) as u8;
+            let b = (a * pixel.0[2] as f32 + (1.0 - a) * bg.0[2] as f32) as u8;
+            dst.put_pixel(bx as u32, by as u32, Rgba([r, g, b, 255]));
         }
     }
 }

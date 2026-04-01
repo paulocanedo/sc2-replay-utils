@@ -21,6 +21,7 @@ pub struct ArmySnapshot {
 pub struct ArmyUpgradeEvent {
     pub game_loop: u32,
     pub name: String,
+    pub raw_name: String,
     pub kind: UpgradeKind,
     pub level: u8,
 }
@@ -58,6 +59,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
                     ArmyUpgradeEvent {
                         game_loop: u.game_loop,
                         name,
+                        raw_name: u.name.clone(),
                         kind,
                         level,
                     }

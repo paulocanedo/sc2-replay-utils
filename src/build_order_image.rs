@@ -5,6 +5,7 @@ use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_line_segment_mut, draw_text_mut, text_size};
 
 use crate::build_order::{format_time, BuildOrderEntry};
+use crate::icons::{self, ICON_SIZE};
 
 // ── Fonte embutida ────────────────────────────────────────────────────────────
 
@@ -54,7 +55,13 @@ pub fn write_build_order_png(
     let scale = PxScale::from(FONT_SIZE);
     let title_scale = PxScale::from(TITLE_FONT_SIZE);
 
-    // Rótulo de cada evento: "Ação x3 (supply)"
+    // Pré-carrega ícones para cada entrada (None = usar rótulo de texto)
+    let entry_icons: Vec<Option<image::DynamicImage>> = entries
+        .iter()
+        .map(|e| icons::lookup(race, &e.action))
+        .collect();
+
+    // Rótulo de cada evento: "Ação x3 (supply)" — usado apenas quando não há ícone
     let labels: Vec<String> = entries
         .iter()
         .map(|e| {
@@ -67,18 +74,23 @@ pub fn write_build_order_png(
         })
         .collect();
 
-    // Largura máxima em pixels de um rótulo (vira altura ao ser rotacionado)
-    let max_label_px = labels
+    // Altura máxima de conteúdo: ícone (tamanho fixo) vs texto rotacionado (largura vira altura)
+    let max_text_px = labels
         .iter()
-        .map(|l| text_size(scale, &font, l).0)
+        .zip(entry_icons.iter())
+        .filter(|(_, icon)| icon.is_none())
+        .map(|(l, _)| text_size(scale, &font, l).0)
         .max()
-        .unwrap_or(100);
+        .unwrap_or(0);
+
+    let has_icons = entry_icons.iter().any(|i| i.is_some());
+    let max_content_h = max_text_px.max(if has_icons { ICON_SIZE } else { 0 });
 
     let max_game_loop = entries.iter().map(|e| e.game_loop).max().unwrap_or(1);
 
     // ── Dimensões da imagem ───────────────────────────────────────────────────
-    let char_h = FONT_SIZE.ceil() as u32 + 4; // altura do buffer de texto
-    let label_area_h = max_label_px + LABEL_GAP + TICK_H;
+    let char_h = FONT_SIZE.ceil() as u32 + 4;
+    let label_area_h = max_content_h + LABEL_GAP + TICK_H;
     let img_height = TITLE_H + label_area_h + AXIS_BELOW;
     let axis_y = TITLE_H + label_area_h;
 
@@ -110,7 +122,7 @@ pub fn write_build_order_png(
     );
 
     // ── Eventos ───────────────────────────────────────────────────────────────
-    for (label, entry) in labels.iter().zip(entries.iter()) {
+    for ((icon_opt, label), entry) in entry_icons.iter().zip(labels.iter()).zip(entries.iter()) {
         let x = LEFT_MARGIN as f32
             + (entry.game_loop as f32 / max_game_loop as f32) * axis_width;
         let xi = x as i32;
@@ -123,16 +135,23 @@ pub fn write_build_order_png(
             TICK_COL,
         );
 
-        // Rende rótulo em buffer horizontal, depois rotaciona 90° CW (texto vai para cima)
-        let label_w = text_size(scale, &font, label).0.max(1);
-        let mut label_buf = RgbaImage::from_pixel(label_w, char_h.max(1), BG);
-        draw_text_mut(&mut label_buf, LABEL_COL, 0, 0, scale, &font, label);
-        let rotated = image::imageops::rotate270(&label_buf);
-        // Após rotate90: width = char_h, height = label_w
-        let paste_x = xi - (rotated.width() as i32 / 2);
-        let paste_y =
-            (axis_y - TICK_H - LABEL_GAP) as i32 - rotated.height() as i32;
-        blit(&mut img, &rotated, paste_x, paste_y);
+        if let Some(icon) = icon_opt {
+            // Ícone centralizado horizontalmente sobre o tick
+            let icon_rgba = icon.to_rgba8();
+            let paste_x = xi - (ICON_SIZE as i32 / 2);
+            let paste_y = (axis_y - TICK_H - LABEL_GAP) as i32 - ICON_SIZE as i32;
+            blit_alpha(&mut img, &icon_rgba, paste_x, paste_y);
+        } else {
+            // Rótulo em buffer horizontal, rotacionado 270° (texto cresce para cima)
+            let label_w = text_size(scale, &font, label).0.max(1);
+            let mut label_buf = RgbaImage::from_pixel(label_w, char_h.max(1), BG);
+            draw_text_mut(&mut label_buf, LABEL_COL, 0, 0, scale, &font, label);
+            let rotated = image::imageops::rotate270(&label_buf);
+            let paste_x = xi - (rotated.width() as i32 / 2);
+            let paste_y =
+                (axis_y - TICK_H - LABEL_GAP) as i32 - rotated.height() as i32;
+            blit(&mut img, &rotated, paste_x, paste_y);
+        }
     }
 
     // ── Rótulos de tempo abaixo do eixo ──────────────────────────────────────
@@ -187,6 +206,25 @@ fn blit(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
         let by = y + oy as i32;
         if bx >= 0 && by >= 0 && (bx as u32) < dst.width() && (by as u32) < dst.height() {
             dst.put_pixel(bx as u32, by as u32, *pixel);
+        }
+    }
+}
+
+/// Copia pixels de `src` sobre `dst` com composição alfa (para PNGs com transparência).
+fn blit_alpha(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
+    for (ox, oy, pixel) in src.enumerate_pixels() {
+        let bx = x + ox as i32;
+        let by = y + oy as i32;
+        if bx >= 0 && by >= 0 && (bx as u32) < dst.width() && (by as u32) < dst.height() {
+            let a = pixel.0[3] as f32 / 255.0;
+            if a == 0.0 {
+                continue;
+            }
+            let bg = dst.get_pixel(bx as u32, by as u32);
+            let r = (a * pixel.0[0] as f32 + (1.0 - a) * bg.0[0] as f32) as u8;
+            let g = (a * pixel.0[1] as f32 + (1.0 - a) * bg.0[1] as f32) as u8;
+            let b = (a * pixel.0[2] as f32 + (1.0 - a) * bg.0[2] as f32) as u8;
+            dst.put_pixel(bx as u32, by as u32, Rgba([r, g, b, 255]));
         }
     }
 }
