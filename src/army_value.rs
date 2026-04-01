@@ -37,6 +37,7 @@ pub struct ArmyValueResult {
     pub players: Vec<PlayerArmyValue>,
     pub game_loops: u32,
     pub map_name: String,
+    pub datetime: String,
 }
 
 // ── Extração ──────────────────────────────────────────────────────────────────
@@ -116,6 +117,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
         players,
         game_loops: data.game_loops,
         map_name: data.map.clone(),
+        datetime: data.datetime.clone(),
     })
 }
 

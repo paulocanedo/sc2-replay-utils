@@ -22,6 +22,8 @@ pub struct PlayerBuildOrder {
 
 pub struct BuildOrderResult {
     pub players: Vec<PlayerBuildOrder>,
+    pub datetime: String,
+    pub map_name: String,
 }
 
 // ── Extração ──────────────────────────────────────────────────────────────────
@@ -42,6 +44,11 @@ pub fn extract_build_order(
     if active_count < 2 {
         return Err("menos de 2 jogadores".to_string());
     }
+
+    let datetime = s2protocol::transform_to_naivetime(details.time_utc, details.time_local_offset)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S").to_string())
+        .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
+    let map_name = details.title.clone();
 
     // player_id (1-indexado no player_list completo) → índice no vec de jogadores ativos
     let player_idx: HashMap<u8, usize> = details
@@ -151,7 +158,7 @@ pub fn extract_build_order(
         })
         .collect();
 
-    Ok(BuildOrderResult { players })
+    Ok(BuildOrderResult { players, datetime, map_name })
 }
 
 /// Funde entradas consecutivas com a mesma ação em uma única com `count` incrementado.

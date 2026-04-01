@@ -40,6 +40,32 @@ pub fn sanitize(s: &str) -> String {
         .collect()
 }
 
+/// Gera o nome-base dos arquivos de saída a partir dos metadados do replay.
+///
+/// Formato: `{YYYYMMDD-HHMM}_{Mapa}_{J1}({R})_vs_{J2}({R})`
+/// Exemplo: `20251218-0644_Solaris_Paulo(T)_vs_Maria(Z)`
+pub fn replay_base(
+    datetime: &str,
+    map: &str,
+    p1_name: &str,
+    p1_race: &str,
+    p2_name: &str,
+    p2_race: &str,
+) -> String {
+    let dt_raw = datetime.replace(['-', ':', 'T'], "");
+    let dt = if dt_raw.len() >= 12 {
+        format!("{}-{}", &dt_raw[..8], &dt_raw[8..12])
+    } else {
+        dt_raw
+    };
+    let p1 = if p1_name.is_empty() { "P1".to_string() } else { sanitize(p1_name) };
+    let p2 = if p2_name.is_empty() { "P2".to_string() } else { sanitize(p2_name) };
+    format!(
+        "{}_{}_{}({})_vs_{}({})",
+        dt, sanitize(map), p1, race_letter(p1_race), p2, race_letter(p2_race)
+    )
+}
+
 // ── Helpers de filesystem ────────────────────────────────────────────────────
 
 /// Resolve um caminho (arquivo ou diretório): usa `opt` se fornecido, senão busca `DEFAULT_DIR_NAME`.

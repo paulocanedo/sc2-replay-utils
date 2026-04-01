@@ -10,8 +10,8 @@ use crate::supply_block_image::write_supply_block_png;
 use crate::build_order_image::write_build_order_png;
 use crate::replay::parse_replay;
 use crate::utils::{
-    find_latest_replay, list_replays, prepare_out_dir, race_letter, resolve_dir, resolve_path,
-    sanitize, sc2_default_dir,
+    find_latest_replay, list_replays, prepare_out_dir, race_letter, replay_base, resolve_dir,
+    resolve_path, sanitize, sc2_default_dir,
 };
 
 pub fn cmd_rename(dir: Option<PathBuf>) {
@@ -128,11 +128,14 @@ fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32, inclu
             print!("{}", yaml);
         }
         DumpDest::Dir(dir) => {
-            let stem = replay_path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "replay".to_string());
-            let out_file = dir.join(format!("{}.yaml", stem));
+            let base = if data.players.len() >= 2 {
+                let p1 = &data.players[0];
+                let p2 = &data.players[1];
+                replay_base(&data.datetime, &data.map, &p1.name, &p1.race, &p2.name, &p2.race)
+            } else {
+                replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
+            };
+            let out_file = dir.join(format!("{}.yaml", base));
             match fs::write(&out_file, &yaml) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
                 Err(e) => eprintln!("  ERRO ao gravar {}: {}", out_file.display(), e),
@@ -198,19 +201,22 @@ fn build_order_one(
         }
     };
 
-    let stem = replay_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "replay".to_string());
+    let base = if result.players.len() >= 2 {
+        let p1 = &result.players[0];
+        let p2 = &result.players[1];
+        replay_base(&result.datetime, &result.map_name, &p1.name, &p1.race, &p2.name, &p2.race)
+    } else {
+        replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
+    };
 
     for (i, player) in result.players.iter().enumerate() {
         let n = i + 1;
-        let suffix = if player.name.is_empty() {
+        let player_suffix = if player.name.is_empty() {
             format!("p{}", n)
         } else {
-            sanitize(&player.name)
+            format!("{}({})", sanitize(&player.name), race_letter(&player.race))
         };
-        let out_file = out_dir.join(format!("{}_{}.csv", stem, suffix));
+        let out_file = out_dir.join(format!("{}_build_{}.csv", base, player_suffix));
         let csv = to_fixed_csv(&player.entries);
         match fs::write(&out_file, &csv) {
             Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
@@ -218,7 +224,7 @@ fn build_order_one(
         }
 
         if image {
-            let png_file = out_dir.join(format!("{}_{}.png", stem, suffix));
+            let png_file = out_dir.join(format!("{}_build_{}.png", base, player_suffix));
             match write_build_order_png(n, &player.name, &player.race, &player.entries, &png_file) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), png_file.display()),
                 Err(e) => eprintln!("  ERRO ao gerar PNG {}: {}", png_file.display(), e),
@@ -241,10 +247,13 @@ fn supply_block_one(
         }
     };
 
-    let stem = replay_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "replay".to_string());
+    let base = if data.players.len() >= 2 {
+        let p1 = &data.players[0];
+        let p2 = &data.players[1];
+        replay_base(&data.datetime, &data.map, &p1.name, &p1.race, &p2.name, &p2.race)
+    } else {
+        replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
+    };
 
     let effective_end = if max_time == 0 {
         data.game_loops
@@ -254,23 +263,23 @@ fn supply_block_one(
 
     for (i, player) in data.players.iter().enumerate() {
         let n = i + 1;
-        let suffix = if player.name.is_empty() {
+        let player_suffix = if player.name.is_empty() {
             format!("p{}", n)
         } else {
-            sanitize(&player.name)
+            format!("{}({})", sanitize(&player.name), race_letter(&player.race))
         };
 
         let entries = extract_supply_blocks(&player.stats_snapshots, effective_end);
         let csv = to_supply_block_csv(&entries);
 
-        let out_file = out_dir.join(format!("{}_{}.csv", stem, suffix));
+        let out_file = out_dir.join(format!("{}_supply_{}.csv", base, player_suffix));
         match fs::write(&out_file, &csv) {
             Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
             Err(e) => eprintln!("  ERRO ao gravar {}: {}", out_file.display(), e),
         }
 
         if image {
-            let png_file = out_dir.join(format!("{}_{}.png", stem, suffix));
+            let png_file = out_dir.join(format!("{}_supply_{}.png", base, player_suffix));
             match write_supply_block_png(n, &player.name, &player.race, &entries, effective_end, &png_file) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), png_file.display()),
                 Err(e) => eprintln!("  ERRO ao gerar PNG {}: {}", png_file.display(), e),
@@ -325,19 +334,22 @@ fn army_value_one(
         }
     };
 
-    let stem = replay_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "replay".to_string());
+    let base = if result.players.len() >= 2 {
+        let p1 = &result.players[0];
+        let p2 = &result.players[1];
+        replay_base(&result.datetime, &result.map_name, &p1.name, &p1.race, &p2.name, &p2.race)
+    } else {
+        replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
+    };
 
     for (i, player) in result.players.iter().enumerate() {
         let n = i + 1;
-        let suffix = if player.name.is_empty() {
+        let player_suffix = if player.name.is_empty() {
             format!("p{}", n)
         } else {
-            sanitize(&player.name)
+            format!("{}({})", sanitize(&player.name), race_letter(&player.race))
         };
-        let out_file = out_dir.join(format!("{}_{}.csv", stem, suffix));
+        let out_file = out_dir.join(format!("{}_army_{}.csv", base, player_suffix));
         let csv = to_army_value_csv(&player.snapshots);
         match fs::write(&out_file, &csv) {
             Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
@@ -347,7 +359,7 @@ fn army_value_one(
 
     if image {
         if let [p1, p2, ..] = result.players.as_slice() {
-            let png_file = out_dir.join(format!("{}.png", stem));
+            let png_file = out_dir.join(format!("{}_army.png", base));
             match write_army_value_png(p1, p2, &result.map_name, result.game_loops, &png_file) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), png_file.display()),
                 Err(e) => eprintln!("  ERRO ao gerar PNG {}: {}", png_file.display(), e),
