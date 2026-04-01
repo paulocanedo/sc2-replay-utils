@@ -1,7 +1,7 @@
 use image::DynamicImage;
 
 /// Tamanho fixo (px) para todos os ícones exibidos nas imagens.
-pub const ICON_SIZE: u32 = 40;
+pub const ICON_SIZE: u32 = 32;
 
 /// Retorna o ícone redimensionado para `action` na `race`, se disponível.
 ///
