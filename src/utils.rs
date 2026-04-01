@@ -4,6 +4,22 @@ use std::process;
 
 pub const DEFAULT_DIR_NAME: &str = "sc2replays-pack";
 
+// ── Helpers de tempo ────────────────────────────────────────────────────────
+
+/// Converte a velocidade do jogo SC2 para game loops por segundo real.
+///
+/// SC2 roda a 16 loops/segundo de jogo. Na velocidade Faster (padrão competitivo),
+/// a simulação avança 1.4× mais rápido, resultando em 22.4 loops por segundo real.
+pub fn game_speed_to_loops_per_second(game_speed: &str) -> f64 {
+    match game_speed {
+        "Slower" => 9.6,
+        "Slow"   => 12.8,
+        "Fast"   => 19.2,
+        "Faster" => 22.4,
+        _        => 16.0, // "Normal" e fallback
+    }
+}
+
 // ── Helpers de string ────────────────────────────────────────────────────────
 
 /// Converte o nome da raça para a letra inicial maiúscula (T/P/Z/R).

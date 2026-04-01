@@ -61,15 +61,15 @@ pub fn extract_supply_blocks(
 
 /// Serializa os blocos como CSV de largura fixada.
 /// Colunas: start, end, duration, supply.
-pub fn to_supply_block_csv(entries: &[SupplyBlockEntry]) -> String {
+pub fn to_supply_block_csv(entries: &[SupplyBlockEntry], lps: f64) -> String {
     let rows: Vec<(String, String, String, String)> = entries
         .iter()
         .map(|e| {
             let duration = e.end_loop.saturating_sub(e.start_loop);
             (
-                format_time(e.start_loop),
-                format_time(e.end_loop),
-                format_time(duration),
+                format_time(e.start_loop, lps),
+                format_time(e.end_loop, lps),
+                format_time(duration, lps),
                 e.supply.to_string(),
             )
         })
