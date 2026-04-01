@@ -271,15 +271,11 @@ fn draw_upgrade_verticals<Fv, Fl>(
             );
         }
 
-        // Ícone quando disponível; rótulo de texto como fallback
+        // Ícone quando disponível (sempre abaixo do eixo); rótulo de texto como fallback
         if let Some(icon) = icons::lookup(race, &ev.raw_name) {
             let icon_rgba = icon.to_rgba8();
             let paste_x = xi - (ICON_SIZE as i32 / 2);
-            let paste_y = if above {
-                (axis_y - label_gap) as i32 - ICON_SIZE as i32
-            } else {
-                (axis_y + label_gap) as i32
-            };
+            let paste_y = (axis_y + label_gap) as i32;
             blit_alpha(img, &icon_rgba, paste_x, paste_y);
         } else {
             let label_w = text_size(label_scale, font, &ev.name).0.max(1);
