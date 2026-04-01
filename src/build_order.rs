@@ -13,6 +13,7 @@ pub struct BuildOrderEntry {
     pub action: String,
     pub count: u32,
     pub is_upgrade: bool,
+    pub is_structure: bool,
 }
 
 pub struct PlayerBuildOrder {
@@ -100,12 +101,15 @@ pub fn extract_build_order(
                 }
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let supply = *supply_now.get(&e.control_player_id).unwrap_or(&0);
+                // MorphTo pode produzir estruturas (ex: OrbitalCommand) ou unidades (ex: Hellbat)
+                let is_structure = ability.starts_with("MorphTo") && is_structure_name(&e.unit_type_name);
                 raw[idx].push(BuildOrderEntry {
                     supply,
                     game_loop,
                     action: e.unit_type_name,
                     count: 1,
                     is_upgrade: false,
+                    is_structure,
                 });
             }
 
@@ -116,12 +120,14 @@ pub fn extract_build_order(
                 }
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let supply = *supply_now.get(&e.control_player_id).unwrap_or(&0);
+                // UnitInit é sempre uma construção sendo iniciada
                 raw[idx].push(BuildOrderEntry {
                     supply,
                     game_loop,
                     action: e.unit_type_name,
                     count: 1,
                     is_upgrade: false,
+                    is_structure: true,
                 });
             }
 
@@ -137,6 +143,7 @@ pub fn extract_build_order(
                     action: e.upgrade_type_name,
                     count: 1,
                     is_upgrade: true,
+                    is_structure: false,
                 });
             }
 
@@ -177,6 +184,45 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
         }
     }
     out
+}
+
+// ── Classificação de estruturas ───────────────────────────────────────────────
+
+/// Retorna `true` se o nome da unidade corresponde a uma estrutura conhecida.
+/// Usado para classificar eventos `UnitBorn` com habilidade `MorphTo*` que produzem
+/// construções em vez de unidades (ex: OrbitalCommand, Lair).
+fn is_structure_name(name: &str) -> bool {
+    matches!(name,
+        // Terran — base
+        "CommandCenter" | "OrbitalCommand" | "PlanetaryFortress" |
+        "SupplyDepot" | "SupplyDepotLowered" | "Refinery" |
+        // Terran — produção
+        "Barracks" | "Factory" | "Starport" |
+        // Terran — tecnologia
+        "EngineeringBay" | "Armory" | "FusionCore" | "GhostAcademy" |
+        // Terran — defesa
+        "Bunker" | "MissileTurret" | "SensorTower" |
+        // Terran — add-ons
+        "BarracksTechLab" | "FactoryTechLab" | "StarportTechLab" |
+        "BarracksReactor" | "FactoryReactor" | "StarportReactor" |
+        // Zerg — base
+        "Hatchery" | "Lair" | "Hive" | "Extractor" |
+        // Zerg — produção/tecnologia
+        "SpawningPool" | "RoachWarren" | "HydraliskDen" | "BanelingNest" |
+        "EvolutionChamber" | "Spire" | "GreaterSpire" |
+        "InfestationPit" | "UltraliskCavern" | "NydusNetwork" | "NydusCanal" |
+        "LurkerDen" |
+        // Zerg — defesa
+        "SpineCrawler" | "SporeCrawler" |
+        // Protoss — base
+        "Nexus" | "Pylon" | "Assimilator" |
+        // Protoss — produção/tecnologia
+        "Gateway" | "WarpGate" | "Forge" | "CyberneticsCore" |
+        "TwilightCouncil" | "Stargate" | "RoboticsFacility" |
+        "TemplarArchive" | "DarkShrine" | "RoboticsBay" | "FleetBeacon" |
+        // Protoss — defesa
+        "PhotonCannon" | "ShieldBattery"
+    )
 }
 
 // ── Formatação CSV de largura fixada ─────────────────────────────────────────

@@ -23,7 +23,12 @@ const RIGHT_MARGIN: u32 = 40;
 
 const TITLE_TOP: u32 = 20;
 const TITLE_H: u32 = 70;
-/// Pequeno espaço entre o título e a linha do eixo
+/// Faixa da escala de supply (linha + ticks + rótulos), logo abaixo do título
+const SUPPLY_AREA: u32 = 44;
+const SUPPLY_AXIS_GAP: u32 = 8;  // gap entre fundo do título e linha de supply
+const SUPPLY_TICK_H: u32 = 6;    // comprimento do tick descendo da linha
+const SUPPLY_LBL_GAP: u32 = 2;   // gap entre tick e rótulo
+/// Pequeno espaço entre a escala de supply e a área de conteúdo acima do eixo
 const AXIS_TOP: u32 = 8;
 const TICK_H: u32 = 20;
 const LABEL_GAP: u32 = 12; // espaço entre eixo+tick e topo do conteúdo
@@ -39,22 +44,25 @@ const AXIS_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
 const TICK_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
 const LABEL_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
 const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const SUPPLY_AXIS_COL: Rgba<u8> = Rgba([160, 160, 160, 255]); // linha/ticks da escala de supply
+const SUPPLY_LBL_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);     // valores de supply
 
 // ── API pública ───────────────────────────────────────────────────────────────
 
 /// Renderiza a build order de um jogador como imagem de linha do tempo em memória.
 ///
 /// Layout vertical (de cima para baixo):
-///   TITLE_H         — título
-///   AXIS_TOP        — respiro entre título e área de upgrades
-///   upgrade_content_h — ícones de upgrades/pesquisas (acima do eixo)
-///   LABEL_GAP_UP    — espaço entre ícones de upgrade e topo do tick
-///   TICK_H_UP       — ticks de upgrades subindo até o eixo
-///   axis_y          — linha horizontal do eixo X
-///   TICK_H          — ticks de unidades/construções descendo do eixo
-///   LABEL_GAP       — espaço entre ticks e ícones/rótulos
-///   units_content_h — ícones de unidades/construções (ou rótulos rotacionados)
-///   TIME_AREA       — rótulos de tempo MM:SS
+///   TITLE_H           — título
+///   SUPPLY_AREA       — escala de supply (linha + ticks + rótulos de supply)
+///   AXIS_TOP          — respiro entre escala de supply e área de upgrades
+///   upgrade_content_h — ícones de upgrades/estruturas (acima do eixo)
+///   LABEL_GAP_UP      — espaço entre ícones e topo do tick
+///   TICK_H_UP         — ticks subindo até o eixo
+///   axis_y            — linha horizontal do eixo X
+///   TICK_H            — ticks descendo do eixo
+///   LABEL_GAP         — espaço entre ticks e ícones/rótulos
+///   units_content_h   — ícones de unidades (ou rótulos rotacionados)
+///   TIME_AREA         — rótulos de tempo MM:SS
 pub fn render_build_order(
     player_number: usize,
     name: &str,
@@ -90,26 +98,68 @@ pub fn render_build_order(
         })
         .collect();
 
-    // Altura máxima do conteúdo: separada para upgrades (acima) e unidades/construções (abaixo)
+    // ── Pré-passe: xi de cada entrada + detecção de colisão/empilhamento ────────
+    let max_game_loop = entries.iter().map(|e| e.game_loop).max().unwrap_or(1);
+    let axis_width = (IMG_WIDTH - LEFT_MARGIN - RIGHT_MARGIN) as f32;
+
+    // Xi pixel de cada entrada (mesma fórmula usada na renderização)
+    let xis: Vec<i32> = entries.iter()
+        .map(|e| (LEFT_MARGIN as f32 + (e.game_loop as f32 / max_game_loop as f32) * axis_width) as i32)
+        .collect();
+
+    // Listas (orig_idx, xi) por região, somente entradas com ícone, ordenadas por xi
+    // Acima do eixo: upgrades/pesquisas E estruturas
+    let mut upgrade_icon_xis: Vec<(usize, i32)> = entry_icons.iter().zip(entries.iter())
+        .enumerate()
+        .filter(|(_, (icon, e))| icon.is_some() && (e.is_upgrade || e.is_structure))
+        .map(|(i, _)| (i, xis[i]))
+        .collect();
+    upgrade_icon_xis.sort_by_key(|&(_, xi)| xi);
+
+    // Abaixo do eixo: apenas unidades
+    let mut units_icon_xis: Vec<(usize, i32)> = entry_icons.iter().zip(entries.iter())
+        .enumerate()
+        .filter(|(_, (icon, e))| icon.is_some() && !e.is_upgrade && !e.is_structure)
+        .map(|(i, _)| (i, xis[i]))
+        .collect();
+    units_icon_xis.sort_by_key(|&(_, xi)| xi);
+
+    // Algoritmo guloso: atribui slot a cada ícone sem colisão
+    let upgrade_slots = assign_slots(&upgrade_icon_xis);
+    let units_slots   = assign_slots(&units_icon_xis);
+
+    // Mapas orig_idx → slot para uso na renderização
+    let mut upgrade_slot_for = vec![0usize; entries.len()];
+    for (pos, &(orig, _)) in upgrade_icon_xis.iter().enumerate() {
+        upgrade_slot_for[orig] = upgrade_slots[pos];
+    }
+    let mut units_slot_for = vec![0usize; entries.len()];
+    for (pos, &(orig, _)) in units_icon_xis.iter().enumerate() {
+        units_slot_for[orig] = units_slots[pos];
+    }
+
+    // Profundidade máxima de pilha por região
+    let max_depth_upgrades = upgrade_slots.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+    let max_depth_units    = units_slots.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+
+    // Altura máxima do conteúdo: separada para a região acima (upgrades+estruturas) e abaixo (unidades)
     let upgrade_content_h = {
         let max_txt = labels.iter().zip(entry_icons.iter()).zip(entries.iter())
-            .filter(|((_, icon), e)| icon.is_none() && e.is_upgrade)
+            .filter(|((_, icon), e)| icon.is_none() && (e.is_upgrade || e.is_structure))
             .map(|((l, _), _)| text_size(scale, &font, l).0)
             .max().unwrap_or(0);
-        let has_icons = entry_icons.iter().zip(entries.iter()).any(|(i, e)| i.is_some() && e.is_upgrade);
-        max_txt.max(if has_icons { ICON_SIZE } else { 0 })
+        let icon_h = (max_depth_upgrades as u32) * ICON_SIZE;
+        max_txt.max(icon_h)
     };
 
     let units_content_h = {
         let max_txt = labels.iter().zip(entry_icons.iter()).zip(entries.iter())
-            .filter(|((_, icon), e)| icon.is_none() && !e.is_upgrade)
+            .filter(|((_, icon), e)| icon.is_none() && !e.is_upgrade && !e.is_structure)
             .map(|((l, _), _)| text_size(scale, &font, l).0)
             .max().unwrap_or(0);
-        let has_icons = entry_icons.iter().zip(entries.iter()).any(|(i, e)| i.is_some() && !e.is_upgrade);
-        max_txt.max(if has_icons { ICON_SIZE } else { 0 })
+        let icon_h = (max_depth_units as u32) * ICON_SIZE;
+        max_txt.max(icon_h)
     };
-
-    let max_game_loop = entries.iter().map(|e| e.game_loop).max().unwrap_or(1);
 
     // ── Dimensões da imagem ───────────────────────────────────────────────────
     let char_h = FONT_SIZE.ceil() as u32 + 4;
@@ -118,7 +168,8 @@ pub fn render_build_order(
     } else {
         0
     };
-    let axis_y = TITLE_H + AXIS_TOP + above_axis_reserved;
+    // axis_y agora inclui SUPPLY_AREA logo após o título
+    let axis_y = TITLE_H + SUPPLY_AREA + AXIS_TOP + above_axis_reserved;
     let content_top = axis_y + TICK_H + LABEL_GAP;
     let time_top = content_top + units_content_h + 8;
     let img_height = time_top + TIME_AREA;
@@ -142,8 +193,49 @@ pub fn render_build_order(
         &title,
     );
 
+    // ── Escala de supply (topo do gráfico) ───────────────────────────────────
+    // Linha horizontal da escala de supply
+    let supply_axis_y = TITLE_H + SUPPLY_AXIS_GAP;
+    let supply_label_y = (supply_axis_y + SUPPLY_TICK_H + SUPPLY_LBL_GAP) as i32;
+    draw_line_segment_mut(
+        &mut img,
+        (LEFT_MARGIN as f32, supply_axis_y as f32),
+        ((IMG_WIDTH - RIGHT_MARGIN) as f32, supply_axis_y as f32),
+        SUPPLY_AXIS_COL,
+    );
+    // Ticks e rótulos: um por mudança de supply, sem sobrepor o anterior
+    let mut prev_supply: Option<u8> = None;
+    let mut last_label_right: i32 = i32::MIN;
+    for entry in entries {
+        if prev_supply == Some(entry.supply) {
+            continue; // supply não mudou, não há nada novo a mostrar
+        }
+        let x = LEFT_MARGIN as f32
+            + (entry.game_loop as f32 / max_game_loop as f32) * axis_width;
+        let xi = x as i32;
+        let label = entry.supply.to_string();
+        let label_w = text_size(scale, &font, &label).0 as i32;
+        let label_x = xi - label_w / 2;
+        if label_x < last_label_right + 4 {
+            // Sobreporia o rótulo anterior — pula, mas registra que o supply mudou
+            // para que a próxima posição livre mostre o valor atualizado
+            prev_supply = Some(entry.supply);
+            continue;
+        }
+        // Tick curto descendo da linha de supply
+        draw_line_segment_mut(
+            &mut img,
+            (x, supply_axis_y as f32),
+            (x, (supply_axis_y + SUPPLY_TICK_H) as f32),
+            SUPPLY_AXIS_COL,
+        );
+        // Rótulo do valor de supply
+        draw_text_mut(&mut img, SUPPLY_LBL_COL, label_x, supply_label_y, scale, &font, &label);
+        last_label_right = label_x + label_w;
+        prev_supply = Some(entry.supply);
+    }
+
     // ── Linha do eixo ─────────────────────────────────────────────────────────
-    let axis_width = (IMG_WIDTH - LEFT_MARGIN - RIGHT_MARGIN) as f32;
     draw_line_segment_mut(
         &mut img,
         (LEFT_MARGIN as f32, axis_y as f32),
@@ -152,13 +244,18 @@ pub fn render_build_order(
     );
 
     // ── Eventos ───────────────────────────────────────────────────────────────
-    for ((icon_opt, label), entry) in entry_icons.iter().zip(labels.iter()).zip(entries.iter()) {
+    for (entry_index, ((icon_opt, label), entry)) in entry_icons
+        .iter()
+        .zip(labels.iter())
+        .zip(entries.iter())
+        .enumerate()
+    {
         let x = LEFT_MARGIN as f32
             + (entry.game_loop as f32 / max_game_loop as f32) * axis_width;
         let xi = x as i32;
 
-        if entry.is_upgrade {
-            // Tick vertical subindo do eixo (upgrades/pesquisas ficam acima)
+        if entry.is_upgrade || entry.is_structure {
+            // Tick vertical subindo do eixo (upgrades, pesquisas e estruturas ficam acima)
             draw_line_segment_mut(
                 &mut img,
                 (x, axis_y as f32),
@@ -167,10 +264,11 @@ pub fn render_build_order(
             );
 
             if let Some(icon) = icon_opt {
-                // Ícone centralizado horizontalmente acima do tick
+                // Ícone centralizado horizontalmente acima do tick, empilhado se colidir
                 let icon_rgba = icon.to_rgba8();
                 let paste_x = xi - (ICON_SIZE as i32 / 2);
-                let paste_y = axis_y as i32 - TICK_H_UP as i32 - LABEL_GAP_UP as i32 - ICON_SIZE as i32;
+                let slot = upgrade_slot_for[entry_index];
+                let paste_y = axis_y as i32 - TICK_H_UP as i32 - LABEL_GAP_UP as i32 - (slot as i32 + 1) * ICON_SIZE as i32;
                 blit_alpha(&mut img, &icon_rgba, paste_x, paste_y);
             } else {
                 // Rótulo rotacionado 270° (texto sobe a partir do eixo)
@@ -183,7 +281,7 @@ pub fn render_build_order(
                 blit(&mut img, &rotated, paste_x, paste_y);
             }
         } else {
-            // Tick vertical descendo do eixo (unidades e construções ficam abaixo)
+            // Tick vertical descendo do eixo (apenas unidades ficam abaixo)
             draw_line_segment_mut(
                 &mut img,
                 (x, axis_y as f32),
@@ -192,10 +290,11 @@ pub fn render_build_order(
             );
 
             if let Some(icon) = icon_opt {
-                // Ícone centralizado horizontalmente abaixo do tick
+                // Ícone centralizado horizontalmente abaixo do tick, empilhado se colidir
                 let icon_rgba = icon.to_rgba8();
                 let paste_x = xi - (ICON_SIZE as i32 / 2);
-                let paste_y = content_top as i32;
+                let slot = units_slot_for[entry_index];
+                let paste_y = content_top as i32 + slot as i32 * ICON_SIZE as i32;
                 blit_alpha(&mut img, &icon_rgba, paste_x, paste_y);
             } else {
                 // Rótulo em buffer horizontal, rotacionado 90° (texto desce a partir do eixo)
@@ -262,6 +361,30 @@ fn blit(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {
             dst.put_pixel(bx as u32, by as u32, *pixel);
         }
     }
+}
+
+/// Algoritmo guloso de alocação de slots sem colisão para ícones de `ICON_SIZE` px.
+///
+/// `xis`: pares `(orig_idx, xi)` já ordenados por `xi` crescente.
+/// Retorna `Vec` onde o índice `list_pos` corresponde ao slot atribuído àquele par.
+///
+/// Dois ícones colidem quando `|xi_a - xi_b| < ICON_SIZE`, pois cada ícone ocupa
+/// `[xi - ICON_SIZE/2, xi + ICON_SIZE/2]`.
+fn assign_slots(xis: &[(usize, i32)]) -> Vec<usize> {
+    let mut slots: Vec<i32> = Vec::new(); // slots[s] = último xi colocado no slot s
+    let mut result = Vec::with_capacity(xis.len());
+    for &(_, xi) in xis {
+        let slot = slots
+            .iter()
+            .position(|&last| xi - last >= ICON_SIZE as i32)
+            .unwrap_or_else(|| {
+                slots.push(i32::MIN);
+                slots.len() - 1
+            });
+        slots[slot] = xi;
+        result.push(slot);
+    }
+    result
 }
 
 fn blit_alpha(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {

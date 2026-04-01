@@ -5,6 +5,7 @@ use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_line_segment_mut, draw_text_mut, text_size};
 use imageproc::rect::Rect;
 
+use crate::army_value_image::{P1_COLOR, P2_COLOR};
 use crate::build_order::format_time;
 use crate::supply_block::SupplyBlockEntry;
 
@@ -23,7 +24,7 @@ const RIGHT_MARGIN: u32 = 40;
 
 const TITLE_TOP: u32 = 20;
 const TITLE_H: u32 = 70;
-const BAR_GAP: u32 = 16;
+const BAR_GAP: u32 = 32; // inclui espaço para rótulos acima da barra (≥ FONT_SIZE + folga)
 const BAR_H: u32 = 44;
 const AXIS_BELOW: u32 = 65;
 
@@ -34,23 +35,22 @@ const BAR_NORMAL: Rgba<u8> = Rgba([50, 70, 110, 255]);
 const BAR_BLOCKED: Rgba<u8> = Rgba([200, 40, 40, 255]);
 const TICK_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
 const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
-const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
 const SUPPLY_LABEL_COL: Rgba<u8> = Rgba([255, 255, 255, 255]);
 
 // ── API pública ───────────────────────────────────────────────────────────────
 
-/// Renderiza os supply blocks de um jogador como barra de linha do tempo PNG.
+/// Renderiza os supply blocks de um jogador como barra de linha do tempo em memória.
 ///
 /// A barra inteira representa [0, game_loops]. Trechos em vermelho são supply blocks.
 /// O título inclui o tempo total bloqueado.
-pub fn write_supply_block_png(
+pub fn render_supply_block(
     player_number: usize,
     name: &str,
     race: &str,
     entries: &[SupplyBlockEntry],
     game_loops: u32,
-    out_path: &Path,
-) -> Result<(), String> {
+    loops_per_second: f64,
+) -> Result<RgbaImage, String> {
     if game_loops == 0 {
         return Err("game_loops é 0, impossível renderizar".to_string());
     }
@@ -82,11 +82,12 @@ pub fn write_supply_block_png(
     let title = format!(
         "{} | Supply Block total: {}",
         player_label,
-        format_time(total_blocked)
+        format_time(total_blocked, loops_per_second)
     );
+    let title_color = if player_number == 1 { P1_COLOR } else { P2_COLOR };
     draw_text_mut(
         &mut img,
-        TITLE_COL,
+        title_color,
         LEFT_MARGIN as i32,
         TITLE_TOP as i32,
         title_scale,
@@ -126,19 +127,19 @@ pub fn write_supply_block_png(
             let label_x = x_start as i32 + (w as i32 - label_w as i32) / 2;
             draw_text_mut(&mut img, SUPPLY_LABEL_COL, label_x, label_y, label_scale, &font, &label);
         } else {
-            // Não coube dentro: exibe abaixo da barra, centralizado no meio do bloco
+            // Não coube dentro: exibe acima da barra, centralizado no meio do bloco
             let mid_x = x_start as i32 + (w as i32 / 2) - (label_w as i32 / 2);
-            draw_text_mut(&mut img, TICK_COL, mid_x, axis_y as i32 + 2, label_scale, &font, &label);
+            let above_y = bar_y as i32 - char_h as i32 - 2;
+            draw_text_mut(&mut img, TICK_COL, mid_x, above_y, label_scale, &font, &label);
         }
     }
 
     // ── Marcas e rótulos de tempo abaixo da barra ─────────────────────────────
-    let total_secs = game_loops / 16;
-    let interval = nice_interval(total_secs);
     let time_w = text_size(scale, &font, "00:00").0 as i32;
     let mut t = 0u32;
     loop {
-        let gl = (t * 16).min(game_loops);
+        let gl = (t as f64 * loops_per_second).round() as u32;
+        if gl > game_loops { break; }
         let x = LEFT_MARGIN as f32 + (gl as f32 / game_loops as f32) * axis_width;
         draw_line_segment_mut(
             &mut img,
@@ -146,7 +147,7 @@ pub fn write_supply_block_png(
             (x, (axis_y + 6) as f32),
             TICK_COL,
         );
-        let time_str = format_time(gl);
+        let time_str = format_time(gl, loops_per_second);
         draw_text_mut(
             &mut img,
             TIME_COL,
@@ -156,22 +157,25 @@ pub fn write_supply_block_png(
             &font,
             &time_str,
         );
-        if t * 16 >= game_loops {
-            break;
-        }
-        t += interval;
+        t += 60;
     }
 
+    Ok(img)
+}
+
+/// Salva os supply blocks de um jogador como barra de linha do tempo PNG.
+pub fn write_supply_block_png(
+    player_number: usize,
+    name: &str,
+    race: &str,
+    entries: &[SupplyBlockEntry],
+    game_loops: u32,
+    loops_per_second: f64,
+    out_path: &Path,
+) -> Result<(), String> {
+    let img = render_supply_block(player_number, name, race, entries, game_loops, loops_per_second)?;
     img.save(out_path).map_err(|e| format!("erro ao salvar PNG: {}", e))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn nice_interval(total_secs: u32) -> u32 {
-    match total_secs {
-        0..=90 => 15,
-        91..=300 => 30,
-        301..=600 => 60,
-        _ => 120,
-    }
-}
