@@ -38,8 +38,8 @@ const BG: Rgba<u8> = Rgba([255, 255, 255, 255]);
 const AXIS_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
 const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
 const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
-const GRID_COL: Rgba<u8> = Rgba([228, 228, 228, 255]);
-const Y_LABEL_COL: Rgba<u8> = Rgba([110, 110, 110, 255]);
+const GRID_COL: Rgba<u8> = Rgba([195, 195, 195, 255]);
+const Y_LABEL_COL: Rgba<u8> = Rgba([75, 75, 75, 255]);
 
 /// Cor fixa da linha de army value do P1 (azul)
 const P1_LINE: Rgba<u8> = Rgba([80, 150, 255, 255]);
@@ -292,35 +292,27 @@ fn army_y(value: i32, max_army: i32, axis_y: u32, chart_h: u32) -> f32 {
 
 // ── Cores ─────────────────────────────────────────────────────────────────────
 
-fn upgrade_vline_color_p1(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
-    match ev.kind {
-        UpgradeKind::Attack => Rgba([210, 165, 60, 255]),  // âmbar dourado
-        UpgradeKind::Armor  => Rgba([90, 165, 225, 255]),  // azul aço
-        UpgradeKind::Other  => Rgba([185, 185, 200, 255]), // cinza lavanda
-    }
+fn upgrade_vline_color_p1(_ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
+    P1_LINE
 }
 
-fn upgrade_vline_color_p2(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
-    match ev.kind {
-        UpgradeKind::Attack => Rgba([225, 140, 55, 255]),  // laranja queimado
-        UpgradeKind::Armor  => Rgba([60, 195, 170, 255]),  // turquesa
-        UpgradeKind::Other  => Rgba([190, 175, 160, 255]), // bege acinzentado
-    }
+fn upgrade_vline_color_p2(_ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
+    P2_LINE
 }
 
 fn upgrade_label_color_p1(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
     match ev.kind {
-        UpgradeKind::Attack => Rgba([155, 105, 10, 255]),  // âmbar escuro
-        UpgradeKind::Armor  => Rgba([20, 95, 165, 255]),   // azul escuro
-        UpgradeKind::Other  => Rgba([90, 90, 110, 255]),   // cinza azulado
+        UpgradeKind::Attack => Rgba([120, 75, 0, 255]),   // âmbar profundo
+        UpgradeKind::Armor  => Rgba([10, 65, 140, 255]),  // azul profundo
+        UpgradeKind::Other  => Rgba([55, 55, 80, 255]),   // índigo escuro
     }
 }
 
 fn upgrade_label_color_p2(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
     match ev.kind {
-        UpgradeKind::Attack => Rgba([175, 90, 10, 255]),   // laranja escuro
-        UpgradeKind::Armor  => Rgba([10, 135, 115, 255]),  // teal escuro
-        UpgradeKind::Other  => Rgba([100, 88, 76, 255]),   // marrom acinzentado
+        UpgradeKind::Attack => Rgba([140, 60, 0, 255]),   // laranja queimado escuro
+        UpgradeKind::Armor  => Rgba([0, 100, 80, 255]),   // teal profundo
+        UpgradeKind::Other  => Rgba([70, 55, 45, 255]),   // marrom escuro
     }
 }
 

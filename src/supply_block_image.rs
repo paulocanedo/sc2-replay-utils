@@ -119,12 +119,16 @@ pub fn write_supply_block_png(
             BAR_BLOCKED,
         );
 
-        // Rótulo do supply centralizado dentro do trecho, se couber
+        // Rótulo do supply: dentro do trecho se couber, senão abaixo da barra
         let label = entry.supply.to_string();
         let label_w = text_size(label_scale, &font, &label).0;
         if label_w + 4 <= w {
             let label_x = x_start as i32 + (w as i32 - label_w as i32) / 2;
             draw_text_mut(&mut img, SUPPLY_LABEL_COL, label_x, label_y, label_scale, &font, &label);
+        } else {
+            // Não coube dentro: exibe abaixo da barra, centralizado no meio do bloco
+            let mid_x = x_start as i32 + (w as i32 / 2) - (label_w as i32 / 2);
+            draw_text_mut(&mut img, TICK_COL, mid_x, axis_y as i32 + 2, label_scale, &font, &label);
         }
     }
 
