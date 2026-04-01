@@ -33,12 +33,12 @@ const TIME_AREA: u32 = 44;
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 
-const BG: Rgba<u8> = Rgba([18, 18, 28, 255]);
-const AXIS_COL: Rgba<u8> = Rgba([100, 120, 180, 255]);
-const TIME_COL: Rgba<u8> = Rgba([140, 160, 200, 255]);
-const TITLE_COL: Rgba<u8> = Rgba([220, 180, 60, 255]);
-const GRID_COL: Rgba<u8> = Rgba([40, 52, 88, 255]);
-const Y_LABEL_COL: Rgba<u8> = Rgba([110, 130, 170, 200]);
+const BG: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const AXIS_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
+const GRID_COL: Rgba<u8> = Rgba([200, 200, 200, 255]);
+const Y_LABEL_COL: Rgba<u8> = Rgba([80, 80, 80, 200]);
 
 /// Cor fixa da linha de army value do P1 (azul)
 const P1_LINE: Rgba<u8> = Rgba([80, 150, 255, 255]);

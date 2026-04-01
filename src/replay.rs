@@ -75,14 +75,14 @@ pub struct ReplayData {
     pub datetime: String,
     pub game_loops: u32,
     pub duration_seconds: u32,
-    /// Limite de coleta de eventos em minutos. 0 indica sem limite.
-    pub max_time_minutes: u32,
+    /// Limite de coleta de eventos em segundos. 0 indica sem limite.
+    pub max_time_seconds: u32,
     pub players: Vec<PlayerData>,
 }
 
 // ── Parser principal ─────────────────────────────────────────────────────────
 
-pub fn parse_replay(path: &Path, max_time_minutes: u32, include_location: bool) -> Result<ReplayData, String> {
+pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) -> Result<ReplayData, String> {
     let path_str = path.to_str().unwrap_or_default();
 
     let (mpq, file_contents) =
@@ -131,7 +131,7 @@ pub fn parse_replay(path: &Path, max_time_minutes: u32, include_location: bool) 
         })
         .collect();
 
-    let max_loops = max_time_minutes.saturating_mul(60 * 16);
+    let max_loops = max_time_seconds.saturating_mul(16);
     process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players, max_loops, include_location)?;
 
     let file = path
@@ -145,7 +145,7 @@ pub fn parse_replay(path: &Path, max_time_minutes: u32, include_location: bool) 
         datetime,
         game_loops,
         duration_seconds: game_loops / 16,
-        max_time_minutes,
+        max_time_seconds,
         players,
     })
 }

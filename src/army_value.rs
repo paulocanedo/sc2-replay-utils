@@ -40,8 +40,8 @@ pub struct ArmyValueResult {
 
 // ── Extração ──────────────────────────────────────────────────────────────────
 
-pub fn extract_army_value(path: &Path, max_time_minutes: u32) -> Result<ArmyValueResult, String> {
-    let data = parse_replay(path, max_time_minutes, false)?;
+pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValueResult, String> {
+    let data = parse_replay(path, max_time_seconds, false)?;
 
     let players = data
         .players

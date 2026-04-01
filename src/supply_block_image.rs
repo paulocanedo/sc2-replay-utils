@@ -29,12 +29,12 @@ const AXIS_BELOW: u32 = 65;
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 
-const BG: Rgba<u8> = Rgba([18, 18, 28, 255]);
+const BG: Rgba<u8> = Rgba([255, 255, 255, 255]);
 const BAR_NORMAL: Rgba<u8> = Rgba([50, 70, 110, 255]);
 const BAR_BLOCKED: Rgba<u8> = Rgba([200, 40, 40, 255]);
-const TICK_COL: Rgba<u8> = Rgba([100, 120, 180, 255]);
-const TIME_COL: Rgba<u8> = Rgba([140, 160, 200, 255]);
-const TITLE_COL: Rgba<u8> = Rgba([220, 180, 60, 255]);
+const TICK_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
 const SUPPLY_LABEL_COL: Rgba<u8> = Rgba([255, 255, 255, 255]);
 
 // ── API pública ───────────────────────────────────────────────────────────────

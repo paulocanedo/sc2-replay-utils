@@ -38,8 +38,8 @@ enum Commands {
         /// Imprime todos os YAMLs no stdout em vez de gravar arquivos [env: SC2RU_STDOUT]
         #[arg(long, env = "SC2RU_STDOUT")]
         stdout: bool,
-        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
-        #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
+        /// Rastreia eventos até este limite em segundos (0 = sem limite, padrão: 600) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 600, env = "SC2RU_MAX_TIME")]
         max_time: u32,
         /// Omite campos de localização (pos_x, pos_y) dos eventos [env: SC2RU_NO_LOCATION]
         #[arg(long, env = "SC2RU_NO_LOCATION")]
@@ -59,8 +59,8 @@ enum Commands {
         /// Diretório de saída para os CSVs (padrão: ./ para arquivo, ./out/ para diretório) [env: SC2RU_OUTPUT]
         #[arg(long, env = "SC2RU_OUTPUT")]
         output: Option<PathBuf>,
-        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
-        #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
+        /// Rastreia eventos até este limite em segundos (0 = sem limite, padrão: 0) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 0, env = "SC2RU_MAX_TIME")]
         max_time: u32,
         /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
         #[arg(long, env = "SC2RU_LATEST")]
@@ -80,7 +80,7 @@ enum Commands {
         /// Diretório de saída para os CSVs (padrão: ./ para arquivo, ./out/ para diretório) [env: SC2RU_OUTPUT]
         #[arg(long, env = "SC2RU_OUTPUT")]
         output: Option<PathBuf>,
-        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 0) [env: SC2RU_MAX_TIME]
+        /// Rastreia eventos até este limite em segundos (0 = sem limite, padrão: 0) [env: SC2RU_MAX_TIME]
         #[arg(long, default_value_t = 0, env = "SC2RU_MAX_TIME")]
         max_time: u32,
         /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
@@ -101,8 +101,8 @@ enum Commands {
         /// Diretório de saída para os CSVs (padrão: ./ para arquivo, ./out/ para diretório) [env: SC2RU_OUTPUT]
         #[arg(long, env = "SC2RU_OUTPUT")]
         output: Option<PathBuf>,
-        /// Rastreia eventos até este limite em minutos (0 = sem limite, padrão: 5) [env: SC2RU_MAX_TIME]
-        #[arg(long, default_value_t = 5, env = "SC2RU_MAX_TIME")]
+        /// Rastreia eventos até este limite em segundos (0 = sem limite, padrão: 0) [env: SC2RU_MAX_TIME]
+        #[arg(long, default_value_t = 0, env = "SC2RU_MAX_TIME")]
         max_time: u32,
         /// Usa o replay mais recente encontrado em --sc2-replay-dir [env: SC2RU_LATEST]
         #[arg(long, env = "SC2RU_LATEST")]

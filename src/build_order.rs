@@ -29,7 +29,7 @@ pub struct BuildOrderResult {
 /// Extrai a Build Order de cada jogador ativo.
 pub fn extract_build_order(
     path: &Path,
-    max_time_minutes: u32,
+    max_time_seconds: u32,
 ) -> Result<BuildOrderResult, String> {
     let path_str = path.to_str().unwrap_or_default();
 
@@ -56,7 +56,7 @@ pub fn extract_build_order(
     let tracker_events = s2protocol::read_tracker_events(path_str, &mpq, &file_contents)
         .map_err(|e| format!("{:?}", e))?;
 
-    let max_loops = max_time_minutes.saturating_mul(60 * 16);
+    let max_loops = max_time_seconds.saturating_mul(16);
 
     // supply atual por player_id (atualizado em cada PlayerStats)
     let mut supply_now: HashMap<u8, u8> = HashMap::new();

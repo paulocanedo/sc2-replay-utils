@@ -249,7 +249,7 @@ fn supply_block_one(
     let effective_end = if max_time == 0 {
         data.game_loops
     } else {
-        data.game_loops.min(max_time * 60 * 16)
+        data.game_loops.min(max_time * 16)
     };
 
     for (i, player) in data.players.iter().enumerate() {

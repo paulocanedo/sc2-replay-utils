@@ -28,12 +28,12 @@ const AXIS_BELOW: u32 = 80; // espaço abaixo do eixo para rótulos de tempo
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 
-const BG: Rgba<u8> = Rgba([18, 18, 28, 255]);
-const AXIS_COL: Rgba<u8> = Rgba([100, 120, 180, 255]);
-const TICK_COL: Rgba<u8> = Rgba([180, 200, 255, 255]);
-const LABEL_COL: Rgba<u8> = Rgba([240, 240, 255, 255]);
-const TIME_COL: Rgba<u8> = Rgba([140, 160, 200, 255]);
-const TITLE_COL: Rgba<u8> = Rgba([220, 180, 60, 255]);
+const BG: Rgba<u8> = Rgba([255, 255, 255, 255]);
+const AXIS_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TICK_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const LABEL_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
+const TIME_COL: Rgba<u8> = Rgba([80, 80, 80, 255]);
+const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
 
 // ── API pública ───────────────────────────────────────────────────────────────
 
