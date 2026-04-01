@@ -67,6 +67,7 @@ pub fn render_build_order(
     player_number: usize,
     name: &str,
     race: &str,
+    mmr: Option<i32>,
     entries: &[BuildOrderEntry],
     loops_per_second: f64,
 ) -> Result<RgbaImage, String> {
@@ -180,7 +181,10 @@ pub fn render_build_order(
     let title = if name.is_empty() {
         format!("Player {}", player_number)
     } else {
-        format!("Player {} — {} ({})", player_number, name, race)
+        match mmr {
+            Some(m) => format!("Player {} — {} ({}) · {}", player_number, name, race, m),
+            None    => format!("Player {} — {} ({})", player_number, name, race),
+        }
     };
     let title_color = if player_number == 1 { P1_COLOR } else { P2_COLOR };
     draw_text_mut(
@@ -374,11 +378,12 @@ pub fn write_build_order_png(
     player_number: usize,
     name: &str,
     race: &str,
+    mmr: Option<i32>,
     entries: &[BuildOrderEntry],
     loops_per_second: f64,
     out_path: &Path,
 ) -> Result<(), String> {
-    let img = render_build_order(player_number, name, race, entries, loops_per_second)?;
+    let img = render_build_order(player_number, name, race, mmr, entries, loops_per_second)?;
     img.save(out_path).map_err(|e| format!("erro ao salvar PNG: {}", e))
 }
 

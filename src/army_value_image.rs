@@ -42,14 +42,14 @@ const TITLE_COL: Rgba<u8> = Rgba([30, 30, 30, 255]);
 const GRID_COL: Rgba<u8> = Rgba([195, 195, 195, 255]);
 const Y_LABEL_COL: Rgba<u8> = Rgba([75, 75, 75, 255]);
 
-/// Cor fixa da linha de army value do P1 (azul)
-const P1_LINE: Rgba<u8> = Rgba([80, 150, 255, 255]);
-/// Cor fixa da linha de army value do P2 (laranja)
-const P2_LINE: Rgba<u8> = Rgba([255, 160, 60, 255]);
+/// Cor do P1 (azul saturado) — compartilhada com outros módulos de imagem
+pub const P1_COLOR: Rgba<u8> = Rgba([20, 110, 255, 255]);
+/// Cor do P2 (vermelho) — compartilhada com outros módulos de imagem
+pub const P2_COLOR: Rgba<u8> = Rgba([215, 40, 40, 255]);
 
 // ── API pública ───────────────────────────────────────────────────────────────
 
-/// Renderiza o gráfico de valor de exército de ambos os jogadores em um único PNG.
+/// Renderiza o gráfico de valor de exército de ambos os jogadores em memória.
 ///
 /// Layout vertical:
 ///   TITLE_H        — título
@@ -58,13 +58,13 @@ const P2_LINE: Rgba<u8> = Rgba([255, 160, 60, 255]);
 ///   axis_y         — eixo de tempo
 ///   UPGRADE_LABEL_H — upgrades/pesquisas do P1 (abaixo do eixo, descendo)
 ///   TIME_AREA      — rótulos MM:SS
-pub fn write_army_value_png(
+pub fn render_army_value(
     p1: &PlayerArmyValue,
     p2: &PlayerArmyValue,
     map_name: &str,
     game_loops: u32,
-    out_path: &Path,
-) -> Result<(), String> {
+    loops_per_second: f64,
+) -> Result<RgbaImage, String> {
     let font = FontRef::try_from_slice(FONT_BYTES)
         .map_err(|e| format!("fonte inválida: {:?}", e))?;
     let scale = PxScale::from(FONT_SIZE);
@@ -144,8 +144,8 @@ pub fn write_army_value_png(
     );
 
     // ── Curvas de army value (desenhadas sobre as linhas verticais) ───────────
-    draw_army_curve(&mut img, p1, P1_LINE, axis_y, chart_top, axis_width, max_loop, max_army_ceil);
-    draw_army_curve(&mut img, p2, P2_LINE, axis_y, chart_top, axis_width, max_loop, max_army_ceil);
+    draw_army_curve(&mut img, p1, P1_COLOR, axis_y, chart_top, axis_width, max_loop, max_army_ceil);
+    draw_army_curve(&mut img, p2, P2_COLOR, axis_y, chart_top, axis_width, max_loop, max_army_ceil);
 
     // ── Eixo horizontal de tempo ──────────────────────────────────────────────
     draw_line_segment_mut(
@@ -156,9 +156,12 @@ pub fn write_army_value_png(
     );
 
     // ── Título ────────────────────────────────────────────────────────────────
-    let p1_label = player_label(p1);
-    let p2_label = player_label(p2);
-    let title = format!("{} — {} vs {}", map_name, p1_label, p2_label);
+    // Título principal usa label curto (sem MMR); a legenda colorida usa label completo (com MMR)
+    let p1_label_short = player_label_short(p1);
+    let p2_label_short = player_label_short(p2);
+    let p1_label_full = player_label(p1);
+    let p2_label_full = player_label(p2);
+    let title = format!("{} — {} vs {}", map_name, p1_label_short, p2_label_short);
     draw_text_mut(&mut img, TITLE_COL, LEFT_MARGIN as i32, TITLE_TOP as i32, title_scale, &font, &title);
 
     // Legendas coloridas (P1 e P2) à direita do título
@@ -171,27 +174,26 @@ pub fn write_army_value_png(
     let sq_y = legend_y + ((FONT_SIZE as i32 - sq) / 2);
     let legend_x = LEFT_MARGIN as i32 + title_w + sep;
 
-    draw_filled_rect_mut(&mut img, Rect::at(legend_x, sq_y).of_size(sq as u32, sq as u32), P1_LINE);
-    draw_text_mut(&mut img, TITLE_COL, legend_x + sq + sq_gap, legend_y, scale, &font, &p1_label);
-    let p1_w = sq + sq_gap + text_size(scale, &font, &p1_label).0 as i32;
+    draw_filled_rect_mut(&mut img, Rect::at(legend_x, sq_y).of_size(sq as u32, sq as u32), P1_COLOR);
+    draw_text_mut(&mut img, TITLE_COL, legend_x + sq + sq_gap, legend_y, scale, &font, &p1_label_full);
+    let p1_w = sq + sq_gap + text_size(scale, &font, &p1_label_full).0 as i32;
 
     let p2_x = legend_x + p1_w + sep;
-    draw_filled_rect_mut(&mut img, Rect::at(p2_x, sq_y).of_size(sq as u32, sq as u32), P2_LINE);
-    draw_text_mut(&mut img, TITLE_COL, p2_x + sq + sq_gap, legend_y, scale, &font, &p2_label);
+    draw_filled_rect_mut(&mut img, Rect::at(p2_x, sq_y).of_size(sq as u32, sq as u32), P2_COLOR);
+    draw_text_mut(&mut img, TITLE_COL, p2_x + sq + sq_gap, legend_y, scale, &font, &p2_label_full);
 
     // ── Rótulos de tempo ──────────────────────────────────────────────────────
-    let total_secs = max_loop / 16;
-    let interval = nice_time_interval(total_secs);
     let time_w = text_size(scale, &font, "00:00").0 as i32;
-    // Começa pelo primeiro intervalo — t=0 é omitido (irrelevante)
-    let mut t = interval;
+    // Começa em 1min — t=0 é omitido (irrelevante)
+    let mut t = 60u32;
     loop {
-        let gl = (t * 16).min(max_loop);
+        let gl = (t as f64 * loops_per_second).round() as u32;
+        if gl > max_loop { break; }
         let x = LEFT_MARGIN as f32 + (gl as f32 / max_loop as f32) * axis_width;
 
         draw_line_segment_mut(&mut img, (x, axis_y as f32), (x, (axis_y + 6) as f32), AXIS_COL);
 
-        let time_str = format_time(gl);
+        let time_str = format_time(gl, loops_per_second);
         draw_text_mut(
             &mut img,
             TIME_COL,
@@ -201,10 +203,22 @@ pub fn write_army_value_png(
             &font,
             &time_str,
         );
-        if gl >= max_loop { break; }
-        t += interval;
+        t += 60;
     }
 
+    Ok(img)
+}
+
+/// Salva o gráfico de valor de exército de ambos os jogadores como PNG.
+pub fn write_army_value_png(
+    p1: &PlayerArmyValue,
+    p2: &PlayerArmyValue,
+    map_name: &str,
+    game_loops: u32,
+    loops_per_second: f64,
+    out_path: &Path,
+) -> Result<(), String> {
+    let img = render_army_value(p1, p2, map_name, game_loops, loops_per_second)?;
     img.save(out_path).map_err(|e| format!("erro ao salvar PNG: {}", e))
 }
 
@@ -269,11 +283,10 @@ fn draw_upgrade_verticals<Fv, Fl>(
 
         let lcol = label_color(ev);
 
-        // Linha vertical através da área do gráfico (apenas para ataque / armadura), 2 px de largura
+        // Linha vertical através da área do gráfico (apenas para ataque / armadura), 1 px de largura
         if matches!(ev.kind, UpgradeKind::Attack | UpgradeKind::Armor) {
             let vcol = vline_color(ev);
-            draw_line_segment_mut(img, (x,       chart_top as f32), (x,       axis_y as f32), vcol);
-            draw_line_segment_mut(img, (x + 1.0, chart_top as f32), (x + 1.0, axis_y as f32), vcol);
+            draw_line_segment_mut(img, (x, chart_top as f32), (x, axis_y as f32), vcol);
         }
 
         // Ícone quando disponível; rótulo de texto como fallback — ambos descem a partir de label_top
@@ -303,11 +316,11 @@ fn army_y(value: i32, max_army: i32, axis_y: u32, chart_h: u32) -> f32 {
 // ── Cores ─────────────────────────────────────────────────────────────────────
 
 fn upgrade_vline_color_p1(_ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
-    P1_LINE
+    P1_COLOR
 }
 
 fn upgrade_vline_color_p2(_ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
-    P2_LINE
+    P2_COLOR
 }
 
 fn upgrade_label_color_p1(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
@@ -320,9 +333,9 @@ fn upgrade_label_color_p1(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> 
 
 fn upgrade_label_color_p2(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> {
     match ev.kind {
-        UpgradeKind::Attack => Rgba([140, 60, 0, 255]),   // laranja queimado escuro
-        UpgradeKind::Armor  => Rgba([0, 100, 80, 255]),   // teal profundo
-        UpgradeKind::Other  => Rgba([70, 55, 45, 255]),   // marrom escuro
+        UpgradeKind::Attack => Rgba([155, 10, 10, 255]),  // vermelho escuro
+        UpgradeKind::Armor  => Rgba([110, 0, 55, 255]),   // carmesim escuro
+        UpgradeKind::Other  => Rgba([80, 35, 35, 255]),   // marrom avermelhado
     }
 }
 
@@ -330,20 +343,22 @@ fn upgrade_label_color_p2(ev: &crate::army_value::ArmyUpgradeEvent) -> Rgba<u8> 
 
 fn player_label(p: &PlayerArmyValue) -> String {
     if p.name.is_empty() {
+        return "Player".to_string();
+    }
+    match p.mmr {
+        Some(mmr) => format!("{} ({}) · {}", p.name, p.race, mmr),
+        None => format!("{} ({})", p.name, p.race),
+    }
+}
+
+fn player_label_short(p: &PlayerArmyValue) -> String {
+    if p.name.is_empty() {
         "Player".to_string()
     } else {
         format!("{} ({})", p.name, p.race)
     }
 }
 
-fn nice_time_interval(total_secs: u32) -> u32 {
-    match total_secs {
-        0..=90   => 15,
-        91..=300 => 30,
-        301..=600 => 60,
-        _ => 120,
-    }
-}
 
 // ── Antialiasing (algoritmo de Xiaolin Wu) ────────────────────────────────────
 

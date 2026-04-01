@@ -47,6 +47,7 @@ pub fn render_supply_block(
     player_number: usize,
     name: &str,
     race: &str,
+    mmr: Option<i32>,
     entries: &[SupplyBlockEntry],
     game_loops: u32,
     loops_per_second: f64,
@@ -77,7 +78,10 @@ pub fn render_supply_block(
     let player_label = if name.is_empty() {
         format!("Player {}", player_number)
     } else {
-        format!("Player {} — {} ({})", player_number, name, race)
+        match mmr {
+            Some(m) => format!("Player {} — {} ({}) · {}", player_number, name, race, m),
+            None    => format!("Player {} — {} ({})", player_number, name, race),
+        }
     };
     let title = format!(
         "{} | Supply Block total: {}",
@@ -168,12 +172,13 @@ pub fn write_supply_block_png(
     player_number: usize,
     name: &str,
     race: &str,
+    mmr: Option<i32>,
     entries: &[SupplyBlockEntry],
     game_loops: u32,
     loops_per_second: f64,
     out_path: &Path,
 ) -> Result<(), String> {
-    let img = render_supply_block(player_number, name, race, entries, game_loops, loops_per_second)?;
+    let img = render_supply_block(player_number, name, race, mmr, entries, game_loops, loops_per_second)?;
     img.save(out_path).map_err(|e| format!("erro ao salvar PNG: {}", e))
 }
 

@@ -29,6 +29,7 @@ pub struct ArmyUpgradeEvent {
 pub struct PlayerArmyValue {
     pub name: String,
     pub race: String,
+    pub mmr: Option<i32>,
     pub snapshots: Vec<ArmySnapshot>,
     pub upgrade_events: Vec<ArmyUpgradeEvent>,
 }
@@ -36,6 +37,7 @@ pub struct PlayerArmyValue {
 pub struct ArmyValueResult {
     pub players: Vec<PlayerArmyValue>,
     pub game_loops: u32,
+    pub loops_per_second: f64,
     pub map_name: String,
     pub datetime: String,
 }
@@ -107,6 +109,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
             PlayerArmyValue {
                 name: player.name.clone(),
                 race: player.race.clone(),
+                mmr: player.mmr,
                 snapshots,
                 upgrade_events,
             }
@@ -116,6 +119,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
     Ok(ArmyValueResult {
         players,
         game_loops: data.game_loops,
+        loops_per_second: data.loops_per_second,
         map_name: data.map.clone(),
         datetime: data.datetime.clone(),
     })
@@ -184,11 +188,11 @@ fn abbreviate_upgrade(name: &str) -> String {
 
 // ── CSV ───────────────────────────────────────────────────────────────────────
 
-pub fn to_army_value_csv(snapshots: &[ArmySnapshot]) -> String {
+pub fn to_army_value_csv(snapshots: &[ArmySnapshot], lps: f64) -> String {
     let mut out = String::new();
     out.push_str("time, army_total, army_gas, attack_level, armor_level\n");
     for s in snapshots {
-        let total_secs = s.game_loop / 16;
+        let total_secs = (s.game_loop as f64 / lps).round() as u32;
         let time = format!("{:02}:{:02}", total_secs / 60, total_secs % 60);
         out.push_str(&format!(
             "{}, {}, {}, {}, {}\n",

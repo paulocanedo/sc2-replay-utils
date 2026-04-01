@@ -19,6 +19,7 @@ pub struct BuildOrderEntry {
 pub struct PlayerBuildOrder {
     pub name: String,
     pub race: String,
+    pub mmr: Option<i32>,
     pub entries: Vec<BuildOrderEntry>,
 }
 
@@ -42,6 +43,7 @@ pub fn extract_build_order(
         s2protocol::read_mpq(path_str).map_err(|e| format!("{:?}", e))?;
     let details =
         s2protocol::read_details(path_str, &mpq, &file_contents).map_err(|e| format!("{:?}", e))?;
+    let init_data = s2protocol::read_init_data(path_str, &mpq, &file_contents).ok();
 
     let active_count = details.player_list.iter().filter(|p| p.observe == 0).count();
     if active_count < 2 {
@@ -151,13 +153,15 @@ pub fn extract_build_order(
         }
     }
 
-    let player_meta: Vec<(String, String)> = details
+    let player_meta: Vec<(String, String, Option<i32>)> = details
         .player_list
         .iter()
         .filter(|p| p.observe == 0)
         .map(|p| {
             let (_, name) = extract_clan_and_name(&p.name);
-            (name, p.race.clone())
+            let mmr = init_data.as_ref()
+                .and_then(|id| find_mmr_for_slot(id, p.working_set_slot_id));
+            (name, p.race.clone(), mmr)
         })
         .collect();
 
@@ -166,8 +170,8 @@ pub fn extract_build_order(
         .map(deduplicate)
         .enumerate()
         .map(|(i, entries)| {
-            let (name, race) = player_meta.get(i).cloned().unwrap_or_default();
-            PlayerBuildOrder { name, race, entries }
+            let (name, race, mmr) = player_meta.get(i).cloned().unwrap_or_default();
+            PlayerBuildOrder { name, race, mmr, entries }
         })
         .collect();
 
@@ -268,4 +272,23 @@ pub fn to_fixed_csv(entries: &[BuildOrderEntry], lps: f64) -> String {
         ));
     }
     out
+}
+
+// ── MMR lookup ────────────────────────────────────────────────────────────────
+
+fn find_mmr_for_slot(
+    init: &s2protocol::InitData,
+    working_set_slot_id: Option<u8>,
+) -> Option<i32> {
+    let wsid = working_set_slot_id?;
+    let slot_idx = init
+        .sync_lobby_state
+        .lobby_state
+        .slots
+        .iter()
+        .position(|s| s.working_set_slot_id == Some(wsid))?;
+    init.sync_lobby_state
+        .user_initial_data
+        .get(slot_idx)?
+        .scaled_rating
 }

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use s2protocol::tracker_events::{unit_tag, ReplayTrackerEvent};
 
-use crate::utils::extract_clan_and_name;
+use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
 // ── Structs de saída ─────────────────────────────────────────────────────────
 
@@ -62,6 +62,7 @@ pub struct PlayerData {
     pub name: String,
     pub clan: String,
     pub race: String,
+    pub mmr: Option<i32>,
     pub stats_snapshots: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,
     pub units: Vec<UnitEntry>,
@@ -75,6 +76,7 @@ pub struct ReplayData {
     pub datetime: String,
     pub game_loops: u32,
     pub duration_seconds: u32,
+    pub loops_per_second: f64,
     /// Limite de coleta de eventos em segundos. 0 indica sem limite.
     pub max_time_seconds: u32,
     pub players: Vec<PlayerData>,
@@ -91,6 +93,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) 
         s2protocol::read_protocol_header(&mpq).map_err(|e| format!("{:?}", e))?;
     let details =
         s2protocol::read_details(path_str, &mpq, &file_contents).map_err(|e| format!("{:?}", e))?;
+    let init_data = s2protocol::read_init_data(path_str, &mpq, &file_contents).ok();
 
     let active_players: Vec<_> = details.player_list.iter().filter(|p| p.observe == 0).collect();
     if active_players.len() < 2 {
@@ -103,6 +106,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) 
             .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
 
     let game_loops = header.m_elapsed_game_loops as u32;
+    let loops_per_second = game_speed_to_loops_per_second(&details.game_speed);
 
     // Mapeia player_id do tracker (posição 1-indexada no player_list completo)
     // → índice no Vec<PlayerData> (somente jogadores ativos)
@@ -115,14 +119,18 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) 
         .map(|(out_idx, (in_idx, _))| ((in_idx + 1) as u8, out_idx))
         .collect();
 
-    let mut players: Vec<PlayerData> = active_players
+    let mut players: Vec<PlayerData> = details
+        .player_list
         .iter()
+        .filter(|p| p.observe == 0)
         .map(|p| {
             let (clan, name) = extract_clan_and_name(&p.name);
+            let mmr = init_data.as_ref().and_then(|id| find_mmr_for_slot(id, p.working_set_slot_id));
             PlayerData {
                 name,
                 clan,
                 race: p.race.clone(),
+                mmr,
                 stats_snapshots: Vec::new(),
                 upgrades: Vec::new(),
                 units: Vec::new(),
@@ -131,7 +139,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) 
         })
         .collect();
 
-    let max_loops = max_time_seconds.saturating_mul(16);
+    let max_loops = if max_time_seconds == 0 { 0 } else { (max_time_seconds as f64 * loops_per_second).round() as u32 };
     process_tracker_events(path_str, &mpq, &file_contents, &player_idx, &mut players, max_loops, include_location)?;
 
     let file = path
@@ -144,7 +152,8 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32, include_location: bool) 
         map: details.title.clone(),
         datetime,
         game_loops,
-        duration_seconds: game_loops / 16,
+        duration_seconds: (game_loops as f64 / loops_per_second).round() as u32,
+        loops_per_second,
         max_time_seconds,
         players,
     })
@@ -263,4 +272,27 @@ fn process_tracker_events(
     }
 
     Ok(())
+}
+
+// ── MMR lookup ────────────────────────────────────────────────────────────────
+
+/// Encontra o `scaled_rating` de um jogador no InitData usando `working_set_slot_id`.
+///
+/// O índice correto em `user_initial_data` é determinado pela posição do slot
+/// em `lobby_state.slots` cujo `working_set_slot_id` coincide com o do jogador.
+fn find_mmr_for_slot(
+    init: &s2protocol::InitData,
+    working_set_slot_id: Option<u8>,
+) -> Option<i32> {
+    let wsid = working_set_slot_id?;
+    let slot_idx = init
+        .sync_lobby_state
+        .lobby_state
+        .slots
+        .iter()
+        .position(|s| s.working_set_slot_id == Some(wsid))?;
+    init.sync_lobby_state
+        .user_initial_data
+        .get(slot_idx)?
+        .scaled_rating
 }
