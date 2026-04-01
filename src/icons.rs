@@ -44,8 +44,6 @@ fn terran_bytes(action: &str) -> Option<&'static [u8]> {
         | "WidowMineBurrowed" => include_bytes!("images/terran/widow_mine.png"),
         "SCV"                 => include_bytes!("images/terran/scv.png"),
         "MULE" | "Mule"       => include_bytes!("images/terran/mule.png"),
-        "AutoTurret"          => include_bytes!("images/terran/auto_turret.png"),
-        "PointDefenseDrone"   => include_bytes!("images/terran/point_defense_drone.png"),
 
         // ── Upgrades — armas de infantaria ───────────────────────────────────
         "TerranInfantryWeaponsLevel1" => include_bytes!("images/terran/infantry_weapons_1.png"),
@@ -74,6 +72,21 @@ fn terran_bytes(action: &str) -> Option<&'static [u8]> {
         "TerranShipWeaponsLevel1" => include_bytes!("images/terran/ship_weapons_1.png"),
         "TerranShipWeaponsLevel2" => include_bytes!("images/terran/ship_weapons_2.png"),
         "TerranShipWeaponsLevel3" => include_bytes!("images/terran/ship_weapons_3.png"),
+
+        // ── Upgrades — habilidades de infantaria ─────────────────────────────
+        "Stimpack"         => include_bytes!("images/terran/stimpack.png"),
+        "CombatShield"     => include_bytes!("images/terran/combat_shield.png"),
+        "ConcussiveShells" => include_bytes!("images/terran/concussive_shells.png"),
+        "PersonalCloaking" => include_bytes!("images/terran/cloaking.png"),
+        "BansheeCloak" => include_bytes!("images/terran/cloaking.png"),
+
+        // ── Upgrades — habilidades de veículos ───────────────────────────────
+        "InfernalPreIgniter"  => include_bytes!("images/terran/infernal_pre_igniter.png"),
+        "MagFieldAccelerator" => include_bytes!("images/terran/mag_field_accelerator.png"),
+
+        // ── Upgrades — estruturas ─────────────────────────────────────────────
+        "HiSecAutoTracking"            => include_bytes!("images/terran/hi_sec_auto_tracking.png"),
+        "NeosteelFrame" | "NeosteelArmor" => include_bytes!("images/terran/neosteel_armor.png"),
 
         _ => return None,
     })
