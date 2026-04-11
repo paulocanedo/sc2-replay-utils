@@ -101,13 +101,21 @@ fn header_insights(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
 // ── Mini-mapa ──────────────────────────────────────────────────────────
 
 fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
-    // Quadrado o maior possível centralizado horizontalmente, limitado
-    // pelo espaço vertical disponível e por um teto pra não virar HUD.
+    // Ocupa todo o espaço restante da aba, mas mantém o aspect ratio
+    // do mapa real (cell units do replay; fallback pra textura, depois
+    // 1:1) — letterbox no centro do canvas disponível.
     let avail = ui.available_size();
-    let side = avail.x.min(avail.y).min(560.0).max(160.0);
+    let aspect = map_aspect(loaded);
+    let rect_size = fit_aspect(avail, aspect);
+
+    // Bounds em coords de tile do replay. Quando o init_data não trouxe
+    // dimensões, caímos em 256 (igual ao range u8 cru) só pra não
+    // dividir por zero — visual fica errado mas o app não trava.
+    let map_w = loaded.timeline.map_size_x.max(1);
+    let map_h = loaded.timeline.map_size_y.max(1);
 
     ui.vertical_centered(|ui| {
-        let (rect, _resp) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+        let (rect, _resp) = ui.allocate_exact_size(rect_size, Sense::hover());
         let painter = ui.painter_at(rect);
 
         // Fundo do mapa: se temos a imagem rasterizada do mapa atual,
@@ -138,13 +146,47 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
             let entities = alive_entities_at(p, game_loop);
 
             for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, 4.0, color, false);
+                draw_unit(&painter, rect, e.x, e.y, map_w, map_h, 4.0, color, false);
             }
             for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, 6.0, color, true);
+                draw_unit(&painter, rect, e.x, e.y, map_w, map_h, 6.0, color, true);
             }
         }
     });
+}
+
+/// Aspect ratio (largura/altura) do mapa do replay. Usa as dimensões em
+/// células do `init_data` quando disponíveis; senão tenta o aspect do
+/// próprio TGA da textura; fallback final é 1:1.
+fn map_aspect(loaded: &LoadedReplay) -> f32 {
+    let mx = loaded.timeline.map_size_x;
+    let my = loaded.timeline.map_size_y;
+    if mx > 0 && my > 0 {
+        return mx as f32 / my as f32;
+    }
+    if let Some(img) = loaded.map_image.as_ref() {
+        if img.width > 0 && img.height > 0 {
+            return img.width as f32 / img.height as f32;
+        }
+    }
+    1.0
+}
+
+/// Encaixa um retângulo de aspect `aspect` (largura/altura) dentro de
+/// `avail`, preservando proporção (letterbox). Pelo menos um dos eixos
+/// fica grudado no `avail`.
+fn fit_aspect(avail: egui::Vec2, aspect: f32) -> egui::Vec2 {
+    if avail.x <= 0.0 || avail.y <= 0.0 || aspect <= 0.0 {
+        return vec2(0.0, 0.0);
+    }
+    let avail_aspect = avail.x / avail.y;
+    if avail_aspect > aspect {
+        // Espaço sobrando na horizontal: altura é o limite.
+        vec2(avail.y * aspect, avail.y)
+    } else {
+        // Espaço sobrando na vertical: largura é o limite.
+        vec2(avail.x, avail.x / aspect)
+    }
 }
 
 /// Converte um `MapImage` (RGBA8 bruto) para o `ColorImage` que `egui`
@@ -158,13 +200,13 @@ fn map_image_to_color_image(img: &MapImage) -> ColorImage {
     )
 }
 
-/// Mapeia coordenadas de mapa (u8 0..=255) para coordenadas de tela
-/// dentro do retângulo do mini-mapa. Inverte Y porque no jogo Y cresce
-/// para cima, mas na tela queremos topo = topo (igual ao mini-mapa
-/// in-game).
-fn to_screen(rect: Rect, x: u8, y: u8) -> Pos2 {
-    let nx = x as f32 / 255.0;
-    let ny = 1.0 - (y as f32 / 255.0);
+/// Mapeia coordenadas de mapa (em células de tile, 0..map_w/map_h) para
+/// coordenadas de tela dentro do retângulo do mini-mapa. Inverte Y porque
+/// no jogo Y cresce para cima, mas na tela queremos topo = topo (igual ao
+/// mini-mapa in-game).
+fn to_screen(rect: Rect, x: u8, y: u8, map_w: u8, map_h: u8) -> Pos2 {
+    let nx = x as f32 / map_w as f32;
+    let ny = 1.0 - (y as f32 / map_h as f32);
     pos2(
         rect.left() + nx * rect.width(),
         rect.top() + ny * rect.height(),
@@ -176,11 +218,13 @@ fn draw_unit(
     rect: Rect,
     x: u8,
     y: u8,
+    map_w: u8,
+    map_h: u8,
     side: f32,
     color: Color32,
     structure: bool,
 ) {
-    let center = to_screen(rect, x, y);
+    let center = to_screen(rect, x, y, map_w, map_h);
     let half = side * 0.5;
     let r = Rect::from_min_max(
         pos2(center.x - half, center.y - half),

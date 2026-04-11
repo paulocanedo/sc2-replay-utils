@@ -3,7 +3,11 @@
 // Mapas (.SC2Map e .s2ma) são arquivos MPQ que carregam um `Minimap.tga`
 // pré-renderizado pela Blizzard. Este módulo:
 //
-//  1. Localiza um arquivo de mapa por título (ver `locator`).
+//  1. Localiza um arquivo de mapa, em ordem de preferência:
+//     a) Pelo `m_cacheHandles` do replay → caminho exato no Battle.net
+//        Cache (cobre 100% dos mapas de ladder).
+//     b) Pelo título do mapa → stem do filename em
+//        `Documents\StarCraft II\Maps` (cobre mapas custom/instalados).
 //  2. Abre o MPQ via `s2protocol::read_mpq` (mesma stack já usada para
 //     replays).
 //  3. Lê o sector `Minimap.tga` do archive e decodifica em RGBA8 (ver
@@ -11,16 +15,11 @@
 //
 // O retorno é um `MapImage` neutro de UI — a integração com `egui` fica
 // em `gui/tabs/timeline.rs`, que faz upload pra GPU sob demanda.
-//
-// **Limitações conhecidas**: a resolução por título é por *stem* do
-// filename (ver doc em `locator::resolve_map_file`). Mapas no Battle.net
-// Cache têm nome em hash e não casam — só mapas instalados em
-// `StarCraft II/Maps` resolvem por enquanto.
 
 mod decode;
 mod locator;
 
-pub use locator::resolve_map_file_default;
+pub use locator::{resolve_from_cache_handles, resolve_map_file_default};
 
 use std::path::Path;
 
@@ -34,17 +33,29 @@ pub struct MapImage {
     pub rgba: Vec<u8>,
 }
 
-/// Pipeline completo: localiza o arquivo do mapa pelo título e extrai
-/// sua imagem rasterizada. Conveniência usada por `LoadedReplay::load`.
+/// Pipeline completo: localiza o arquivo do mapa do replay e extrai sua
+/// imagem rasterizada. Conveniência usada por `LoadedReplay::load`.
 ///
-/// Usa o lookup cacheado (`resolve_map_file_default`) — a varredura
-/// recursiva das pastas de Maps acontece **uma vez por processo**, no
-/// primeiro replay carregado. Carregamentos seguintes pagam só o custo
-/// de abrir o MPQ e decodificar o TGA.
-pub fn load_for_title(map_title: &str) -> Result<MapImage, String> {
-    let path = resolve_map_file_default(map_title)
-        .ok_or_else(|| format!("mapa não encontrado: {map_title:?}"))?;
-    extract_minimap(&path)
+/// Estratégia em ordem:
+/// 1. Itera todos os `.s2ma` referenciados em `cache_handles` que
+///    existem no Battle.net Cache. Tenta abrir/extrair cada um — o
+///    primeiro que for um MPQ válido com `Minimap.tga` ganha. Os
+///    stubs de mod (e.g. `Core.SC2Mod`, que ficam como texto
+///    "Standard Data: ..." e não são MPQs) falham silenciosamente
+///    e seguimos pro próximo handle.
+/// 2. Fallback: lookup por título nas pastas de Maps instaladas.
+pub fn load_for_replay(map_title: &str, cache_handles: &[String]) -> Result<MapImage, String> {
+    let mut last_err: Option<String> = None;
+    for path in resolve_from_cache_handles(cache_handles) {
+        match extract_minimap(&path) {
+            Ok(img) => return Ok(img),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if let Some(path) = resolve_map_file_default(map_title) {
+        return extract_minimap(&path);
+    }
+    Err(last_err.unwrap_or_else(|| format!("mapa não encontrado: {map_title:?}")))
 }
 
 /// Extrai a imagem `Minimap.tga` de um arquivo MPQ de mapa SC2 e a

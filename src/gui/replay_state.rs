@@ -79,7 +79,8 @@ impl LoadedReplay {
             .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops))
             .collect();
 
-        let map_image = match map_image::load_for_title(&timeline.map) {
+        let map_image = match map_image::load_for_replay(&timeline.map, &timeline.cache_handles)
+        {
             Ok(img) => Some(img),
             Err(e) => {
                 eprintln!("map_image: {e}");

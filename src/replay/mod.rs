@@ -126,6 +126,19 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
     let map = details.title.clone();
     let duration_seconds = (game_loops as f64 / loops_per_second).round() as u32;
 
+    let cache_handles = details.cache_handles.clone();
+
+    // Dimensões do mapa vêm do init_data; sem ele caem pra zero e a
+    // aba Timeline cai num fallback de aspect 1:1 (raro — `init_data`
+    // só falta em replays muito antigos ou corrompidos).
+    let (map_size_x, map_size_y) = init_data
+        .as_ref()
+        .map(|id| {
+            let gd = &id.sync_lobby_state.game_description;
+            (gd.map_size_x, gd.map_size_y)
+        })
+        .unwrap_or((0, 0));
+
     let mut timeline = ReplayTimeline {
         file,
         map,
@@ -137,6 +150,9 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         max_time_seconds,
         players,
         chat: Vec::new(),
+        cache_handles,
+        map_size_x,
+        map_size_y,
     };
 
     // Fast path para metadata-only (usado pela biblioteca da GUI):

@@ -145,4 +145,18 @@ pub struct ReplayTimeline {
     pub max_time_seconds: u32,
     pub players: Vec<PlayerTimeline>,
     pub chat: Vec<ChatEntry>,
+    /// `m_cacheHandles` do replay — cada string é um handle de 80 chars
+    /// hex (4 bytes ext + 4 hex delimiter + 4 hex region + 64 hex hash).
+    /// O primeiro com extensão `s2ma` aponta para o arquivo do mapa no
+    /// Battle.net Cache; usado por `map_image::load_for_replay` para
+    /// resolver mapas de ladder sem scan de diretório.
+    pub cache_handles: Vec<String>,
+    /// Dimensões do mapa em **células de tile**, vindas de
+    /// `init_data.sync_lobby_state.game_description.map_size_x/y`. As
+    /// posições nos tracker events (`UnitBornEvent.x/.y`, etc.) são
+    /// `u8` no mesmo sistema de coordenadas, então é por isso que a
+    /// renderização do mini-mapa precisa dividir por estes valores
+    /// (e não por 255). Zero indica que o `init_data` faltou.
+    pub map_size_x: u8,
+    pub map_size_y: u8,
 }

@@ -1,26 +1,29 @@
 // Localização de arquivos `.SC2Map` / `.s2ma` no disco.
 //
-// Match estratégia v1: pelo *stem* do filename. Funciona perfeitamente
-// para mapas instalados em pastas como `StarCraft II/Maps/<Title>.SC2Map`.
-// Mapas baixados para o Battle.net Cache têm nome em hash (e.g.
-// `b1f...c9.s2ma`) e por isso não casam por stem — ficam como limitação
-// conhecida desta versão. Quando precisarmos resolver maps do cache,
-// estendemos para abrir e ler o `DocumentHeader` interno.
+// Duas estratégias, em ordem de preferência:
+//
+// 1. **Por cache handle do replay** — mais preciso e instantâneo.
+//    `m_cacheHandles` no header de cada `.SC2Replay` lista exatamente
+//    quais arquivos `.s2ma` foram usados, com SHA-256 hex. O Battle.net
+//    armazena cada um em `Cache\<hash[0..2]>\<hash[2..4]>\<hash>.s2ma`,
+//    então um cache_handle vira um caminho exato sem scan algum.
+//    Cobre 100% dos mapas de ladder.
+//
+// 2. **Por título do mapa, matching por stem do filename** — fallback
+//    para mapas instalados em `Documents\StarCraft II\Maps` cujo
+//    filename é o título humano (ex.: `Pylon Pasture LE.SC2Map`).
+//    Útil para mapas custom ou de testes.
 
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// Lista os caminhos padrão onde o StarCraft II guarda mapas no Windows,
-/// filtrando os que existem no sistema atual. A ordem reflete prioridade:
-/// instalações oficiais primeiro.
-///
-/// **Battle.net Cache não está aqui** propositalmente: contém milhares de
-/// `.s2ma` cujo filename é hash hexadecimal, então o matching por stem
-/// (estratégia da v1) nunca casa com eles. Varrê-lo só queima ~segundos
-/// no thread da UI sem ganho. Será adicionado quando o locator suportar
-/// matching por conteúdo (lendo `DocumentHeader` interno).
+/// Lista os caminhos padrão de pastas de Maps **instaladas** do
+/// StarCraft II no Windows, filtrando as que existem no sistema atual.
+/// É o universo do fallback por título (`resolve_map_file_default`),
+/// não cobre o Battle.net Cache — esse é resolvido por cache handle
+/// (ver [`resolve_from_cache_handles`]).
 pub fn default_search_paths() -> Vec<PathBuf> {
     [
         r"C:\Program Files\StarCraft II\Maps",
@@ -31,6 +34,101 @@ pub fn default_search_paths() -> Vec<PathBuf> {
     .map(PathBuf::from)
     .filter(|p| p.is_dir())
     .collect()
+}
+
+/// Roots do Battle.net Cache no Windows. O cliente Battle.net guarda os
+/// `.s2ma` baixados em `Cache\<XX>\<YY>\<hash>.s2ma`. Há duas localizações
+/// observadas na prática (system-wide e per-user) — verificamos ambas.
+pub fn battlenet_cache_roots() -> Vec<PathBuf> {
+    let mut out = vec![PathBuf::from(
+        r"C:\ProgramData\Blizzard Entertainment\Battle.net\Cache",
+    )];
+    if let Some(local) = dirs::data_local_dir() {
+        out.push(local.join("Battle.net").join("Cache"));
+    }
+    out.into_iter().filter(|p| p.is_dir()).collect()
+}
+
+/// Resolve cache handles de replay para os caminhos dos `.s2ma`
+/// correspondentes no Battle.net Cache que existem no disco.
+///
+/// **Devolve uma lista**, não um único path: o `m_cacheHandles` de um
+/// replay tipicamente contém o mapa real **e** vários stubs de
+/// dependência (mods como `Core.SC2Mod`, `Liberty.SC2Mod`, etc) — todos
+/// como `.s2ma`. Os stubs de mod não são MPQs, são arquivos texto tipo
+/// `"Standard Data: Core.SC2Mod"`. O caller (`load_for_replay`) abre
+/// cada um e fica com o primeiro que for um MPQ válido com Minimap.tga.
+///
+/// Esta é a forma preferida de resolver mapas de ladder: é exata
+/// (hash do replay → filename direto) e instantânea (sem scan).
+pub fn resolve_from_cache_handles(handles: &[String]) -> Vec<PathBuf> {
+    let roots = battlenet_cache_roots();
+    if roots.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for handle in handles {
+        let Some((ext, hash)) = parse_cache_handle(handle) else {
+            continue;
+        };
+        if ext != "s2ma" {
+            continue;
+        }
+        for root in &roots {
+            let path = cache_handle_to_path(root, &hash);
+            if path.is_file() {
+                out.push(path);
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Faz o parsing do cache handle hex de 80 chars do replay (formato
+/// `s2protocol::Details::cache_handles`) extraindo extensão (4 bytes
+/// ASCII como hex) e hash (64 chars hex de SHA-256). Region/delimiter
+/// são ignorados — o filename do cache só usa o hash.
+fn parse_cache_handle(handle: &str) -> Option<(String, String)> {
+    // Layout do hex: 8(ext) + 4(delim "0000") + 4(region ASCII) + 64(hash) = 80
+    if handle.len() != 80 {
+        return None;
+    }
+    let ext = decode_hex_ascii(&handle[0..8])?;
+    let hash = handle[16..].to_ascii_lowercase();
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some((ext, hash))
+}
+
+/// Converte uma string de chars hex pares em bytes ASCII (e.g. `"73326d61"`
+/// → `"s2ma"`). Para nossa utilidade — extrair a extensão de um cache
+/// handle — basta isso. Devolve `None` se a string não for hex válida ou
+/// se algum byte não for ASCII imprimível.
+fn decode_hex_ascii(hex: &str) -> Option<String> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = String::with_capacity(hex.len() / 2);
+    for chunk in hex.as_bytes().chunks_exact(2) {
+        let s = std::str::from_utf8(chunk).ok()?;
+        let byte = u8::from_str_radix(s, 16).ok()?;
+        if !(0x20..=0x7e).contains(&byte) && byte != 0 {
+            return None;
+        }
+        if byte != 0 {
+            out.push(byte as char);
+        }
+    }
+    Some(out)
+}
+
+fn cache_handle_to_path(root: &Path, hash: &str) -> PathBuf {
+    // O Battle.net Cache shardiza por 2/2 chars do hash.
+    root.join(&hash[0..2])
+        .join(&hash[2..4])
+        .join(format!("{hash}.s2ma"))
 }
 
 /// Resolve um título de mapa (ex.: vindo de `ReplayTimeline.map`) para o
@@ -192,5 +290,59 @@ mod tests {
         File::create(dir.join("Foo.SC2Map")).unwrap();
         assert!(resolve_map_file("", &[dir.clone()]).is_none());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_real_cache_handle() {
+        // Cache handle real montado: ext "s2ma" (73326d61) + delim "0000" +
+        // region "EU" (4555) + hash de 64 chars (zeros pra simplicidade).
+        let handle = format!(
+            "{ext}{delim}{region}{hash}",
+            ext = "73326d61",
+            delim = "0000",
+            region = "4555",
+            hash = "abcdef0123456789".repeat(4),
+        );
+        assert_eq!(handle.len(), 80);
+        let (ext, hash) = parse_cache_handle(&handle).expect("parse");
+        assert_eq!(ext, "s2ma");
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn rejects_handle_wrong_length() {
+        assert!(parse_cache_handle("abc").is_none());
+        assert!(parse_cache_handle(&"a".repeat(79)).is_none());
+        assert!(parse_cache_handle(&"a".repeat(81)).is_none());
+    }
+
+    #[test]
+    fn rejects_handle_with_non_hex_hash() {
+        let handle = format!("73326d6100004555{}", "z".repeat(64));
+        assert!(parse_cache_handle(&handle).is_none());
+    }
+
+    #[test]
+    fn cache_handle_to_path_shards_correctly() {
+        let root = PathBuf::from(r"C:\Cache");
+        let hash = "abcdef0123456789".repeat(4);
+        let path = cache_handle_to_path(&root, &hash);
+        assert_eq!(
+            path,
+            root.join("ab").join("cd").join(format!("{hash}.s2ma"))
+        );
+    }
+
+    #[test]
+    fn decode_hex_ascii_works() {
+        // "s2ma" em hex
+        assert_eq!(decode_hex_ascii("73326d61").as_deref(), Some("s2ma"));
+        // Bytes nulos são ignorados (formato region "EU\0\0" → "EU")
+        assert_eq!(decode_hex_ascii("45550000").as_deref(), Some("EU"));
+        // Hex inválido
+        assert!(decode_hex_ascii("zz").is_none());
+        // Comprimento ímpar
+        assert!(decode_hex_ascii("733").is_none());
     }
 }
