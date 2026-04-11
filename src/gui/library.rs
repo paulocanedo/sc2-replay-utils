@@ -248,7 +248,7 @@ impl ReplayLibrary {
 fn parse_meta(path: &Path) -> ParseOutcome {
     // max_time=1 evita processar a maior parte dos eventos. Só precisamos
     // dos metadados (map, datetime, game_loops, jogadores).
-    let data = match parse_replay(path, 1, false) {
+    let data = match parse_replay(path, 1) {
         Ok(d) => d,
         Err(e) => return ParseOutcome::Failed(e),
     };

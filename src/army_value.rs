@@ -1,6 +1,4 @@
-use std::path::Path;
-
-use crate::replay::parse_replay;
+use crate::replay::ReplayTimeline;
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
 
@@ -44,9 +42,7 @@ pub struct ArmyValueResult {
 
 // ── Extração ──────────────────────────────────────────────────────────────────
 
-pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValueResult, String> {
-    let data = parse_replay(path, max_time_seconds, false)?;
-
+pub fn extract_army_value(data: &ReplayTimeline) -> Result<ArmyValueResult, String> {
     let players = data
         .players
         .iter()
@@ -78,7 +74,7 @@ pub fn extract_army_value(path: &Path, max_time_seconds: u32) -> Result<ArmyValu
             let mut upg_idx = 0;
 
             let snapshots = player
-                .stats_snapshots
+                .stats
                 .iter()
                 .map(|s| {
                     // Avança upgrades até o game_loop atual

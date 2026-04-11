@@ -4,7 +4,7 @@
 //
 // A cor do nome de cada jogador no chat segue a convenção in-game do
 // SC2: player1 = vermelho, player2 = azul. O lookup é feito a partir
-// do índice do jogador em `loaded.raw.players`.
+// do índice do jogador em `loaded.timeline.players`.
 
 use std::collections::HashMap;
 
@@ -32,7 +32,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     // (P1 vermelho / P2 azul) de cada mensagem. Comparação
     // case-insensitive já que replays expõem o nome como string bruta.
     let name_to_idx: HashMap<String, usize> = loaded
-        .raw
+        .timeline
         .players
         .iter()
         .enumerate()

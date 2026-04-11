@@ -81,8 +81,8 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
         // Card 2: supply blocks
         card(&mut cols[1], "Supply Blocks", |ui| {
-            let lps = loaded.raw.loops_per_second.max(0.0001);
-            for (idx, p) in loaded.raw.players.iter().enumerate() {
+            let lps = loaded.timeline.loops_per_second.max(0.0001);
+            for (idx, p) in loaded.timeline.players.iter().enumerate() {
                 let blocks = loaded
                     .supply_blocks_per_player
                     .get(idx)
@@ -121,7 +121,7 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
         // Card 4: upgrades
         card(&mut cols[3], "Upgrades", |ui| {
-            for (idx, p) in loaded.raw.players.iter().enumerate() {
+            for (idx, p) in loaded.timeline.players.iter().enumerate() {
                 player_line(
                     ui,
                     &p.name,

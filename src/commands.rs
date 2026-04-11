@@ -3,20 +3,31 @@ use std::path::PathBuf;
 use std::process;
 
 use crate::all_image::write_all_png;
-use crate::army_value::{extract_army_value, to_army_value_csv};
+use crate::army_value::{extract_army_value, to_army_value_csv, ArmyValueResult};
 use crate::army_value_image::write_army_value_png;
-use crate::build_order::{extract_build_order, to_fixed_csv};
+use crate::build_order::{extract_build_order, to_fixed_csv, BuildOrderResult};
+use crate::build_order_image::write_build_order_png;
 use crate::chat::{extract_chat, to_chat_txt};
 use crate::production_gap::{extract_production_gaps, to_production_gap_csv};
 use crate::production_gap_image::write_production_gap_png;
+use crate::replay::{parse_replay, ReplayTimeline};
 use crate::supply_block::{extract_supply_blocks, to_supply_block_csv};
 use crate::supply_block_image::write_supply_block_png;
-use crate::build_order_image::write_build_order_png;
-use crate::replay::parse_replay;
 use crate::utils::{
     find_latest_replay, list_replays, prepare_out_dir, race_letter, replay_base, resolve_dir,
     resolve_path, sanitize, sc2_default_dir,
 };
+
+/// Carrega o `ReplayTimeline` ou imprime um SKIP e devolve `None`.
+fn load_timeline(replay_path: &std::path::Path, max_time: u32) -> Option<ReplayTimeline> {
+    match parse_replay(replay_path, max_time) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            eprintln!("  SKIP {}: {}", replay_path.display(), e);
+            None
+        }
+    }
+}
 
 pub fn cmd_rename(dir: Option<PathBuf>) {
     let input_dir = resolve_dir(dir);
@@ -31,13 +42,8 @@ pub fn cmd_rename(dir: Option<PathBuf>) {
     println!("Encontrados {} replays", replays.len());
 
     for replay_path in &replays {
-        let data = match parse_replay(replay_path, 0, false) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("  SKIP {}: {}", replay_path.display(), e);
-                continue;
-            }
-        };
+        // Apenas metadata é necessária para o rename: usa o fast-path.
+        let Some(data) = load_timeline(replay_path, 1) else { continue };
 
         let [p1, p2, ..] = data.players.as_slice() else {
             eprintln!("  SKIP {}: menos de 2 jogadores", replay_path.display());
@@ -109,16 +115,8 @@ pub(crate) fn resolve_dump_path(
     resolve_path(None)
 }
 
-fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32, include_location: bool) {
-    let data = match parse_replay(replay_path, max_time, include_location) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("  SKIP {}: {}", replay_path.display(), e);
-            return;
-        }
-    };
-
-    let yaml = match serde_yml::to_string(&data) {
+fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, timeline: &ReplayTimeline) {
+    let yaml = match serde_yml::to_string(timeline) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("  ERRO ao serializar {}: {}", replay_path.display(), e);
@@ -132,10 +130,10 @@ fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32, inclu
             print!("{}", yaml);
         }
         DumpDest::Dir(dir) => {
-            let base = if data.players.len() >= 2 {
-                let p1 = &data.players[0];
-                let p2 = &data.players[1];
-                replay_base(&data.datetime, &data.map, &p1.name, &p1.race, &p2.name, &p2.race)
+            let base = if timeline.players.len() >= 2 {
+                let p1 = &timeline.players[0];
+                let p2 = &timeline.players[1];
+                replay_base(&timeline.datetime, &timeline.map, &p1.name, &p1.race, &p2.name, &p2.race)
             } else {
                 replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
             };
@@ -148,20 +146,13 @@ fn dump_one(replay_path: &std::path::Path, dest: &DumpDest, max_time: u32, inclu
     }
 }
 
-fn all_image_one(replay_path: &std::path::Path, out_dir: &std::path::Path, max_time: u32) {
-    let army_result = match extract_army_value(replay_path, max_time) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("  SKIP imagem {}: {}", replay_path.display(), e); return; }
-    };
-    let bo_result = match extract_build_order(replay_path, max_time) {
-        Ok(r) => r,
-        Err(e) => { eprintln!("  SKIP imagem {}: {}", replay_path.display(), e); return; }
-    };
-    let replay_data = match parse_replay(replay_path, max_time, false) {
-        Ok(d) => d,
-        Err(e) => { eprintln!("  SKIP imagem {}: {}", replay_path.display(), e); return; }
-    };
-
+fn all_image_one(
+    replay_path: &std::path::Path,
+    out_dir: &std::path::Path,
+    timeline: &ReplayTimeline,
+    army_result: &ArmyValueResult,
+    bo_result: &BuildOrderResult,
+) {
     let [army_p1, army_p2, ..] = army_result.players.as_slice() else {
         eprintln!("  SKIP imagem {}: menos de 2 jogadores", replay_path.display());
         return;
@@ -171,18 +162,27 @@ fn all_image_one(replay_path: &std::path::Path, out_dir: &std::path::Path, max_t
         return;
     };
 
-    let effective_end = if max_time == 0 {
-        replay_data.game_loops
+    let max_loops = if timeline.max_time_seconds == 0 {
+        0
     } else {
-        replay_data.game_loops.min((max_time as f64 * replay_data.loops_per_second).round() as u32)
+        (timeline.max_time_seconds as f64 * timeline.loops_per_second).round() as u32
+    };
+    let effective_end = if max_loops == 0 {
+        timeline.game_loops
+    } else {
+        timeline.game_loops.min(max_loops)
     };
 
-    let sb_p1 = if replay_data.players.len() >= 1 {
-        extract_supply_blocks(&replay_data.players[0].stats_snapshots, effective_end)
-    } else { vec![] };
-    let sb_p2 = if replay_data.players.len() >= 2 {
-        extract_supply_blocks(&replay_data.players[1].stats_snapshots, effective_end)
-    } else { vec![] };
+    let sb_p1 = if !timeline.players.is_empty() {
+        extract_supply_blocks(&timeline.players[0], effective_end)
+    } else {
+        vec![]
+    };
+    let sb_p2 = if timeline.players.len() >= 2 {
+        extract_supply_blocks(&timeline.players[1], effective_end)
+    } else {
+        vec![]
+    };
 
     let base = replay_base(
         &army_result.datetime, &army_result.map_name,
@@ -210,12 +210,34 @@ pub fn cmd_all(
     output: Option<PathBuf>,
     stdout: bool,
     max_time: u32,
-    include_location: bool,
     latest: bool,
     sc2_replay_dir: Option<PathBuf>,
     image: bool,
 ) {
     let path = resolve_dump_path(path, latest, sc2_replay_dir);
+
+    let process_one =
+        |replay_path: &std::path::Path, dest: &DumpDest, out_dir: &std::path::Path| {
+            let Some(timeline) = load_timeline(replay_path, max_time) else { return };
+            dump_one(replay_path, dest, &timeline);
+            if image {
+                let army_result = match extract_army_value(&timeline) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("  SKIP imagem {}: {}", replay_path.display(), e);
+                        return;
+                    }
+                };
+                let bo_result = match extract_build_order(&timeline) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("  SKIP imagem {}: {}", replay_path.display(), e);
+                        return;
+                    }
+                };
+                all_image_one(replay_path, out_dir, &timeline, &army_result, &bo_result);
+            }
+        };
 
     if path.is_file() {
         let dest = if stdout {
@@ -224,11 +246,8 @@ pub fn cmd_all(
             let dir = output.unwrap_or_else(|| PathBuf::from("."));
             DumpDest::Dir(dir)
         };
-        dump_one(&path, &dest, max_time, include_location);
-        if image {
-            let out_dir = match &dest { DumpDest::Dir(d) => d.clone(), DumpDest::Stdout => PathBuf::from(".") };
-            all_image_one(&path, &out_dir, max_time);
-        }
+        let out_dir = match &dest { DumpDest::Dir(d) => d.clone(), DumpDest::Stdout => PathBuf::from(".") };
+        process_one(&path, &dest, &out_dir);
     } else {
         let replays = list_replays(&path);
         if replays.is_empty() {
@@ -247,10 +266,7 @@ pub fn cmd_all(
 
         let out_dir = match &dest { DumpDest::Dir(d) => d.clone(), DumpDest::Stdout => PathBuf::from(".") };
         for replay_path in &replays {
-            dump_one(replay_path, &dest, max_time, include_location);
-            if image {
-                all_image_one(replay_path, &out_dir, max_time);
-            }
+            process_one(replay_path, &dest, &out_dir);
         }
     }
 
@@ -263,7 +279,8 @@ fn build_order_one(
     max_time: u32,
     image: bool,
 ) {
-    let result = match extract_build_order(replay_path, max_time) {
+    let Some(timeline) = load_timeline(replay_path, max_time) else { return };
+    let result = match extract_build_order(&timeline) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -309,29 +326,23 @@ fn supply_block_one(
     max_time: u32,
     image: bool,
 ) {
-    let data = match parse_replay(replay_path, max_time, false) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("  SKIP {}: {}", replay_path.display(), e);
-            return;
-        }
-    };
+    let Some(timeline) = load_timeline(replay_path, max_time) else { return };
 
-    let base = if data.players.len() >= 2 {
-        let p1 = &data.players[0];
-        let p2 = &data.players[1];
-        replay_base(&data.datetime, &data.map, &p1.name, &p1.race, &p2.name, &p2.race)
+    let base = if timeline.players.len() >= 2 {
+        let p1 = &timeline.players[0];
+        let p2 = &timeline.players[1];
+        replay_base(&timeline.datetime, &timeline.map, &p1.name, &p1.race, &p2.name, &p2.race)
     } else {
         replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
     };
 
     let effective_end = if max_time == 0 {
-        data.game_loops
+        timeline.game_loops
     } else {
-        data.game_loops.min((max_time as f64 * data.loops_per_second).round() as u32)
+        timeline.game_loops.min((max_time as f64 * timeline.loops_per_second).round() as u32)
     };
 
-    for (i, player) in data.players.iter().enumerate() {
+    for (i, player) in timeline.players.iter().enumerate() {
         let n = i + 1;
         let player_suffix = if player.name.is_empty() {
             format!("p{}", n)
@@ -339,8 +350,8 @@ fn supply_block_one(
             format!("{}({})", sanitize(&player.name), race_letter(&player.race))
         };
 
-        let entries = extract_supply_blocks(&player.stats_snapshots, effective_end);
-        let csv = to_supply_block_csv(&entries, data.loops_per_second);
+        let entries = extract_supply_blocks(player, effective_end);
+        let csv = to_supply_block_csv(&entries, timeline.loops_per_second);
 
         let out_file = out_dir.join(format!("{}_supply_{}.csv", base, player_suffix));
         match fs::write(&out_file, &csv) {
@@ -350,7 +361,7 @@ fn supply_block_one(
 
         if image {
             let png_file = out_dir.join(format!("{}_supply_{}.png", base, player_suffix));
-            match write_supply_block_png(n, &player.name, &player.race, player.mmr, &entries, effective_end, data.loops_per_second, &png_file) {
+            match write_supply_block_png(n, &player.name, &player.race, player.mmr, &entries, effective_end, timeline.loops_per_second, &png_file) {
                 Ok(_) => println!("  {} -> {}", replay_path.display(), png_file.display()),
                 Err(e) => eprintln!("  ERRO ao gerar PNG {}: {}", png_file.display(), e),
             }
@@ -396,7 +407,8 @@ fn production_gap_one(
     max_time: u32,
     image: bool,
 ) {
-    let result = match extract_production_gaps(replay_path, max_time) {
+    let Some(timeline) = load_timeline(replay_path, max_time) else { return };
+    let result = match extract_production_gaps(&timeline) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -486,7 +498,8 @@ fn army_value_one(
     max_time: u32,
     image: bool,
 ) {
-    let result = match extract_army_value(replay_path, max_time) {
+    let Some(timeline) = load_timeline(replay_path, max_time) else { return };
+    let result = match extract_army_value(&timeline) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -561,15 +574,9 @@ pub fn cmd_army_value(
 }
 
 fn chat_one(replay_path: &std::path::Path, out_dir: &std::path::Path, max_time: u32) {
-    let rd = match parse_replay(replay_path, max_time, false) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("  SKIP {}: {}", replay_path.display(), e);
-            return;
-        }
-    };
+    let Some(timeline) = load_timeline(replay_path, max_time) else { return };
 
-    let result = match extract_chat(replay_path, max_time) {
+    let result = match extract_chat(&timeline) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  SKIP {}: {}", replay_path.display(), e);
@@ -577,10 +584,10 @@ fn chat_one(replay_path: &std::path::Path, out_dir: &std::path::Path, max_time: 
         }
     };
 
-    let (base, p1_label, p2_label) = if rd.players.len() >= 2 {
-        let p1 = &rd.players[0];
-        let p2 = &rd.players[1];
-        let base = replay_base(&rd.datetime, &rd.map, &p1.name, &p1.race, &p2.name, &p2.race);
+    let (base, p1_label, p2_label) = if timeline.players.len() >= 2 {
+        let p1 = &timeline.players[0];
+        let p2 = &timeline.players[1];
+        let base = replay_base(&timeline.datetime, &timeline.map, &p1.name, &p1.race, &p2.name, &p2.race);
         let p1l = format!("{}({})", sanitize(&p1.name), race_letter(&p1.race));
         let p2l = format!("{}({})", sanitize(&p2.name), race_letter(&p2.race));
         (base, p1l, p2l)

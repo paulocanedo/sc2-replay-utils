@@ -1,5 +1,5 @@
 use crate::build_order::format_time;
-use crate::replay::StatsSnapshot;
+use crate::replay::PlayerTimeline;
 
 // ── Structs ───────────────────────────────────────────────────────────────────
 
@@ -11,14 +11,15 @@ pub struct SupplyBlockEntry {
 
 // ── Detecção ──────────────────────────────────────────────────────────────────
 
-/// Detecta períodos de supply block nos snapshots de um jogador.
+/// Detecta períodos de supply block nos stats de um jogador.
 ///
 /// Um supply block ocorre quando `supply_used >= supply_made` e `supply_made < 200`.
 /// `game_loops` é usado para fechar blocos ainda abertos ao fim da sequência.
 pub fn extract_supply_blocks(
-    snapshots: &[StatsSnapshot],
+    player: &PlayerTimeline,
     game_loops: u32,
 ) -> Vec<SupplyBlockEntry> {
+    let snapshots = player.stats.as_slice();
     let mut results = Vec::new();
     let mut in_block = false;
     let mut block_start_loop = 0u32;

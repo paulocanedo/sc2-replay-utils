@@ -190,11 +190,11 @@ impl eframe::App for AppState {
                     ui.label("📼");
                     ui.monospace(loaded.file_name());
                     ui.separator();
-                    ui.label(&loaded.raw.map);
+                    ui.label(&loaded.timeline.map);
                     ui.separator();
-                    ui.label(fmt_time(loaded.raw.game_loops, loaded.raw.loops_per_second));
+                    ui.label(fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second));
                     ui.separator();
-                    ui.small(&loaded.raw.datetime);
+                    ui.small(&loaded.timeline.datetime);
                 } else {
                     ui.label(RichText::new("(nenhum replay carregado)").italics());
                 }
@@ -372,8 +372,8 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
             .inner_margin(egui::Margin::same(10.0))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                let last = loaded.raw.players.len().saturating_sub(1);
-                for (i, p) in loaded.raw.players.iter().enumerate() {
+                let last = loaded.timeline.players.len().saturating_sub(1);
+                for (i, p) in loaded.timeline.players.iter().enumerate() {
                     let is_user = config.is_user(&p.name);
                     player_card(ui, p, i, is_user);
                     if i != last {
@@ -386,14 +386,14 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
         ui.separator();
         ui.heading("Partida");
         ui.add_space(2.0);
-        ui.small(format!("🗺  {}", loaded.raw.map));
-        ui.small(format!("🗓  {}", loaded.raw.datetime));
+        ui.small(format!("🗺  {}", loaded.timeline.map));
+        ui.small(format!("🗓  {}", loaded.timeline.datetime));
         ui.small(format!(
             "⏱  {} ({} loops)",
-            fmt_time(loaded.raw.game_loops, loaded.raw.loops_per_second),
-            loaded.raw.game_loops
+            fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second),
+            loaded.timeline.game_loops
         ));
-        ui.small(format!("⚙  {:.1} loops/s", loaded.raw.loops_per_second));
+        ui.small(format!("⚙  {:.1} loops/s", loaded.timeline.loops_per_second));
     });
 }
 
@@ -403,7 +403,7 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
 /// esverdeado no fill, sem sequestrar a borda colorida do slot.
 fn player_card(
     ui: &mut egui::Ui,
-    player: &crate::replay::PlayerData,
+    player: &crate::replay::PlayerTimeline,
     index: usize,
     is_user: bool,
 ) {

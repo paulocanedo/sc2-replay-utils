@@ -1,9 +1,13 @@
-use std::collections::HashMap;
-use std::path::Path;
+// Extrator de build order — agora é uma camada pura sobre `ReplayTimeline`.
+//
+// Não abre o MPQ nem decodifica eventos: consome `entity_events` e
+// `upgrades` que o parser single-pass já produziu, mapeando cada um
+// para `BuildOrderEntry` na semântica esperada pelos consumers
+// (CSV, GUI, image renderer).
 
-use s2protocol::tracker_events::ReplayTrackerEvent;
-
-use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
+use crate::replay::{
+    EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
+};
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
 
@@ -11,6 +15,10 @@ use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 pub struct BuildOrderEntry {
     pub supply: u8,
     pub game_loop: u32,
+    /// Sequência global vinda do parser, usada como tiebreaker entre
+    /// `entity_events` e `upgrades` no mesmo `game_loop`. Não é
+    /// exposto no CSV.
+    pub seq: u32,
     pub action: String,
     pub count: u32,
     pub is_upgrade: bool,
@@ -33,150 +41,99 @@ pub struct BuildOrderResult {
 
 // ── Extração ──────────────────────────────────────────────────────────────────
 
-/// Extrai a Build Order de cada jogador ativo.
-pub fn extract_build_order(
-    path: &Path,
-    max_time_seconds: u32,
-) -> Result<BuildOrderResult, String> {
-    let path_str = path.to_str().unwrap_or_default();
-
-    let (mpq, file_contents) =
-        s2protocol::read_mpq(path_str).map_err(|e| format!("{:?}", e))?;
-    let details =
-        s2protocol::read_details(path_str, &mpq, &file_contents).map_err(|e| format!("{:?}", e))?;
-    let init_data = s2protocol::read_init_data(path_str, &mpq, &file_contents).ok();
-
-    let active_count = details.player_list.iter().filter(|p| p.observe == 0).count();
-    if active_count < 2 {
-        return Err("menos de 2 jogadores".to_string());
-    }
-
-    let datetime = s2protocol::transform_to_naivetime(details.time_utc, details.time_local_offset)
-        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S").to_string())
-        .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
-    let map_name = details.title.clone();
-    let loops_per_second = game_speed_to_loops_per_second(&details.game_speed);
-
-    // player_id (1-indexado no player_list completo) → índice no vec de jogadores ativos
-    let player_idx: HashMap<u8, usize> = details
-        .player_list
+/// Constrói o `BuildOrderResult` a partir de um `ReplayTimeline` já
+/// parseado. Chama O(eventos), sem I/O.
+pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult, String> {
+    let players = timeline
+        .players
         .iter()
-        .enumerate()
-        .filter(|(_, p)| p.observe == 0)
-        .enumerate()
-        .map(|(out_idx, (in_idx, _))| ((in_idx + 1) as u8, out_idx))
+        .map(|p| PlayerBuildOrder {
+            name: p.name.clone(),
+            race: p.race.clone(),
+            mmr: p.mmr,
+            entries: build_player_entries(p),
+        })
         .collect();
 
-    let tracker_events = s2protocol::read_tracker_events(path_str, &mpq, &file_contents)
-        .map_err(|e| format!("{:?}", e))?;
+    Ok(BuildOrderResult {
+        players,
+        datetime: timeline.datetime.clone(),
+        map_name: timeline.map.clone(),
+        loops_per_second: timeline.loops_per_second,
+    })
+}
 
-    let max_loops = if max_time_seconds == 0 { 0 } else { (max_time_seconds as f64 * loops_per_second).round() as u32 };
+fn build_player_entries(player: &PlayerTimeline) -> Vec<BuildOrderEntry> {
+    let mut raw: Vec<BuildOrderEntry> = Vec::new();
 
-    // supply atual por player_id (atualizado em cada PlayerStats)
-    let mut supply_now: HashMap<u8, u8> = HashMap::new();
-    // entradas brutas por jogador, antes da deduplicação
-    let mut raw: Vec<Vec<BuildOrderEntry>> = (0..active_count).map(|_| Vec::new()).collect();
-
-    let mut game_loop: u32 = 0;
-
-    for ev in tracker_events {
-        game_loop += ev.delta;
-        if max_loops != 0 && game_loop > max_loops {
-            break;
+    // Entidades — só ProductionStarted, filtrado por origem da habilidade.
+    for ev in &player.entity_events {
+        if ev.kind != EntityEventKind::ProductionStarted {
+            continue;
         }
-        if game_loop == 0 {
+        if ev.game_loop == 0 {
+            continue;
+        }
+        let Some(ability) = ev.creator_ability.as_deref() else {
+            // Sem ability associada → spawn inicial / coisa fora de
+            // build order (CC inicial, larvas, etc.).
+            continue;
+        };
+
+        let from_unit_init = ability == UNIT_INIT_MARKER;
+        let from_train = ability.contains("Train");
+        let from_morph = ability.starts_with("MorphTo");
+        if !from_unit_init && !from_train && !from_morph {
             continue;
         }
 
-        match ev.event {
-            ReplayTrackerEvent::PlayerStats(e) => {
-                supply_now.insert(e.player_id, e.stats.food_used as u8);
-            }
+        let supply = player
+            .stats_at(ev.game_loop)
+            .map(|s| s.supply_used as u8)
+            .unwrap_or(0);
 
-            ReplayTrackerEvent::UnitBorn(e) => {
-                let ability = match &e.creator_ability_name {
-                    Some(a) if !a.is_empty() => a,
-                    _ => continue,
-                };
-                // Keep only real training (ability contains "Train") or morphs ("MorphTo*")
-                if !ability.contains("Train") && !ability.starts_with("MorphTo") {
-                    continue;
-                }
-                let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
-                let supply = *supply_now.get(&e.control_player_id).unwrap_or(&0);
-                // MorphTo pode produzir estruturas (ex: OrbitalCommand) ou unidades (ex: Hellbat)
-                let is_structure = ability.starts_with("MorphTo") && is_structure_name(&e.unit_type_name);
-                raw[idx].push(BuildOrderEntry {
-                    supply,
-                    game_loop,
-                    action: e.unit_type_name,
-                    count: 1,
-                    is_upgrade: false,
-                    is_structure,
-                });
-            }
+        // is_structure: UnitInit sempre cria estrutura; morphs criam
+        // estrutura quando o tipo destino é uma estrutura. Trains nunca
+        // criam estrutura.
+        let is_structure = from_unit_init
+            || (from_morph && matches!(ev.category, EntityCategory::Structure));
 
-            ReplayTrackerEvent::UnitInit(e) => {
-                // Exclude cosmetics and tactical placements, not build order
-                if e.unit_type_name.contains("Tumor") || e.unit_type_name.contains("Spray") {
-                    continue;
-                }
-                let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
-                let supply = *supply_now.get(&e.control_player_id).unwrap_or(&0);
-                // UnitInit é sempre uma construção sendo iniciada
-                raw[idx].push(BuildOrderEntry {
-                    supply,
-                    game_loop,
-                    action: e.unit_type_name,
-                    count: 1,
-                    is_upgrade: false,
-                    is_structure: true,
-                });
-            }
-
-            ReplayTrackerEvent::Upgrade(e) => {
-                if e.upgrade_type_name.contains("Spray") {
-                    continue;
-                }
-                let Some(&idx) = player_idx.get(&e.player_id) else { continue };
-                let supply = *supply_now.get(&e.player_id).unwrap_or(&0);
-                raw[idx].push(BuildOrderEntry {
-                    supply,
-                    game_loop,
-                    action: e.upgrade_type_name,
-                    count: 1,
-                    is_upgrade: true,
-                    is_structure: false,
-                });
-            }
-
-            _ => {}
-        }
+        raw.push(BuildOrderEntry {
+            supply,
+            game_loop: ev.game_loop,
+            seq: ev.seq,
+            action: ev.entity_type.clone(),
+            count: 1,
+            is_upgrade: false,
+            is_structure,
+        });
     }
 
-    let player_meta: Vec<(String, String, Option<i32>)> = details
-        .player_list
-        .iter()
-        .filter(|p| p.observe == 0)
-        .map(|p| {
-            let (_, name) = extract_clan_and_name(&p.name);
-            let mmr = init_data.as_ref()
-                .and_then(|id| find_mmr_for_slot(id, p.working_set_slot_id));
-            (name, p.race.clone(), mmr)
-        })
-        .collect();
+    // Upgrades — Sprays já filtrados pelo parser.
+    for u in &player.upgrades {
+        if u.game_loop == 0 {
+            continue;
+        }
+        let supply = player
+            .stats_at(u.game_loop)
+            .map(|s| s.supply_used as u8)
+            .unwrap_or(0);
+        raw.push(BuildOrderEntry {
+            supply,
+            game_loop: u.game_loop,
+            seq: u.seq,
+            action: u.name.clone(),
+            count: 1,
+            is_upgrade: true,
+            is_structure: false,
+        });
+    }
 
-    let players = raw
-        .into_iter()
-        .map(deduplicate)
-        .enumerate()
-        .map(|(i, entries)| {
-            let (name, race, mmr) = player_meta.get(i).cloned().unwrap_or_default();
-            PlayerBuildOrder { name, race, mmr, entries }
-        })
-        .collect();
+    // Sort por (game_loop, seq) reconstrói a interleavação original
+    // do tracker entre entidades e upgrades.
+    raw.sort_by_key(|e| (e.game_loop, e.seq));
 
-    Ok(BuildOrderResult { players, datetime, map_name, loops_per_second })
+    deduplicate(raw)
 }
 
 /// Funde entradas consecutivas com a mesma ação em uma única com `count` incrementado.
@@ -271,43 +228,6 @@ fn is_leveled_upgrade(name: &str) -> bool {
     name.ends_with("Level1") || name.ends_with("Level2") || name.ends_with("Level3")
 }
 
-/// Retorna `true` se o nome da unidade corresponde a uma estrutura conhecida.
-/// Usado para classificar eventos `UnitBorn` com habilidade `MorphTo*` que produzem
-/// construções em vez de unidades (ex: OrbitalCommand, Lair).
-fn is_structure_name(name: &str) -> bool {
-    matches!(name,
-        // Terran — base
-        "CommandCenter" | "OrbitalCommand" | "PlanetaryFortress" |
-        "SupplyDepot" | "SupplyDepotLowered" | "Refinery" |
-        // Terran — produção
-        "Barracks" | "Factory" | "Starport" |
-        // Terran — tecnologia
-        "EngineeringBay" | "Armory" | "FusionCore" | "GhostAcademy" |
-        // Terran — defesa
-        "Bunker" | "MissileTurret" | "SensorTower" |
-        // Terran — add-ons
-        "BarracksTechLab" | "FactoryTechLab" | "StarportTechLab" |
-        "BarracksReactor" | "FactoryReactor" | "StarportReactor" |
-        // Zerg — base
-        "Hatchery" | "Lair" | "Hive" | "Extractor" |
-        // Zerg — produção/tecnologia
-        "SpawningPool" | "RoachWarren" | "HydraliskDen" | "BanelingNest" |
-        "EvolutionChamber" | "Spire" | "GreaterSpire" |
-        "InfestationPit" | "UltraliskCavern" | "NydusNetwork" | "NydusCanal" |
-        "LurkerDen" |
-        // Zerg — defesa
-        "SpineCrawler" | "SporeCrawler" |
-        // Protoss — base
-        "Nexus" | "Pylon" | "Assimilator" |
-        // Protoss — produção/tecnologia
-        "Gateway" | "WarpGate" | "Forge" | "CyberneticsCore" |
-        "TwilightCouncil" | "Stargate" | "RoboticsFacility" |
-        "TemplarArchive" | "DarkShrine" | "RoboticsBay" | "FleetBeacon" |
-        // Protoss — defesa
-        "PhotonCannon" | "ShieldBattery"
-    )
-}
-
 // ── Formatação CSV de largura fixada ─────────────────────────────────────────
 
 pub fn format_time(game_loop: u32, lps: f64) -> String {
@@ -351,23 +271,4 @@ pub fn to_fixed_csv(entries: &[BuildOrderEntry], lps: f64) -> String {
         ));
     }
     out
-}
-
-// ── MMR lookup ────────────────────────────────────────────────────────────────
-
-fn find_mmr_for_slot(
-    init: &s2protocol::InitData,
-    working_set_slot_id: Option<u8>,
-) -> Option<i32> {
-    let wsid = working_set_slot_id?;
-    let slot_idx = init
-        .sync_lobby_state
-        .lobby_state
-        .slots
-        .iter()
-        .position(|s| s.working_set_slot_id == Some(wsid))?;
-    init.sync_lobby_state
-        .user_initial_data
-        .get(slot_idx)?
-        .scaled_rating
 }
