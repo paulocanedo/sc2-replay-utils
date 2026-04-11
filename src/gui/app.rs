@@ -1,8 +1,12 @@
 // AppState + impl eframe::App.
 //
-// Layout raiz: menu bar, replay bar, sidebar com info, row de abas
-// e central panel que delega para o módulo da aba ativa. Também
-// gerencia polling do file watcher e toasts efêmeros.
+// A UI alterna entre duas telas mutuamente exclusivas:
+// - `Screen::Library`: a biblioteca de replays ocupa toda a janela.
+// - `Screen::Analysis`: replay bar + tab bar + central panel + painel
+//   direito de jogadores ocupam toda a janela.
+//
+// Em ambas as telas há uma status bar inferior persistente exibindo o
+// replay atualmente carregado, o estado do watcher e os toasts.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -19,11 +23,21 @@ use crate::watcher::ReplayWatcher;
 
 const TOAST_TTL: Duration = Duration::from_secs(4);
 
+/// Tela atualmente ativa. A transição é dirigida por intent do usuário,
+/// não pelo estado de `loaded` — ao voltar para `Library`, o replay
+/// carregado permanece na memória e o usuário pode reentrar na análise.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Screen {
+    Library,
+    Analysis,
+}
+
 pub struct AppState {
     pub config: AppConfig,
     pub loaded: Option<LoadedReplay>,
     pub load_error: Option<String>,
     pub active_tab: Tab,
+    pub screen: Screen,
     pub show_settings: bool,
     pub nickname_input: String,
     pub watcher: Option<ReplayWatcher>,
@@ -42,6 +56,7 @@ impl AppState {
             loaded: None,
             load_error: None,
             active_tab: Tab::Timeline,
+            screen: Screen::Library,
             show_settings: false,
             nickname_input: String::new(),
             watcher: None,
@@ -82,6 +97,9 @@ impl AppState {
             Ok(r) => {
                 self.loaded = Some(r);
                 self.load_error = None;
+                // Carregar com sucesso sempre transiciona para a Tela
+                // Análise — é a única forma de chegar lá.
+                self.screen = Screen::Analysis;
             }
             Err(e) => {
                 self.load_error = Some(format!("Erro ao carregar {}: {}", p.display(), e));
@@ -142,7 +160,13 @@ impl eframe::App for AppState {
             ctx.request_repaint();
         }
 
-        // -------- Menu bar --------
+        // Guarda: Tela Análise exige replay carregado. Se por qualquer
+        // motivo o estado divergir, força fallback para a biblioteca.
+        if self.screen == Screen::Analysis && self.loaded.is_none() {
+            self.screen = Screen::Library;
+        }
+
+        // -------- Menu bar (sempre) --------
         TopBottomPanel::top("menubar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("Arquivo", |ui| {
@@ -165,6 +189,15 @@ impl eframe::App for AppState {
                     }
                 });
                 ui.menu_button("Exibir", |ui| {
+                    if ui.button("Biblioteca").clicked() {
+                        self.screen = Screen::Library;
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(self.loaded.is_some(), egui::Button::new("Análise")).clicked() {
+                        self.screen = Screen::Analysis;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("Configurações…").clicked() {
                         self.show_settings = true;
                         ui.close_menu();
@@ -182,115 +215,120 @@ impl eframe::App for AppState {
             });
         });
 
-        // -------- Replay bar --------
-        TopBottomPanel::top("replay_bar").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if let Some(loaded) = self.loaded.as_ref() {
-                    ui.label("📼");
-                    ui.monospace(loaded.file_name());
-                    ui.separator();
-                    ui.label(&loaded.timeline.map);
-                    ui.separator();
-                    ui.label(fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second));
-                    ui.separator();
-                    ui.small(&loaded.timeline.datetime);
-                } else {
-                    ui.label(RichText::new("(nenhum replay carregado)").italics());
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(w) = self.watcher.as_ref() {
-                        ui.label("👁")
-                            .on_hover_text(format!("Observando: {}", w.watched_dir().display()));
+        // -------- Replay bar + Tab bar (apenas Tela Análise) --------
+        if self.screen == Screen::Analysis {
+            TopBottomPanel::top("replay_bar").show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("📚 Biblioteca")
+                        .on_hover_text("Voltar para a biblioteca de replays")
+                        .clicked()
+                    {
+                        self.screen = Screen::Library;
                     }
-                    if ui.button("Trocar…").clicked() {
-                        if let Some(p) = rfd::FileDialog::new()
-                            .add_filter("SC2 Replay", &["SC2Replay"])
-                            .pick_file()
-                        {
-                            self.load_path(p);
+                    ui.separator();
+                    if let Some(loaded) = self.loaded.as_ref() {
+                        ui.label("📼");
+                        ui.monospace(loaded.file_name());
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Trocar…").clicked() {
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("SC2 Replay", &["SC2Replay"])
+                                .pick_file()
+                            {
+                                self.load_path(p);
+                            }
                         }
+                    });
+                });
+                ui.add_space(4.0);
+            });
+
+            TopBottomPanel::top("tabs").show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    for tab in Tab::ALL {
+                        ui.selectable_value(&mut self.active_tab, tab, tab.label());
                     }
                 });
-            });
-            // Toast
-            if let Some(msg) = self.toast_visible() {
-                let msg = msg.to_string();
                 ui.add_space(2.0);
-                egui::Frame::none()
-                    .fill(Color32::from_rgb(28, 60, 28))
-                    .stroke(egui::Stroke::new(1.0, Color32::LIGHT_GREEN))
-                    .inner_margin(egui::Margin::symmetric(8.0, 4.0))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(msg).color(Color32::LIGHT_GREEN));
-                    });
-            }
-            ui.add_space(4.0);
-        });
-
-        // -------- Sidebar --------
-        // Sempre visível: biblioteca no topo + (se houver replay) info da partida abaixo.
-        let mut library_action = LibraryAction::None;
-        SidePanel::left("sidebar")
-            .resizable(true)
-            .default_width(280.0)
-            .width_range(220.0..=420.0)
-            .show(ctx, |ui| {
-                let current = self.loaded.as_ref().map(|l| l.path.as_path());
-                // Topo: biblioteca ocupa metade superior.
-                let total_h = ui.available_height();
-                let lib_h = if self.loaded.is_some() {
-                    (total_h * 0.55).max(200.0)
-                } else {
-                    total_h
-                };
-                egui::Frame::none().show(ui, |ui| {
-                    ui.set_max_height(lib_h);
-                    ui.set_min_height(lib_h.min(total_h));
-                    library_action = library::show(
-                        ui,
-                        &self.library,
-                        current,
-                        &self.config,
-                        &mut self.library_filter,
-                    );
-                });
-
-                if let Some(loaded) = self.loaded.as_ref() {
-                    ui.separator();
-                    sidebar_content(ui, loaded, &self.config);
-                }
             });
-
-        // Processa ação pedida pela biblioteca.
-        match library_action {
-            LibraryAction::None => {}
-            LibraryAction::Load(p) => self.load_path(p),
-            LibraryAction::Refresh => self.refresh_library(),
-            LibraryAction::PickWorkingDir(p) => {
-                self.config.working_dir = Some(p);
-                if let Err(e) = self.config.save() {
-                    self.set_toast(format!("Erro ao salvar: {e}"));
-                }
-                self.refresh_library();
-            }
         }
 
-        // Mantém repaint enquanto a biblioteca estiver parseando em background.
-        library::keep_alive(ctx, &self.library);
+        // -------- Status bar inferior (sempre visível) --------
+        // Snapshot dos campos antes do closure para evitar conflitos de
+        // borrow (toast_visible empresta self inteiro).
+        let loaded_snapshot = self.loaded.as_ref().map(|l| {
+            (
+                l.file_name(),
+                l.timeline.map.clone(),
+                fmt_time(l.timeline.game_loops, l.timeline.loops_per_second),
+                l.timeline.datetime.clone(),
+            )
+        });
+        let watcher_dir = self
+            .watcher
+            .as_ref()
+            .map(|w| w.watched_dir().to_path_buf());
+        let toast_msg = self.toast_visible().map(|s| s.to_string());
 
-        // -------- Tab bar --------
-        TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.add_space(4.0);
+        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.add_space(2.0);
             ui.horizontal(|ui| {
-                for tab in Tab::ALL {
-                    ui.selectable_value(&mut self.active_tab, tab, tab.label());
+                match &loaded_snapshot {
+                    Some((file, map, time, dt)) => {
+                        ui.label("📼");
+                        ui.monospace(file);
+                        ui.separator();
+                        ui.small(map);
+                        ui.separator();
+                        ui.small(time);
+                        ui.separator();
+                        ui.small(dt);
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("(nenhum replay carregado)")
+                                .italics()
+                                .small(),
+                        );
+                    }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(dir) = &watcher_dir {
+                        ui.label("👁")
+                            .on_hover_text(format!("Observando: {}", dir.display()));
+                    }
+                    if let Some(msg) = toast_msg {
+                        egui::Frame::none()
+                            .fill(Color32::from_rgb(28, 60, 28))
+                            .stroke(egui::Stroke::new(1.0, Color32::LIGHT_GREEN))
+                            .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(msg).color(Color32::LIGHT_GREEN).small());
+                            });
+                    }
+                });
             });
             ui.add_space(2.0);
         });
 
+        // -------- SidePanel direita: Jogadores/Partida (apenas Análise) --------
+        if self.screen == Screen::Analysis && let Some(loaded) = self.loaded.as_ref() {
+            let config = &self.config;
+            SidePanel::right("match_info")
+                .resizable(true)
+                .default_width(280.0)
+                .width_range(240.0..=360.0)
+                .show(ctx, |ui| {
+                    sidebar_content(ui, loaded, config);
+                });
+        }
+
         // -------- Central --------
+        let mut library_action = LibraryAction::None;
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = self.load_error.clone() {
                 egui::Frame::none()
@@ -308,15 +346,45 @@ impl eframe::App for AppState {
                 ui.add_space(8.0);
             }
 
-            match self.loaded.as_ref() {
-                None => empty_state(ui),
-                Some(loaded) => match self.active_tab {
-                    Tab::Timeline => tabs::timeline::show(ui, loaded, &self.config),
-                    Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
-                    Tab::Charts => tabs::charts::show(ui, loaded, &self.config),
+            match self.screen {
+                Screen::Library => {
+                    let current = self.loaded.as_ref().map(|l| l.path.as_path());
+                    library_action = library::show(
+                        ui,
+                        &self.library,
+                        current,
+                        &self.config,
+                        &mut self.library_filter,
+                    );
+                }
+                Screen::Analysis => match self.loaded.as_ref() {
+                    None => empty_state(ui),
+                    Some(loaded) => match self.active_tab {
+                        Tab::Timeline => tabs::timeline::show(ui, loaded, &self.config),
+                        Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
+                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config),
+                    },
                 },
             }
         });
+
+        // Processa ação pedida pela biblioteca (somente válida se a Tela
+        // Biblioteca foi renderizada neste frame).
+        match library_action {
+            LibraryAction::None => {}
+            LibraryAction::Load(p) => self.load_path(p),
+            LibraryAction::Refresh => self.refresh_library(),
+            LibraryAction::PickWorkingDir(p) => {
+                self.config.working_dir = Some(p);
+                if let Err(e) = self.config.save() {
+                    self.set_toast(format!("Erro ao salvar: {e}"));
+                }
+                self.refresh_library();
+            }
+        }
+
+        // Mantém repaint enquanto a biblioteca estiver parseando em background.
+        library::keep_alive(ctx, &self.library);
 
         // -------- Settings window --------
         let prev_effective_dir = self.config.effective_working_dir();
