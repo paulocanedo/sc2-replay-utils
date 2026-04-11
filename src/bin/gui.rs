@@ -1,15 +1,11 @@
 // Entry point do binário GUI (sc2-replay-gui).
 //
-// Este arquivo é apenas plumbing: declara via #[path] os módulos de
-// src/ (compartilhados com o CLI) e os módulos novos em src/gui/,
-// depois chama eframe::run_native. Toda a lógica está em src/gui/.
+// Plumbing puro: declara via #[path] os módulos de domínio em src/ e os
+// módulos exclusivos da GUI em src/gui/, depois chama eframe::run_native.
 
-// Os módulos de src/ são compartilhados com o CLI (src/main.rs) e nem
-// todas as funções são exercidas pelo binário GUI — silenciamos os
-// dead_code warnings do nível do binário inteiro.
 #![allow(dead_code)]
 
-// Módulos de domínio (compartilhados com src/main.rs via #[path]).
+// Módulos de domínio (parser + extractors puros sobre ReplayTimeline).
 #[path = "../replay.rs"]
 mod replay;
 #[path = "../build_order.rs"]
@@ -24,24 +20,6 @@ mod production_gap;
 mod supply_block;
 #[path = "../utils.rs"]
 mod utils;
-
-// Auxiliares puxados pela cadeia de compile dos módulos acima.
-// Incluídos mesmo não sendo usados diretamente pela GUI para evitar
-// quebras de símbolos caso exista alguma dependência cruzada.
-#[path = "../icons.rs"]
-mod icons;
-#[path = "../all_image.rs"]
-mod all_image;
-#[path = "../army_value_image.rs"]
-mod army_value_image;
-#[path = "../build_order_image.rs"]
-mod build_order_image;
-#[path = "../production_gap_image.rs"]
-mod production_gap_image;
-#[path = "../supply_block_image.rs"]
-mod supply_block_image;
-#[path = "../commands.rs"]
-mod commands;
 
 // Módulos exclusivos da GUI.
 #[path = "../gui/build_times.rs"]

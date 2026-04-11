@@ -1,4 +1,3 @@
-use crate::build_order::format_time;
 use crate::replay::PlayerTimeline;
 
 // ── Structs ───────────────────────────────────────────────────────────────────
@@ -58,41 +57,3 @@ pub fn extract_supply_blocks(
     results
 }
 
-// ── Formatação CSV ────────────────────────────────────────────────────────────
-
-/// Serializa os blocos como CSV de largura fixada.
-/// Colunas: start, end, duration, supply.
-pub fn to_supply_block_csv(entries: &[SupplyBlockEntry], lps: f64) -> String {
-    let rows: Vec<(String, String, String, String)> = entries
-        .iter()
-        .map(|e| {
-            let duration = e.end_loop.saturating_sub(e.start_loop);
-            (
-                format_time(e.start_loop, lps),
-                format_time(e.end_loop, lps),
-                format_time(duration, lps),
-                e.supply.to_string(),
-            )
-        })
-        .collect();
-
-    let w_start = rows.iter().map(|(s, _, _, _)| s.len()).max().unwrap_or(0).max("start".len());
-    let w_end = rows.iter().map(|(_, e, _, _)| e.len()).max().unwrap_or(0).max("end".len());
-    let w_dur = rows.iter().map(|(_, _, d, _)| d.len()).max().unwrap_or(0).max("duration".len());
-    let w_sup = rows.iter().map(|(_, _, _, s)| s.len()).max().unwrap_or(0).max("supply".len());
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "{:<w_start$}, {:<w_end$}, {:<w_dur$}, {:<w_sup$}\n",
-        "start", "end", "duration", "supply",
-        w_start = w_start, w_end = w_end, w_dur = w_dur, w_sup = w_sup,
-    ));
-    for (start, end, dur, sup) in &rows {
-        out.push_str(&format!(
-            "{:<w_start$}, {:<w_end$}, {:<w_dur$}, {:<w_sup$}\n",
-            start, end, dur, sup,
-            w_start = w_start, w_end = w_end, w_dur = w_dur, w_sup = w_sup,
-        ));
-    }
-    out
-}

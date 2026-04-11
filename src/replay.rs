@@ -37,9 +37,8 @@ pub const UNIT_INIT_MARKER: &str = "__UnitInit__";
 
 // ── Tipos de saída ───────────────────────────────────────────────────
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone)]
 pub struct StatsSnapshot {
-    #[serde(rename = "loop")]
     pub game_loop: u32,
     pub minerals: i32,
     pub vespene: i32,
@@ -56,12 +55,10 @@ pub struct StatsSnapshot {
     pub vespene_killed_army: i32,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone)]
 pub struct UpgradeEntry {
-    #[serde(rename = "loop")]
     pub game_loop: u32,
     /// Sequência global do evento na stream do tracker — ver `EntityEvent::seq`.
-    #[serde(skip)]
     pub seq: u32,
     pub name: String,
 }
@@ -71,8 +68,7 @@ pub struct UpgradeEntry {
 /// O parser traduz os eventos crus do replay para uma destas variantes
 /// — o resto do app só lida com este vocabulário, não com Born/Init/
 /// Done/Died direto do MPQ.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EntityEventKind {
     /// Build/train/warp/morph foi iniciado.
     ProductionStarted,
@@ -87,54 +83,46 @@ pub enum EntityEventKind {
     Died,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EntityCategory {
     Worker,
     Unit,
     Structure,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone)]
 pub struct EntityEvent {
-    #[serde(rename = "loop")]
     pub game_loop: u32,
     /// Sequência global do evento na stream do tracker, atribuída pelo
     /// parser. Permite reconstituir a ordem original entre `entity_events`
     /// e `upgrades` quando os dois ocorrem no mesmo `game_loop` (o
     /// build_order depende dessa interleavação).
-    #[serde(skip)]
     pub seq: u32,
     pub kind: EntityEventKind,
     pub entity_type: String,
     pub category: EntityCategory,
     /// Tag interno do replay — para correlação entre eventos do mesmo
-    /// objeto. Não serializado.
-    #[serde(skip)]
+    /// objeto.
     pub tag: i64,
     pub pos_x: u8,
     pub pos_y: u8,
     /// Habilidade que iniciou a produção. Só populado em
     /// `ProductionStarted`. Usado pelo build_order para distinguir
     /// trains/morphs de spawns iniciais.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub creator_ability: Option<String>,
     /// Quem matou a entidade. None quando o evento é uma transformação
     /// (morph) ou quando o killer é desconhecido.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub killer_player_id: Option<u8>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone)]
 pub struct ChatEntry {
-    #[serde(rename = "loop")]
     pub game_loop: u32,
     pub player_name: String,
     pub recipient: String,
     pub message: String,
 }
 
-#[derive(serde::Serialize)]
 pub struct PlayerTimeline {
     pub name: String,
     pub clan: String,
@@ -149,26 +137,21 @@ pub struct PlayerTimeline {
     /// `entity_type`, um vetor ordenado de
     /// `(game_loop, alive_count_apos_o_evento)`. Construído no
     /// pós-processamento a partir de `entity_events`.
-    #[serde(skip)]
     pub alive_count: HashMap<String, Vec<(u32, i32)>>,
 
     /// Capacidade de produção de workers (CC/Orbital/PF/Nexus). Cada
-    /// par é `(game_loop, capacity_apos_o_evento)`, ordenado.
-    #[serde(skip)]
+    /// par é `(game_loop, delta)`, ordenado.
     pub worker_capacity: Vec<(u32, i32)>,
 
     /// game_loops em que workers (SCV/Probe) nasceram, ordenado.
     /// Usado por `production_gap` para detectar slots ociosos.
-    #[serde(skip)]
     pub worker_births: Vec<u32>,
 
     /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
     /// para queries de scrubbing.
-    #[serde(skip)]
     pub upgrade_cumulative: Vec<(u32, u8, u8)>,
 }
 
-#[derive(serde::Serialize)]
 pub struct ReplayTimeline {
     pub file: String,
     pub map: String,

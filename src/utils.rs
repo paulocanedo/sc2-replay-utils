@@ -1,8 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process;
-
-pub const DEFAULT_DIR_NAME: &str = "sc2replays-pack";
 
 // ── Helpers de tempo ────────────────────────────────────────────────────────
 
@@ -22,17 +19,6 @@ pub fn game_speed_to_loops_per_second(game_speed: &str) -> f64 {
 
 // ── Helpers de string ────────────────────────────────────────────────────────
 
-/// Converte o nome da raça para a letra inicial maiúscula (T/P/Z/R).
-pub fn race_letter(race: &str) -> char {
-    match race.chars().next().unwrap_or('?') {
-        'T' | 't' => 'T',
-        'P' | 'p' => 'P',
-        'Z' | 'z' => 'Z',
-        'R' | 'r' => 'R',
-        other => other,
-    }
-}
-
 /// Separa clan tag e nome limpo de um nome bruto como "&lt;TAG&gt;<sp/>PlayerName".
 /// Retorna `(clan, name)`. Clan é string vazia se não houver tag.
 pub fn extract_clan_and_name(raw: &str) -> (String, String) {
@@ -49,110 +35,13 @@ pub fn extract_clan_and_name(raw: &str) -> (String, String) {
     }
 }
 
-/// Substitui caracteres que não são alfanuméricos, `-` ou `_` por `_`.
-pub fn sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect()
-}
+// ── Filesystem ──────────────────────────────────────────────────────────────
 
-/// Gera o nome-base dos arquivos de saída a partir dos metadados do replay.
-///
-/// Formato: `{YYYYMMDD-HHMM}_{Mapa}_{J1}({R})_vs_{J2}({R})`
-/// Exemplo: `20251218-0644_Solaris_Paulo(T)_vs_Maria(Z)`
-pub fn replay_base(
-    datetime: &str,
-    map: &str,
-    p1_name: &str,
-    p1_race: &str,
-    p2_name: &str,
-    p2_race: &str,
-) -> String {
-    let dt_raw = datetime.replace(['-', ':', 'T'], "");
-    let dt = if dt_raw.len() >= 12 {
-        format!("{}-{}", &dt_raw[..8], &dt_raw[8..12])
-    } else {
-        dt_raw
-    };
-    let p1 = if p1_name.is_empty() { "P1".to_string() } else { sanitize(p1_name) };
-    let p2 = if p2_name.is_empty() { "P2".to_string() } else { sanitize(p2_name) };
-    format!(
-        "{}_{}_{}({})_vs_{}({})",
-        dt, sanitize(map), p1, race_letter(p1_race), p2, race_letter(p2_race)
-    )
-}
-
-// ── Helpers de filesystem ────────────────────────────────────────────────────
-
-/// Resolve um caminho (arquivo ou diretório): usa `opt` se fornecido, senão busca `DEFAULT_DIR_NAME`.
-pub fn resolve_path(opt: Option<PathBuf>) -> PathBuf {
-    if let Some(p) = opt {
-        if !p.exists() {
-            eprintln!("Erro: '{}' não encontrado", p.display());
-            process::exit(1);
-        }
-        return p;
-    }
-    let candidate = Path::new(DEFAULT_DIR_NAME);
-    if candidate.is_dir() {
-        println!("Usando diretório encontrado: {}", candidate.display());
-        return candidate.to_path_buf();
-    }
-    eprintln!(
-        "Nenhum argumento fornecido e '{}' não encontrado no diretório atual.",
-        DEFAULT_DIR_NAME
-    );
-    process::exit(1);
-}
-
-/// Resolve o diretório de entrada: usa `opt` se fornecido, senão busca `DEFAULT_DIR_NAME`.
-pub fn resolve_dir(opt: Option<PathBuf>) -> PathBuf {
-    if let Some(p) = opt {
-        if !p.is_dir() {
-            eprintln!("Erro: '{}' não é um diretório", p.display());
-            process::exit(1);
-        }
-        return p;
-    }
-    let candidate = Path::new(DEFAULT_DIR_NAME);
-    if candidate.is_dir() {
-        println!("Usando diretório encontrado: {}", candidate.display());
-        return candidate.to_path_buf();
-    }
-    eprintln!(
-        "Nenhum argumento fornecido e '{}' não encontrado no diretório atual.",
-        DEFAULT_DIR_NAME
-    );
-    process::exit(1);
-}
-
-/// Lista todos os arquivos `.SC2Replay` em `dir`, ordenados por nome.
-/// Varredura **não recursiva** — só olha para filhos diretos.
-pub fn list_replays(dir: &Path) -> Vec<PathBuf> {
-    let mut replays: Vec<_> = fs::read_dir(dir)
-        .unwrap_or_else(|e| {
-            eprintln!("Erro ao ler diretório '{}': {}", dir.display(), e);
-            process::exit(1);
-        })
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            (path.is_file()
-                && path
-                    .extension()
-                    .map_or(false, |ext| ext.eq_ignore_ascii_case("SC2Replay")))
-            .then_some(path)
-        })
-        .collect();
-    replays.sort();
-    replays
-}
-
-/// Lista todos os arquivos `.SC2Replay` em `dir` **recursivamente**, ordenados
-/// por nome. Usada pela GUI ao apontar para pastas no estilo do SC2, onde os
-/// replays ficam em subpastas tipo `Accounts/<id>/<região>/Replays/Multiplayer`.
-/// Ao contrário da versão flat, esta função retorna um `Vec` vazio em caso de
-/// erro em qualquer subdiretório — não aborta o processo.
-#[allow(dead_code)] // usada apenas pelo binário GUI
+/// Lista todos os arquivos `.SC2Replay` em `base` **recursivamente**, ordenados
+/// por nome. Usada pela biblioteca da GUI ao apontar para pastas no estilo do
+/// SC2, onde os replays ficam em subpastas tipo
+/// `Accounts/<id>/<região>/Replays/Multiplayer`. Retorna `Vec` vazio em caso
+/// de erro em qualquer subdiretório — não aborta o processo.
 pub fn list_replays_recursive(base: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut queue = vec![base.to_path_buf()];
@@ -215,29 +104,4 @@ pub fn find_latest_replay(base: &Path) -> Option<PathBuf> {
     }
 
     latest.map(|(p, _)| p)
-}
-
-/// Garante que `out_dir` existe e está vazio. Cria se necessário, aborta se tiver arquivos.
-pub fn prepare_out_dir(out_dir: &Path) {
-    if out_dir.exists() {
-        let not_empty = fs::read_dir(out_dir)
-            .unwrap_or_else(|e| {
-                eprintln!("Erro ao ler '{}': {}", out_dir.display(), e);
-                process::exit(1);
-            })
-            .next()
-            .is_some();
-        if not_empty {
-            eprintln!(
-                "Erro: diretório '{}' já existe e não está vazio",
-                out_dir.display()
-            );
-            process::exit(1);
-        }
-    } else {
-        fs::create_dir_all(out_dir).unwrap_or_else(|e| {
-            eprintln!("Erro ao criar '{}': {}", out_dir.display(), e);
-            process::exit(1);
-        });
-    }
 }

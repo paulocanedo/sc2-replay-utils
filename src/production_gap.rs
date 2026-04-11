@@ -4,7 +4,6 @@
 // resta o cálculo dos períodos ociosos a partir das séries
 // `worker_capacity` e `worker_births` já prontas.
 
-use crate::build_order::format_time;
 use crate::replay::ReplayTimeline;
 
 // ── Constantes ───────────────────────────────────────────────────────────────
@@ -248,62 +247,3 @@ fn compute_idle_periods(
     (entries, total_idle, efficiency)
 }
 
-// ── Formatação CSV ───────────────────────────────────────────────────────────
-
-pub fn to_production_gap_csv(
-    player: &PlayerProductionGap,
-    lps: f64,
-) -> String {
-    if player.is_zerg {
-        return "[Zerg] Análise de produção de workers não suportada — mecânica de larvas requer implementação futura.\n"
-            .to_string();
-    }
-
-    let entries = &player.entries;
-
-    let rows: Vec<(String, String, String, String, String, String)> = entries
-        .iter()
-        .map(|e| {
-            let duration = e.end_loop.saturating_sub(e.start_loop);
-            (
-                format_time(e.start_loop, lps),
-                format_time(e.end_loop, lps),
-                format_time(duration, lps),
-                e.capacity.to_string(),
-                e.active.to_string(),
-                e.idle_slots.to_string(),
-            )
-        })
-        .collect();
-
-    let w_start = rows.iter().map(|r| r.0.len()).max().unwrap_or(0).max("start".len());
-    let w_end = rows.iter().map(|r| r.1.len()).max().unwrap_or(0).max("end".len());
-    let w_dur = rows.iter().map(|r| r.2.len()).max().unwrap_or(0).max("duration".len());
-    let w_cap = rows.iter().map(|r| r.3.len()).max().unwrap_or(0).max("capacity".len());
-    let w_act = rows.iter().map(|r| r.4.len()).max().unwrap_or(0).max("active".len());
-    let w_idle = rows.iter().map(|r| r.5.len()).max().unwrap_or(0).max("idle_slots".len());
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "{:<w_start$}, {:<w_end$}, {:<w_dur$}, {:<w_cap$}, {:<w_act$}, {:<w_idle$}\n",
-        "start", "end", "duration", "capacity", "active", "idle_slots",
-        w_start = w_start, w_end = w_end, w_dur = w_dur,
-        w_cap = w_cap, w_act = w_act, w_idle = w_idle,
-    ));
-    for (start, end, dur, cap, act, idle) in &rows {
-        out.push_str(&format!(
-            "{:<w_start$}, {:<w_end$}, {:<w_dur$}, {:<w_cap$}, {:<w_act$}, {:<w_idle$}\n",
-            start, end, dur, cap, act, idle,
-            w_start = w_start, w_end = w_end, w_dur = w_dur,
-            w_cap = w_cap, w_act = w_act, w_idle = w_idle,
-        ));
-    }
-
-    out.push_str(&format!(
-        "\nTotal idle: {} | Avg efficiency: {:.1}%\n",
-        format_time(player.total_idle_loops, lps),
-        player.efficiency_pct,
-    ));
-
-    out
-}

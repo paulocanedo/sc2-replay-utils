@@ -21,30 +21,3 @@ pub fn extract_chat(timeline: &ReplayTimeline) -> Result<ChatResult, String> {
         entries: timeline.chat.clone(),
     })
 }
-
-pub fn to_chat_txt(result: &ChatResult, player_names: (&str, &str)) -> String {
-    let mut lines: Vec<String> = Vec::new();
-
-    let date = &result.datetime[..10]; // "YYYY-MM-DD"
-    lines.push(format!(
-        "# Chat – {} {} – {} vs {}",
-        date, result.map_name, player_names.0, player_names.1
-    ));
-    lines.push(String::new());
-
-    if result.entries.is_empty() {
-        lines.push("(sem mensagens de chat)".to_string());
-    } else {
-        for entry in &result.entries {
-            let secs = (entry.game_loop as f64 / result.loops_per_second).round() as u32;
-            let mm = secs / 60;
-            let ss = secs % 60;
-            lines.push(format!(
-                "[{:02}:{:02}] {} ({}): {}",
-                mm, ss, entry.player_name, entry.recipient, entry.message
-            ));
-        }
-    }
-
-    lines.join("\n") + "\n"
-}

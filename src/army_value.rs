@@ -182,18 +182,3 @@ fn abbreviate_upgrade(name: &str) -> String {
     base
 }
 
-// ── CSV ───────────────────────────────────────────────────────────────────────
-
-pub fn to_army_value_csv(snapshots: &[ArmySnapshot], lps: f64) -> String {
-    let mut out = String::new();
-    out.push_str("time, army_total, army_gas, attack_level, armor_level\n");
-    for s in snapshots {
-        let total_secs = (s.game_loop as f64 / lps).round() as u32;
-        let time = format!("{:02}:{:02}", total_secs / 60, total_secs % 60);
-        out.push_str(&format!(
-            "{}, {}, {}, {}, {}\n",
-            time, s.army_total, s.army_gas, s.attack_level, s.armor_level
-        ));
-    }
-    out
-}

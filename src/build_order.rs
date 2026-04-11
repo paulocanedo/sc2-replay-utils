@@ -228,47 +228,9 @@ fn is_leveled_upgrade(name: &str) -> bool {
     name.ends_with("Level1") || name.ends_with("Level2") || name.ends_with("Level3")
 }
 
-// ── Formatação CSV de largura fixada ─────────────────────────────────────────
+// ── Formatação de tempo ──────────────────────────────────────────────────────
 
 pub fn format_time(game_loop: u32, lps: f64) -> String {
     let total_secs = (game_loop as f64 / lps).round() as u32;
     format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
-}
-
-/// Serializa entradas como CSV de largura fixada.
-/// Colunas: supply, time, action (largura calculada a partir dos dados).
-pub fn to_fixed_csv(entries: &[BuildOrderEntry], lps: f64) -> String {
-    // Constrói as strings de cada coluna para calcular larguras
-    let rows: Vec<(String, String, String)> = entries
-        .iter()
-        .map(|e| {
-            let action = if e.count > 1 {
-                format!("{} x{}", e.action, e.count)
-            } else {
-                e.action.clone()
-            };
-            (e.supply.to_string(), format_time(e.game_loop, lps), action)
-        })
-        .collect();
-
-    let w_supply = rows.iter().map(|(s, _, _)| s.len()).max().unwrap_or(0).max("supply".len());
-    let w_time = rows.iter().map(|(_, t, _)| t.len()).max().unwrap_or(0).max("time".len());
-    let w_action = rows.iter().map(|(_, _, a)| a.len()).max().unwrap_or(0).max("action".len());
-
-    let mut out = String::new();
-    // Cabeçalho
-    out.push_str(&format!(
-        "{:<w_supply$}, {:<w_time$}, {:<w_action$}\n",
-        "supply", "time", "action",
-        w_supply = w_supply, w_time = w_time, w_action = w_action,
-    ));
-    // Dados
-    for (supply, time, action) in &rows {
-        out.push_str(&format!(
-            "{:<w_supply$}, {:<w_time$}, {:<w_action$}\n",
-            supply, time, action,
-            w_supply = w_supply, w_time = w_time, w_action = w_action,
-        ));
-    }
-    out
 }
