@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 // Módulos de domínio (parser + extractors puros sobre ReplayTimeline).
-#[path = "../replay.rs"]
+#[path = "../replay/mod.rs"]
 mod replay;
 #[path = "../build_order.rs"]
 mod build_order;

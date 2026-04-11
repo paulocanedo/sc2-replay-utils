@@ -1,0 +1,144 @@
+// Tipos de saída do parser single-pass.
+//
+// O vocabulário aqui é o que o resto do app vê — os eventos crus do
+// replay (UnitInit/Born/Done/Died/TypeChange) são traduzidos para
+// `EntityEvent { kind: ProductionStarted | ProductionFinished |
+// ProductionCancelled | Died, … }` no `tracker` antes de chegarem
+// nestas estruturas.
+
+use std::collections::HashMap;
+
+/// Sentinel usado em `EntityEvent.creator_ability` para marcar
+/// `ProductionStarted` derivados de `UnitInit` (warp-ins / construções
+/// iniciadas). O build_order usa esse marcador para distinguir
+/// eventos de início de construção dos spawns "instantâneos" via
+/// `UnitBorn`.
+pub const UNIT_INIT_MARKER: &str = "__UnitInit__";
+
+#[derive(Clone)]
+pub struct StatsSnapshot {
+    pub game_loop: u32,
+    pub minerals: i32,
+    pub vespene: i32,
+    pub minerals_rate: i32,
+    pub vespene_rate: i32,
+    pub workers: i32,
+    pub supply_used: i32,
+    pub supply_made: i32,
+    pub army_value_minerals: i32,
+    pub army_value_vespene: i32,
+    pub minerals_lost_army: i32,
+    pub vespene_lost_army: i32,
+    pub minerals_killed_army: i32,
+    pub vespene_killed_army: i32,
+}
+
+#[derive(Clone)]
+pub struct UpgradeEntry {
+    pub game_loop: u32,
+    /// Sequência global do evento na stream do tracker — ver `EntityEvent::seq`.
+    pub seq: u32,
+    pub name: String,
+}
+
+/// Tipo semântico de evento sobre unidades e estruturas.
+///
+/// O parser traduz os eventos crus do replay para uma destas variantes
+/// — o resto do app só lida com este vocabulário, não com Born/Init/
+/// Done/Died direto do MPQ.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EntityEventKind {
+    /// Build/train/warp/morph foi iniciado.
+    ProductionStarted,
+    /// Build/train/warp/morph ficou pronto.
+    ProductionFinished,
+    /// Build iniciado mas nunca terminou (entidade morreu antes da
+    /// conclusão). Não conta como "morte" para o contador de unidades
+    /// vivas.
+    ProductionCancelled,
+    /// Entidade pronta foi destruída ou se transformou em outro tipo
+    /// (morphs emitem `Died` para o tipo antigo).
+    Died,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EntityCategory {
+    Worker,
+    Unit,
+    Structure,
+}
+
+#[derive(Clone)]
+pub struct EntityEvent {
+    pub game_loop: u32,
+    /// Sequência global do evento na stream do tracker, atribuída pelo
+    /// parser. Permite reconstituir a ordem original entre `entity_events`
+    /// e `upgrades` quando os dois ocorrem no mesmo `game_loop` (o
+    /// build_order depende dessa interleavação).
+    pub seq: u32,
+    pub kind: EntityEventKind,
+    pub entity_type: String,
+    pub category: EntityCategory,
+    /// Tag interno do replay — para correlação entre eventos do mesmo
+    /// objeto.
+    pub tag: i64,
+    pub pos_x: u8,
+    pub pos_y: u8,
+    /// Habilidade que iniciou a produção. Só populado em
+    /// `ProductionStarted`. Usado pelo build_order para distinguir
+    /// trains/morphs de spawns iniciais.
+    pub creator_ability: Option<String>,
+    /// Quem matou a entidade. None quando o evento é uma transformação
+    /// (morph) ou quando o killer é desconhecido.
+    pub killer_player_id: Option<u8>,
+}
+
+#[derive(Clone)]
+pub struct ChatEntry {
+    pub game_loop: u32,
+    pub player_name: String,
+    pub recipient: String,
+    pub message: String,
+}
+
+pub struct PlayerTimeline {
+    pub name: String,
+    pub clan: String,
+    pub race: String,
+    pub mmr: Option<i32>,
+
+    pub stats: Vec<StatsSnapshot>,
+    pub upgrades: Vec<UpgradeEntry>,
+    pub entity_events: Vec<EntityEvent>,
+
+    /// Diff cumulativo de "entidades vivas" por tipo. Para cada
+    /// `entity_type`, um vetor ordenado de
+    /// `(game_loop, alive_count_apos_o_evento)`. Construído no
+    /// pós-processamento a partir de `entity_events`.
+    pub alive_count: HashMap<String, Vec<(u32, i32)>>,
+
+    /// Capacidade de produção de workers (CC/Orbital/PF/Nexus). Cada
+    /// par é `(game_loop, delta)`, ordenado.
+    pub worker_capacity: Vec<(u32, i32)>,
+
+    /// game_loops em que workers (SCV/Probe) nasceram, ordenado.
+    /// Usado por `production_gap` para detectar slots ociosos.
+    pub worker_births: Vec<u32>,
+
+    /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
+    /// para queries de scrubbing.
+    pub upgrade_cumulative: Vec<(u32, u8, u8)>,
+}
+
+pub struct ReplayTimeline {
+    pub file: String,
+    pub map: String,
+    pub datetime: String,
+    pub game_loops: u32,
+    pub duration_seconds: u32,
+    pub loops_per_second: f64,
+    /// Limite de coleta de eventos em segundos. 0 indica sem limite.
+    pub max_time_seconds: u32,
+    pub players: Vec<PlayerTimeline>,
+    pub chat: Vec<ChatEntry>,
+}
