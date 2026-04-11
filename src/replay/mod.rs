@@ -451,4 +451,31 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn morph_only_unit_type_change_carries_synthetic_ability() {
+        // OrbitalCommand e WarpGate só emitem `UnitTypeChange` (sem
+        // `UnitBorn` correspondente). O parser precisa injetar um
+        // `creator_ability=Some("MorphTo*")` sintético para que o
+        // build_order não filtre esses eventos por falta de ability.
+        let t = load();
+        for p in &t.players {
+            for ev in &p.entity_events {
+                if ev.kind != EntityEventKind::ProductionStarted {
+                    continue;
+                }
+                if matches!(
+                    ev.entity_type.as_str(),
+                    "OrbitalCommand" | "PlanetaryFortress" | "WarpGate"
+                ) {
+                    let ability = ev.creator_ability.as_deref().unwrap_or("");
+                    assert!(
+                        ability.starts_with("MorphTo"),
+                        "esperava creator_ability=MorphTo* para {} no loop {}, achei {:?}",
+                        ev.entity_type, ev.game_loop, ev.creator_ability,
+                    );
+                }
+            }
+        }
+    }
 }

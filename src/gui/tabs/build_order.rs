@@ -6,16 +6,12 @@
 // P2 = azul (borda do frame). O realce "Você" é secundário: tom
 // esverdeado discreto apenas no título.
 //
-// Ajuste de tempo: o `game_loop` bruto reflete o instante em que a
-// ação **termina** para UnitBorn e Upgrade (e para structures que
-// vêm via MorphTo). Convertemos via `build_time_seconds` para
-// exibir o instante de início, que é o que um observador de build
-// order espera ver.
+// O `entry.game_loop` que recebemos do extrator já é o instante de
+// **início** da ação (start time). A aba só formata e renderiza.
 
 use egui::{Color32, Frame, Grid, Id, RichText, ScrollArea, Stroke, TextEdit, Ui};
 
-use crate::build_order::{classify_entry, BuildOrderEntry, EntryKind, PlayerBuildOrder};
-use crate::build_times::build_time_seconds;
+use crate::build_order::{classify_entry, EntryKind, PlayerBuildOrder};
 use crate::colors::{player_slot_color, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::replay_state::{fmt_time, LoadedReplay};
@@ -199,11 +195,12 @@ fn player_column(
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 Grid::new(format!("bo_grid_{}", index))
-                    .num_columns(4)
+                    .num_columns(5)
                     .spacing([12.0, 2.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        ui.label(RichText::new("tempo").small().strong());
+                        ui.label(RichText::new("início").small().strong());
+                        ui.label(RichText::new("fim").small().strong());
                         ui.label(RichText::new("supply").small().strong());
                         ui.label(RichText::new("tipo").small().strong());
                         ui.label(RichText::new("ação").small().strong());
@@ -225,15 +222,9 @@ fn player_column(
                                 continue;
                             }
 
-                            // Ajuste start-time: subtrai o build time
-                            // da ação do `game_loop` bruto (que é de
-                            // conclusão) para exibir o instante de
-                            // início. Structures de UnitInit já são
-                            // start-time e não precisam de ajuste.
-                            let shown_loop = start_loop(entry, kind, lps);
-
-                            ui.monospace(fmt_time(shown_loop, lps));
-                            ui.monospace(format!("{:>3}", entry.supply));
+                            ui.monospace(fmt_time(entry.game_loop, lps));
+                            ui.monospace(fmt_time(entry.finish_loop, lps));
+                            ui.monospace(format!("{:>3}/{:<3}", entry.supply, entry.supply_made));
 
                             let color = kind_color(kind);
                             ui.label(
@@ -265,39 +256,6 @@ fn player_column(
                     });
             });
     });
-}
-
-/// Converte o `game_loop` bruto de uma entrada para o instante de
-/// início da ação. Para estruturas construídas via `UnitInit`
-/// (detectadas pelo nome não constar na tabela de morphs conhecidas),
-/// o `game_loop` já representa o início e retornamos o valor sem
-/// mudança. Para o resto, subtraímos o build time da tabela.
-fn start_loop(entry: &BuildOrderEntry, kind: EntryKind, lps: f64) -> u32 {
-    // UnitInit de estruturas já é start-time — só ajustamos structures
-    // que vêm de MorphTo (Lair, Hive, OrbitalCommand, WarpGate…).
-    if matches!(kind, EntryKind::Structure) && !is_morph_structure(&entry.action) {
-        return entry.game_loop;
-    }
-    let secs = build_time_seconds(&entry.action);
-    if secs == 0 {
-        return entry.game_loop;
-    }
-    let subtract = (secs as f64 * lps).round() as u32;
-    entry.game_loop.saturating_sub(subtract)
-}
-
-/// Nomes de estruturas que surgem via `MorphTo*` e portanto o
-/// `UnitBorn` correspondente é um evento de conclusão, não início.
-fn is_morph_structure(name: &str) -> bool {
-    matches!(
-        name,
-        "OrbitalCommand"
-            | "PlanetaryFortress"
-            | "Lair"
-            | "Hive"
-            | "WarpGate"
-            | "GreaterSpire"
-    )
 }
 
 /// Cor característica de cada categoria. Escolhidas pra serem

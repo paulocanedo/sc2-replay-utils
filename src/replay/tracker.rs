@@ -32,6 +32,26 @@ fn morph_build_time(unit_type: &str) -> u32 {
     }
 }
 
+/// Tipos que, ao receberem `UnitTypeChange` (sem `UnitBorn` correspondente,
+/// caso típico dos morphs Terran de CC e do `WarpGate`), devem ser tratados
+/// como "build morph": o build_order precisa de um `creator_ability` que
+/// passe pelo seu filtro `MorphTo*`. A lista contém apenas transformações
+/// que custam tempo/recursos e que um jogador iniciou explicitamente —
+/// transformações mecânicas (siege mode, lift/lower, transform) ficam de
+/// fora.
+fn synthetic_morph_ability(new_type: &str) -> Option<String> {
+    matches!(
+        new_type,
+        "OrbitalCommand"
+            | "PlanetaryFortress"
+            | "Lair"
+            | "Hive"
+            | "GreaterSpire"
+            | "WarpGate"
+    )
+    .then(|| format!("MorphTo{new_type}"))
+}
+
 // ── Estado do tag_map ───────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -375,6 +395,7 @@ pub(super) fn process_tracker_events(
                 let old_type = state.entity_type.clone();
                 let Some(&idx) = player_idx.get(&pid) else { continue };
 
+                let synthetic_ability = synthetic_morph_ability(&e.unit_type_name);
                 apply_type_change(
                     &mut players[idx],
                     game_loop,
@@ -384,7 +405,7 @@ pub(super) fn process_tracker_events(
                     &e.unit_type_name,
                     pos_x,
                     pos_y,
-                    None,
+                    synthetic_ability,
                 );
 
                 tag_map.insert(

@@ -5,12 +5,10 @@
 // incompleta — ações desconhecidas retornam 0, o que preserva o
 // tempo de conclusão como fallback seguro.
 //
-// Usado apenas pelo binário GUI, para converter o `game_loop` bruto
-// (que reflete o instante de conclusão nos eventos `UnitBorn` e
-// `Upgrade`) para o instante de início da ação, que é o que
+// Usado pelo `build_order` extractor para converter o `game_loop`
+// bruto (que reflete o instante de conclusão nos eventos `UnitBorn`
+// e `Upgrade`) para o instante de início da ação, que é o que
 // interessa num build order.
-
-#![allow(dead_code)] // consumido apenas pelo binário GUI
 
 /// Tempo de construção/pesquisa de uma ação em segundos. Retorna 0
 /// quando não conhecido, caso em que o consumidor deve manter o
@@ -83,8 +81,58 @@ pub fn build_time_seconds(name: &str) -> u32 {
         "WarpGate" => 7,
         "GreaterSpire" => 71,
 
+        // ── Terran: estruturas (UnitInit) ────────────────────────
+        "CommandCenter" => 71,
+        "SupplyDepot" => 21,
+        "Refinery" => 21,
+        "Barracks" => 46,
+        "EngineeringBay" => 25,
+        "Bunker" => 29,
+        "MissileTurret" => 18,
+        "SensorTower" => 18,
+        "Factory" => 43,
+        "GhostAcademy" => 29,
+        "Starport" => 36,
+        "Armory" => 46,
+        "FusionCore" => 46,
+        "BarracksTechLab" | "FactoryTechLab" | "StarportTechLab" => 18,
+        "BarracksReactor" | "FactoryReactor" | "StarportReactor" => 36,
+
+        // ── Protoss: estruturas (warp-in via UnitInit) ───────────
+        "Nexus" => 71,
+        "Pylon" => 18,
+        "Assimilator" => 21,
+        "Gateway" => 46,
+        "Forge" => 32,
+        "PhotonCannon" => 29,
+        "ShieldBattery" => 29,
+        "CyberneticsCore" => 36,
+        "TwilightCouncil" => 36,
+        "RoboticsFacility" => 46,
+        "Stargate" => 43,
+        "RoboticsBay" => 46,
+        "FleetBeacon" => 43,
+        "TemplarArchive" => 36,
+        "DarkShrine" => 71,
+
+        // ── Zerg: estruturas (Drone morph via UnitInit) ──────────
+        "Hatchery" => 71,
+        "Extractor" => 21,
+        "SpawningPool" => 46,
+        "EvolutionChamber" => 25,
+        "RoachWarren" => 39,
+        "BanelingNest" => 43,
+        "SpineCrawler" => 36,
+        "SporeCrawler" => 21,
+        "HydraliskDen" => 29,
+        "LurkerDen" => 57,
+        "InfestationPit" => 36,
+        "Spire" => 71,
+        "NydusNetwork" => 36,
+        "UltraliskCavern" => 46,
+
         // ── Terran: research / upgrades ──────────────────────────
-        "Stimpack" => 121,
+        "Stimpack" => 100,
         "CombatShield" | "ShieldWall" => 79,
         "PunisherGrenades" | "ConcussiveShells" => 60,
         "HiSecAutoTracking" => 57,
