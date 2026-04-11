@@ -1,15 +1,52 @@
-// Aba Build Order — duas colunas lado a lado, uma por jogador.
-// Cada coluna mostra: cabeçalho com nome/race/MMR + tabela scrollable
-// com mm:ss, supply, ação. A identidade visual de cada jogador segue
-// a convenção in-game do SC2: P1 = vermelho, P2 = azul (borda do
-// frame). O realce "Você" é secundário e discreto.
+// Aba Build Order — legenda + busca no topo, depois duas colunas
+// lado a lado, uma por jogador. Cada coluna mostra: cabeçalho com
+// nome/race/MMR + toggles de filtro (workers, units) + tabela
+// scrollable com mm:ss, supply, tipo, ação. A identidade visual de
+// cada jogador segue a convenção in-game do SC2: P1 = vermelho,
+// P2 = azul (borda do frame). O realce "Você" é secundário: tom
+// esverdeado discreto apenas no título.
+//
+// Ajuste de tempo: o `game_loop` bruto reflete o instante em que a
+// ação **termina** para UnitBorn e Upgrade (e para structures que
+// vêm via MorphTo). Convertemos via `build_time_seconds` para
+// exibir o instante de início, que é o que um observador de build
+// order espera ver.
 
-use egui::{Color32, Frame, Grid, RichText, ScrollArea, Stroke, Ui};
+use egui::{Color32, Frame, Grid, Id, RichText, ScrollArea, Stroke, TextEdit, Ui};
 
-use crate::build_order::PlayerBuildOrder;
+use crate::build_order::{classify_entry, BuildOrderEntry, EntryKind, PlayerBuildOrder};
+use crate::build_times::build_time_seconds;
 use crate::colors::{player_slot_color, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::replay_state::{fmt_time, LoadedReplay};
+
+/// Todas as categorias, na ordem de exibição da legenda / filtros.
+const ALL_KINDS: [EntryKind; 5] = [
+    EntryKind::Worker,
+    EntryKind::Unit,
+    EntryKind::Structure,
+    EntryKind::Research,
+    EntryKind::Upgrade,
+];
+
+/// Estado persistente dos filtros da coluna de um jogador. Guardado
+/// na memória do egui via `ui.data_mut` com um id estável por slot,
+/// então sobrevive entre frames sem precisar de campo no `AppState`.
+/// Ambos os toggles começam ligados (tudo visível).
+#[derive(Clone, Copy, Debug)]
+struct BuildOrderFilter {
+    show_workers: bool,
+    show_units: bool,
+}
+
+impl Default for BuildOrderFilter {
+    fn default() -> Self {
+        Self {
+            show_workers: true,
+            show_units: true,
+        }
+    }
+}
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let Some(bo) = loaded.build_order.as_ref() else {
@@ -28,14 +65,68 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         return;
     }
 
+    // ── Busca global (ação) ──────────────────────────────────────
+    // Uma query só, aplicada a todos os jogadores. Persistida na
+    // memória do egui para sobreviver a recargas de replay.
+    let search_id = Id::new("bo_search_query");
+    let mut search: String = ui
+        .ctx()
+        .data(|d| d.get_temp::<String>(search_id))
+        .unwrap_or_default();
+
+    ui.horizontal(|ui| {
+        ui.label("🔎");
+        let resp = ui.add(
+            TextEdit::singleline(&mut search)
+                .hint_text("buscar ação... (ex: Marine, Stimpack)")
+                .desired_width(260.0),
+        );
+        if !search.is_empty() && ui.small_button("×").on_hover_text("limpar busca").clicked() {
+            search.clear();
+        }
+        if resp.changed() || search.is_empty() {
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(search_id, search.clone()));
+        }
+    });
+
+    // ── Legenda dos tipos ────────────────────────────────────────
+    // Chips coloridos mostrando cada categoria com sua letra e nome.
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("legenda:").small().italics());
+        for kind in ALL_KINDS {
+            legend_chip(ui, kind);
+        }
+    });
+    ui.separator();
+
+    let query_lower = search.to_ascii_lowercase();
+
     let n = players.len().min(2).max(1);
     ui.columns(n, |cols| {
         for (i, player) in players.iter().take(n).enumerate() {
             let ui = &mut cols[i];
             let is_user = config.is_user(&player.name);
-            player_column(ui, player, i, lps, is_user);
+            player_column(ui, player, i, lps, is_user, &query_lower);
         }
     });
+}
+
+/// Pequeno chip colorido exibindo uma categoria na legenda: fundo
+/// com a cor da categoria, letra em negrito e, ao lado, o nome
+/// completo em texto neutro pra leitura.
+fn legend_chip(ui: &mut Ui, kind: EntryKind) {
+    let color = kind_color(kind);
+    ui.label(
+        RichText::new(format!(" {} ", kind.short_letter()))
+            .monospace()
+            .strong()
+            .color(Color32::BLACK)
+            .background_color(color),
+    )
+    .on_hover_text(kind.full_name());
+    ui.small(kind.full_name());
+    ui.add_space(4.0);
 }
 
 fn player_column(
@@ -44,21 +135,25 @@ fn player_column(
     index: usize,
     lps: f64,
     is_user: bool,
+    query_lower: &str,
 ) {
-    // Borda sempre na cor do slot (P1 vermelho, P2 azul); o fill
-    // permanece neutro — o único realce "Você" nesta aba é uma cor
-    // esverdeada discreta aplicada somente ao título (nome do jogador).
     let slot = player_slot_color(index);
     let frame = Frame::group(ui.style())
         .fill(Color32::from_gray(28))
         .stroke(Stroke::new(1.8, slot));
 
+    // Id estável por slot (e não por nome) — evita recriar o estado
+    // de filtro quando um replay diferente é carregado com o mesmo
+    // jogador em outra posição.
+    let filter_id = Id::new(("bo_filter", index));
+    let mut filter: BuildOrderFilter = ui
+        .ctx()
+        .data(|d| d.get_temp::<BuildOrderFilter>(filter_id))
+        .unwrap_or_default();
+
     frame.show(ui, |ui| {
-        // Cabeçalho
+        // Cabeçalho: nome, raça, MMR e toggles de filtro.
         ui.horizontal_wrapped(|ui| {
-            // Título do jogador: branco no caso normal, tom esverdeado
-            // discreto (USER_CHIP_FG) quando é o usuário. Sem chip
-            // adicional nem background — o realce é só na cor do texto.
             let name_color = if is_user {
                 USER_CHIP_FG
             } else {
@@ -72,6 +167,25 @@ fn player_column(
             if let Some(mmr) = player.mmr {
                 ui.small(format!("MMR {mmr}"));
             }
+
+            // Toggles alinhados à direita — não competem com o nome.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let units_resp = ui
+                    .toggle_value(
+                        &mut filter.show_units,
+                        RichText::new("U").monospace().strong(),
+                    )
+                    .on_hover_text("Mostrar unidades de combate (exclui workers)");
+                let workers_resp = ui
+                    .toggle_value(
+                        &mut filter.show_workers,
+                        RichText::new("W").monospace().strong(),
+                    )
+                    .on_hover_text("Mostrar workers (SCV / Probe / Drone / MULE)");
+                if units_resp.changed() || workers_resp.changed() {
+                    ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
+                }
+            });
         });
         ui.separator();
 
@@ -81,10 +195,10 @@ fn player_column(
         }
 
         ScrollArea::vertical()
-            .id_salt(format!("bo_{}", player.name))
+            .id_salt(format!("bo_{}", index))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                Grid::new(format!("bo_grid_{}", player.name))
+                Grid::new(format!("bo_grid_{}", index))
                     .num_columns(4)
                     .spacing([12.0, 2.0])
                     .striped(true)
@@ -95,27 +209,41 @@ fn player_column(
                         ui.label(RichText::new("ação").small().strong());
                         ui.end_row();
 
+                        let mut rendered = 0usize;
                         for entry in &player.entries {
-                            ui.monospace(fmt_time(entry.game_loop, lps));
+                            let kind = classify_entry(entry);
+
+                            // Filtros: categoria (W/U) + busca textual.
+                            match kind {
+                                EntryKind::Worker if !filter.show_workers => continue,
+                                EntryKind::Unit if !filter.show_units => continue,
+                                _ => {}
+                            }
+                            if !query_lower.is_empty()
+                                && !entry.action.to_ascii_lowercase().contains(query_lower)
+                            {
+                                continue;
+                            }
+
+                            // Ajuste start-time: subtrai o build time
+                            // da ação do `game_loop` bruto (que é de
+                            // conclusão) para exibir o instante de
+                            // início. Structures de UnitInit já são
+                            // start-time e não precisam de ajuste.
+                            let shown_loop = start_loop(entry, kind, lps);
+
+                            ui.monospace(fmt_time(shown_loop, lps));
                             ui.monospace(format!("{:>3}", entry.supply));
-                            // Indicador de tipo como letra colorida —
-                            // ASCII puro garante renderização com a
-                            // fonte padrão do egui (os glifos unicode
-                            // ▲/■/● caíam no fallback e apareciam como
-                            // tofu). U=unidade, E=estrutura, P=pesquisa.
-                            let (letter, color) = if entry.is_upgrade {
-                                ("P", Color32::from_rgb(180, 140, 230)) // roxo
-                            } else if entry.is_structure {
-                                ("E", Color32::from_rgb(230, 170, 80)) // laranja
-                            } else {
-                                ("U", Color32::from_gray(180)) // cinza neutro
-                            };
+
+                            let color = kind_color(kind);
                             ui.label(
-                                RichText::new(letter)
+                                RichText::new(kind.short_letter())
                                     .monospace()
                                     .strong()
                                     .color(color),
-                            );
+                            )
+                            .on_hover_text(kind.full_name());
+
                             let action = if entry.count > 1 {
                                 format!("{} x{}", entry.action, entry.count)
                             } else {
@@ -123,10 +251,66 @@ fn player_column(
                             };
                             ui.label(action);
                             ui.end_row();
+                            rendered += 1;
+                        }
+
+                        if rendered == 0 {
+                            ui.label(
+                                RichText::new("(nada corresponde aos filtros)")
+                                    .italics()
+                                    .color(Color32::from_gray(140)),
+                            );
+                            ui.end_row();
                         }
                     });
             });
     });
+}
+
+/// Converte o `game_loop` bruto de uma entrada para o instante de
+/// início da ação. Para estruturas construídas via `UnitInit`
+/// (detectadas pelo nome não constar na tabela de morphs conhecidas),
+/// o `game_loop` já representa o início e retornamos o valor sem
+/// mudança. Para o resto, subtraímos o build time da tabela.
+fn start_loop(entry: &BuildOrderEntry, kind: EntryKind, lps: f64) -> u32 {
+    // UnitInit de estruturas já é start-time — só ajustamos structures
+    // que vêm de MorphTo (Lair, Hive, OrbitalCommand, WarpGate…).
+    if matches!(kind, EntryKind::Structure) && !is_morph_structure(&entry.action) {
+        return entry.game_loop;
+    }
+    let secs = build_time_seconds(&entry.action);
+    if secs == 0 {
+        return entry.game_loop;
+    }
+    let subtract = (secs as f64 * lps).round() as u32;
+    entry.game_loop.saturating_sub(subtract)
+}
+
+/// Nomes de estruturas que surgem via `MorphTo*` e portanto o
+/// `UnitBorn` correspondente é um evento de conclusão, não início.
+fn is_morph_structure(name: &str) -> bool {
+    matches!(
+        name,
+        "OrbitalCommand"
+            | "PlanetaryFortress"
+            | "Lair"
+            | "Hive"
+            | "WarpGate"
+            | "GreaterSpire"
+    )
+}
+
+/// Cor característica de cada categoria. Escolhidas pra serem
+/// distinguíveis mesmo em scan rápido e não colidirem com as cores
+/// de slot (P1 vermelho / P2 azul) usadas na borda do card.
+fn kind_color(kind: EntryKind) -> Color32 {
+    match kind {
+        EntryKind::Worker => Color32::from_rgb(120, 200, 140),   // verde suave
+        EntryKind::Unit => Color32::from_gray(200),              // cinza claro
+        EntryKind::Structure => Color32::from_rgb(230, 170, 80), // laranja
+        EntryKind::Research => Color32::from_rgb(180, 140, 230), // roxo
+        EntryKind::Upgrade => Color32::from_rgb(240, 210, 120),  // amarelo/dourado
+    }
 }
 
 fn race_short(race: &str) -> &str {

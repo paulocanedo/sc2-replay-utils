@@ -44,6 +44,8 @@ mod supply_block_image;
 mod commands;
 
 // Módulos exclusivos da GUI.
+#[path = "../gui/build_times.rs"]
+mod build_times;
 #[path = "../gui/colors.rs"]
 mod colors;
 #[path = "../gui/config.rs"]
