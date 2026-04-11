@@ -12,8 +12,25 @@ use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
 use crate::map_image::{self, MapImage};
 use crate::production_gap::{self, ProductionGapResult};
-use crate::replay::{self, ReplayTimeline};
+use crate::replay::{self, EntityEventKind, ReplayTimeline};
 use crate::supply_block::{self, SupplyBlockEntry};
+
+/// Bounds (em células de tile) do retângulo onde os eventos do replay
+/// posicionam unidades. Derivado das posições observadas em todos os
+/// `entity_events` — é uma aproximação da playable area, já que o
+/// `init_data` reporta `map_size_x/y` da grade completa (que inclui
+/// uma margem unplayable bem maior do que o jogo mostra).
+///
+/// Usado pela aba Timeline pra mapear coordenadas de unidade pra
+/// coordenadas de tela alinhadas com o `Minimap.tga` (que também
+/// representa só a playable area).
+#[derive(Clone, Copy, Debug)]
+pub struct PlayableBounds {
+    pub min_x: u8,
+    pub max_x: u8,
+    pub min_y: u8,
+    pub max_y: u8,
+}
 
 pub struct LoadedReplay {
     pub path: PathBuf,
@@ -29,6 +46,9 @@ pub struct LoadedReplay {
     /// encontrado em nenhum dos diretórios padrão ou quando a extração
     /// falhou — não é fatal, a aba Timeline cai pro fundo cinza.
     pub map_image: Option<MapImage>,
+    /// Bounds da playable area derivados dos eventos do replay. `None`
+    /// se nenhum evento posicionou alguma entidade (replay vazio).
+    pub playable_bounds: Option<PlayableBounds>,
 }
 
 impl LoadedReplay {
@@ -88,6 +108,8 @@ impl LoadedReplay {
             }
         };
 
+        let playable_bounds = compute_playable_bounds(&timeline);
+
         Ok(Self {
             path: path.to_path_buf(),
             timeline,
@@ -97,6 +119,7 @@ impl LoadedReplay {
             production,
             supply_blocks_per_player,
             map_image,
+            playable_bounds,
         })
     }
 
@@ -115,6 +138,46 @@ impl LoadedReplay {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| self.path.display().to_string())
     }
+}
+
+/// Calcula os bounds da playable area a partir das posições observadas
+/// nos `entity_events` de todos os jogadores. Adiciona uma pequena
+/// margem (`MARGIN`) em cada lado pra deixar respiro visual quando as
+/// unidades estão exatamente no canto da área jogável.
+///
+/// `None` quando o replay não tem nenhum evento posicionado (replay
+/// vazio ou parser sem rastreamento).
+fn compute_playable_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> {
+    const MARGIN: u8 = 4;
+    let mut min_x = u8::MAX;
+    let mut max_x = 0u8;
+    let mut min_y = u8::MAX;
+    let mut max_y = 0u8;
+    let mut any = false;
+    for p in &timeline.players {
+        for ev in &p.entity_events {
+            if !matches!(
+                ev.kind,
+                EntityEventKind::ProductionFinished | EntityEventKind::Died
+            ) {
+                continue;
+            }
+            min_x = min_x.min(ev.pos_x);
+            max_x = max_x.max(ev.pos_x);
+            min_y = min_y.min(ev.pos_y);
+            max_y = max_y.max(ev.pos_y);
+            any = true;
+        }
+    }
+    if !any || max_x <= min_x || max_y <= min_y {
+        return None;
+    }
+    Some(PlayableBounds {
+        min_x: min_x.saturating_sub(MARGIN),
+        max_x: max_x.saturating_add(MARGIN),
+        min_y: min_y.saturating_sub(MARGIN),
+        max_y: max_y.saturating_add(MARGIN),
+    })
 }
 
 /// Formata um game_loop como "mm:ss" dado loops_per_second.

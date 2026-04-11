@@ -24,7 +24,7 @@ use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::map_image::MapImage;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
-use crate::replay_state::{fmt_time, LoadedReplay};
+use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 
 pub fn show(
     ui: &mut Ui,
@@ -101,18 +101,22 @@ fn header_insights(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
 // ── Mini-mapa ──────────────────────────────────────────────────────────
 
 fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
-    // Ocupa todo o espaço restante da aba, mas mantém o aspect ratio
-    // do mapa real (cell units do replay; fallback pra textura, depois
-    // 1:1) — letterbox no centro do canvas disponível.
+    // Ocupa todo o espaço restante da aba e preserva o aspect ratio
+    // da imagem do minimap (que representa a playable area). Letterbox
+    // no centro do canvas disponível.
     let avail = ui.available_size();
     let aspect = map_aspect(loaded);
     let rect_size = fit_aspect(avail, aspect);
 
-    // Bounds em coords de tile do replay. Quando o init_data não trouxe
-    // dimensões, caímos em 256 (igual ao range u8 cru) só pra não
-    // dividir por zero — visual fica errado mas o app não trava.
-    let map_w = loaded.timeline.map_size_x.max(1);
-    let map_h = loaded.timeline.map_size_y.max(1);
+    // Bounds da área onde unidades aparecem. Sem playable_bounds (só em
+    // replays vazios) caímos em (0..255) — visual fica meio descalibrado
+    // mas o app não trava.
+    let bounds = loaded.playable_bounds.unwrap_or(PlayableBounds {
+        min_x: 0,
+        max_x: 255,
+        min_y: 0,
+        max_y: 255,
+    });
 
     ui.vertical_centered(|ui| {
         let (rect, _resp) = ui.allocate_exact_size(rect_size, Sense::hover());
@@ -146,27 +150,30 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
             let entities = alive_entities_at(p, game_loop);
 
             for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, map_w, map_h, 4.0, color, false);
+                draw_unit(&painter, rect, e.x, e.y, bounds, 4.0, color, false);
             }
             for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, map_w, map_h, 6.0, color, true);
+                draw_unit(&painter, rect, e.x, e.y, bounds, 6.0, color, true);
             }
         }
     });
 }
 
-/// Aspect ratio (largura/altura) do mapa do replay. Usa as dimensões em
-/// células do `init_data` quando disponíveis; senão tenta o aspect do
-/// próprio TGA da textura; fallback final é 1:1.
+/// Aspect ratio (largura/altura) do retângulo do minimap. Preferimos o
+/// aspect do `Minimap.tga`, que representa a playable area do mapa
+/// (o que queremos no rect). Fallback: aspect dos `playable_bounds`
+/// observados; senão 1:1.
 fn map_aspect(loaded: &LoadedReplay) -> f32 {
-    let mx = loaded.timeline.map_size_x;
-    let my = loaded.timeline.map_size_y;
-    if mx > 0 && my > 0 {
-        return mx as f32 / my as f32;
-    }
     if let Some(img) = loaded.map_image.as_ref() {
         if img.width > 0 && img.height > 0 {
             return img.width as f32 / img.height as f32;
+        }
+    }
+    if let Some(b) = loaded.playable_bounds {
+        let w = b.max_x.saturating_sub(b.min_x) as f32;
+        let h = b.max_y.saturating_sub(b.min_y) as f32;
+        if w > 0.0 && h > 0.0 {
+            return w / h;
         }
     }
     1.0
@@ -200,13 +207,16 @@ fn map_image_to_color_image(img: &MapImage) -> ColorImage {
     )
 }
 
-/// Mapeia coordenadas de mapa (em células de tile, 0..map_w/map_h) para
-/// coordenadas de tela dentro do retângulo do mini-mapa. Inverte Y porque
-/// no jogo Y cresce para cima, mas na tela queremos topo = topo (igual ao
-/// mini-mapa in-game).
-fn to_screen(rect: Rect, x: u8, y: u8, map_w: u8, map_h: u8) -> Pos2 {
-    let nx = x as f32 / map_w as f32;
-    let ny = 1.0 - (y as f32 / map_h as f32);
+/// Mapeia coordenadas de mapa (em células de tile) para coordenadas de
+/// tela dentro do retângulo do mini-mapa, normalizando dentro dos
+/// `playable_bounds` observados (que aproximam a área visível do
+/// `Minimap.tga`). Inverte Y porque no jogo Y cresce para cima, mas na
+/// tela queremos topo = topo.
+fn to_screen(rect: Rect, x: u8, y: u8, b: PlayableBounds) -> Pos2 {
+    let span_x = (b.max_x - b.min_x).max(1) as f32;
+    let span_y = (b.max_y - b.min_y).max(1) as f32;
+    let nx = (x.saturating_sub(b.min_x) as f32 / span_x).clamp(0.0, 1.0);
+    let ny = 1.0 - (y.saturating_sub(b.min_y) as f32 / span_y).clamp(0.0, 1.0);
     pos2(
         rect.left() + nx * rect.width(),
         rect.top() + ny * rect.height(),
@@ -218,13 +228,12 @@ fn draw_unit(
     rect: Rect,
     x: u8,
     y: u8,
-    map_w: u8,
-    map_h: u8,
+    bounds: PlayableBounds,
     side: f32,
     color: Color32,
     structure: bool,
 ) {
-    let center = to_screen(rect, x, y, map_w, map_h);
+    let center = to_screen(rect, x, y, bounds);
     let half = side * 0.5;
     let r = Rect::from_min_max(
         pos2(center.x - half, center.y - half),
