@@ -12,8 +12,8 @@ use super::classify::{
     classify_entity, is_attack_upgrade, is_armor_upgrade, is_worker_producer, upgrade_level,
 };
 use super::types::{
-    EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, StatsSnapshot, UpgradeEntry,
-    UNIT_INIT_MARKER,
+    EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, StatsSnapshot,
+    UnitPositionSample, UpgradeEntry, UNIT_INIT_MARKER,
 };
 
 // ── Constantes de morph ─────────────────────────────────────────────
@@ -82,6 +82,10 @@ pub(super) fn process_tracker_events(
         .map_err(|e| format!("{:?}", e))?;
 
     let mut tag_map: HashMap<i64, TagState> = HashMap::new();
+    // unit_tag_index → (tag completo, índice do jogador). `UnitPositionsEvent`
+    // só carrega o índice (sem `recycle`), então precisamos deste mapa para
+    // recuperar o tag completo e descobrir a quem cada amostra pertence.
+    let mut index_owner: HashMap<u32, (i64, usize)> = HashMap::new();
     let mut cur_attack: Vec<u8> = vec![0; players.len()];
     let mut cur_armor: Vec<u8> = vec![0; players.len()];
 
@@ -158,6 +162,7 @@ pub(super) fn process_tracker_events(
                     );
                     continue;
                 };
+                index_owner.insert(e.unit_tag_index, (tag, idx));
 
                 let category = classify_entity(&e.unit_type_name);
                 let creator_ability = e.creator_ability_name.clone().filter(|s| !s.is_empty());
@@ -287,6 +292,7 @@ pub(super) fn process_tracker_events(
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let category = classify_entity(&e.unit_type_name);
+                index_owner.insert(e.unit_tag_index, (tag, idx));
 
                 push_event(
                     &mut players[idx],
@@ -353,6 +359,7 @@ pub(super) fn process_tracker_events(
 
             ReplayTrackerEvent::UnitDied(e) => {
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
+                index_owner.remove(&e.unit_tag_index);
                 let Some(state) = tag_map.remove(&tag) else { continue };
                 let Some(&idx) = player_idx.get(&state.player_id) else { continue };
                 let category = classify_entity(&state.entity_type);
@@ -418,6 +425,31 @@ pub(super) fn process_tracker_events(
                         lifecycle: Lifecycle::Finished,
                     },
                 );
+            }
+
+            ReplayTrackerEvent::UnitPosition(e) => {
+                // O SC2 emite `UnitPositionsEvent` periodicamente com a
+                // posição atual de várias unidades móveis. Cada item só
+                // carrega o `unit_tag_index` (não o tag completo), então
+                // resolvemos o dono via `index_owner`.
+                //
+                // Escala: `to_unit_positions_vec` já multiplica os
+                // deltas brutos por 4 (passando para "world units" do
+                // SC2). Para voltar à mesma escala de células usada por
+                // `UnitBornEvent.x/y` (`u8`), dividimos por 4 de novo.
+                for up in e.to_unit_positions_vec() {
+                    let Some(&(full_tag, idx)) = index_owner.get(&up.tag) else {
+                        continue;
+                    };
+                    let cx = (up.x / 4).clamp(0, 255) as u8;
+                    let cy = (up.y / 4).clamp(0, 255) as u8;
+                    players[idx].unit_positions.push(UnitPositionSample {
+                        game_loop,
+                        tag: full_tag,
+                        x: cx,
+                        y: cy,
+                    });
+                }
             }
 
             _ => {}

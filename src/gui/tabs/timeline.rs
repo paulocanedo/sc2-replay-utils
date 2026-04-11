@@ -7,11 +7,12 @@
 // mostra os indicadores rápidos do instante (supply, recursos, workers,
 // army value) por jogador.
 //
-// Limitação atual: o parser só guarda `pos_x`/`pos_y` nos eventos de
-// nascimento (ProductionFinished) e morte (Died). Não há rastreamento de
-// movimento — então cada unidade aparece na posição em que nasceu e some
-// quando morre. Quando o parser passar a amostrar posições reais, basta
-// trocar a fonte de dados em `alive_entities_at`; a UI continua a mesma.
+// Posições: cada unidade nasce em `EntityEvent.pos_x/pos_y` e, quando
+// o parser captou amostras de movimento via `UnitPositionsEvent`,
+// `alive_entities_at` sobrescreve com a última posição conhecida em
+// `PlayerTimeline.unit_positions`. Estruturas raramente recebem
+// amostras (o SC2 só amostra unidades móveis/visíveis), então
+// permanecem no ponto de nascimento.
 
 use std::collections::HashMap;
 
@@ -282,6 +283,16 @@ fn alive_entities_at(p: &PlayerTimeline, until_loop: u32) -> Vec<LiveEntity> {
                 alive.remove(&ev.tag);
             }
             EntityEventKind::ProductionStarted | EntityEventKind::ProductionCancelled => {}
+        }
+    }
+    // Sobrescreve a posição de nascimento com a última amostra de
+    // movimento conhecida. Tags que nunca apareceram em
+    // `unit_positions` (ex.: estruturas) ficam no ponto original.
+    let positions = p.last_known_positions(until_loop);
+    for (tag, ent) in alive.iter_mut() {
+        if let Some(&(x, y)) = positions.get(tag) {
+            ent.x = x;
+            ent.y = y;
         }
     }
     alive.into_values().collect()

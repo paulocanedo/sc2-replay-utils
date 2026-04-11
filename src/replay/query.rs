@@ -1,6 +1,8 @@
 // API de scrubbing — consultas O(log n) sobre as timelines já
 // indexadas pelo parser.
 
+use std::collections::HashMap;
+
 use super::types::{PlayerTimeline, ReplayTimeline, StatsSnapshot, UpgradeEntry};
 
 impl ReplayTimeline {
@@ -69,6 +71,42 @@ impl PlayerTimeline {
         } else {
             v[i - 1].1
         }
+    }
+
+    /// Última posição conhecida da unidade `tag` em ou antes de
+    /// `game_loop`. `None` se a unidade nunca foi amostrada nesse
+    /// intervalo (ex.: estrutura ou tag fora do replay).
+    #[allow(dead_code)]
+    pub fn unit_position_at(&self, tag: i64, game_loop: u32) -> Option<(u8, u8)> {
+        // `unit_positions` é ordenado por `game_loop`, mas conter
+        // várias tags entrelaçadas. Walk linear filtrando por tag
+        // — barato porque a Timeline cacheia o snapshot via
+        // `last_known_positions` quando precisa de todas as tags.
+        let mut last: Option<(u8, u8)> = None;
+        for s in &self.unit_positions {
+            if s.game_loop > game_loop {
+                break;
+            }
+            if s.tag == tag {
+                last = Some((s.x, s.y));
+            }
+        }
+        last
+    }
+
+    /// Snapshot `tag → (x, y)` com a última posição conhecida de
+    /// cada unidade em ou antes de `until_loop`. Pensado para
+    /// consumers que precisam reconstruir todas as unidades vivas
+    /// num instante (custo O(n) sobre `unit_positions`).
+    pub fn last_known_positions(&self, until_loop: u32) -> HashMap<i64, (u8, u8)> {
+        let mut out: HashMap<i64, (u8, u8)> = HashMap::new();
+        for s in &self.unit_positions {
+            if s.game_loop > until_loop {
+                break;
+            }
+            out.insert(s.tag, (s.x, s.y));
+        }
+        out
     }
 
     /// Capacidade de produção de workers em `game_loop`.

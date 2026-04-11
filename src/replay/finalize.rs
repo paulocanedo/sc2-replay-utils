@@ -14,6 +14,10 @@ pub(super) fn finalize_indices(players: &mut [PlayerTimeline]) {
         player.entity_events.sort_by_key(|e| e.game_loop);
         player.worker_capacity.sort_by_key(|(l, _)| *l);
         player.worker_births.sort_unstable();
+        // `unit_positions` chega na ordem natural do tracker, então
+        // já está ordenado — mas um sort estável defensivo garante
+        // o invariante esperado pelos consumers (`last_known_positions`).
+        player.unit_positions.sort_by_key(|s| s.game_loop);
 
         // alive_count: ProductionFinished ++; Died --; ignora
         // Started/Cancelled.

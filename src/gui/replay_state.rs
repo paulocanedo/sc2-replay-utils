@@ -168,6 +168,16 @@ fn compute_playable_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> 
             max_y = max_y.max(ev.pos_y);
             any = true;
         }
+        // Inclui também as amostras de movimento — sem isso, unidades
+        // que se afastam da nuvem de spawns podem ser clipadas no
+        // mini-mapa.
+        for s in &p.unit_positions {
+            min_x = min_x.min(s.x);
+            max_x = max_x.max(s.x);
+            min_y = min_y.min(s.y);
+            max_y = max_y.max(s.y);
+            any = true;
+        }
     }
     if !any || max_x <= min_x || max_y <= min_y {
         return None;

@@ -93,6 +93,21 @@ pub struct EntityEvent {
     pub killer_player_id: Option<u8>,
 }
 
+/// Amostra de posição de uma unidade num instante específico, vinda
+/// dos `UnitPositionsEvent` que o tracker emite periodicamente. As
+/// coordenadas estão na mesma escala (células de tile) que
+/// `EntityEvent.pos_x/pos_y`, então um consumer pode trocar uma pela
+/// outra sem conversão.
+#[derive(Clone, Copy)]
+pub struct UnitPositionSample {
+    pub game_loop: u32,
+    /// Tag completo (`unit_tag(index, recycle)`) — casa com o `tag`
+    /// dos `EntityEvent`s do mesmo objeto.
+    pub tag: i64,
+    pub x: u8,
+    pub y: u8,
+}
+
 #[derive(Clone)]
 pub struct ChatEntry {
     pub game_loop: u32,
@@ -110,6 +125,13 @@ pub struct PlayerTimeline {
     pub stats: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,
     pub entity_events: Vec<EntityEvent>,
+
+    /// Amostras periódicas de posição de unidades vivas, vindas dos
+    /// `UnitPositionsEvent` do tracker. Ordenado por `game_loop`. Só
+    /// inclui unidades cujo `unit_tag_index` foi atribuído a este
+    /// jogador via `UnitInit`/`UnitBorn`. Estruturas raramente
+    /// aparecem aqui — o SC2 só amostra unidades móveis/visíveis.
+    pub unit_positions: Vec<UnitPositionSample>,
 
     /// Diff cumulativo de "entidades vivas" por tipo. Para cada
     /// `entity_type`, um vetor ordenado de

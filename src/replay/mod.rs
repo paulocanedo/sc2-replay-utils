@@ -30,12 +30,12 @@ mod types;
 pub use types::{
     ChatEntry, EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
 };
-// Re-exportados para que `EntityEvent`/`StatsSnapshot`/`UpgradeEntry`,
-// que aparecem como campos públicos das structs acima, sejam
-// alcançáveis via `crate::replay::*` quando consumers precisarem
-// nomeá-los explicitamente.
+// Re-exportados para que `EntityEvent`/`StatsSnapshot`/`UpgradeEntry`/
+// `UnitPositionSample`, que aparecem como campos públicos das structs
+// acima, sejam alcançáveis via `crate::replay::*` quando consumers
+// precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
-pub use types::{EntityEvent, StatsSnapshot, UpgradeEntry};
+pub use types::{EntityEvent, StatsSnapshot, UnitPositionSample, UpgradeEntry};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -99,6 +99,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 stats: Vec::new(),
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),
+                unit_positions: Vec::new(),
                 alive_count: HashMap::new(),
                 worker_capacity: Vec::new(),
                 worker_births: Vec::new(),
@@ -466,6 +467,108 @@ mod tests {
                     "entity_events fora de ordem em {}: {} > {}",
                     p.name, w[0].game_loop, w[1].game_loop,
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn unit_positions_collected_and_sorted() {
+        let t = load();
+        // Pelo menos um jogador deve ter recebido amostras de
+        // movimento — o replay de exemplo tem combate suficiente.
+        let total: usize = t.players.iter().map(|p| p.unit_positions.len()).sum();
+        assert!(
+            total > 0,
+            "esperava ao menos uma amostra de UnitPositionsEvent agregada",
+        );
+        // Sort defensivo do finalize: cada player deve estar ordenado.
+        for p in &t.players {
+            for w in p.unit_positions.windows(2) {
+                assert!(
+                    w[0].game_loop <= w[1].game_loop,
+                    "unit_positions fora de ordem em {}: {} > {}",
+                    p.name,
+                    w[0].game_loop,
+                    w[1].game_loop,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unit_positions_in_map_scale() {
+        // Sanity da escala de coordenadas: a divisão por 4 em
+        // `tracker.rs` (ramo `UnitPosition`) deve produzir valores na
+        // mesma faixa que `UnitBornEvent.x/y`. Se a escala estivesse
+        // errada por um fator >1, a maioria das amostras estouraria
+        // o `map_size_x`/`map_size_y`. Tolerância de 2× a dimensão do
+        // mapa para absorver overflow do clamp e qualquer margem
+        // fora da playable area.
+        let t = load();
+        assert!(t.map_size_x > 0 && t.map_size_y > 0);
+        let limit_x = (t.map_size_x as u32).saturating_mul(2);
+        let limit_y = (t.map_size_y as u32).saturating_mul(2);
+        let mut checked = 0usize;
+        for p in &t.players {
+            for s in &p.unit_positions {
+                assert!(
+                    (s.x as u32) <= limit_x && (s.y as u32) <= limit_y,
+                    "amostra fora de escala: ({},{}) > 2×({},{})",
+                    s.x,
+                    s.y,
+                    t.map_size_x,
+                    t.map_size_y,
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "esperava ao menos uma amostra de posição");
+    }
+
+    #[test]
+    fn unit_positions_show_movement() {
+        // Para alguma unidade, a posição muda entre amostras —
+        // garantia de que estamos realmente coletando movimento e
+        // não só repetindo o ponto de nascimento.
+        let t = load();
+        let mut moved = false;
+        'outer: for p in &t.players {
+            let mut by_tag: HashMap<i64, (u8, u8)> = HashMap::new();
+            for s in &p.unit_positions {
+                if let Some(&(px, py)) = by_tag.get(&s.tag) {
+                    if px != s.x || py != s.y {
+                        moved = true;
+                        break 'outer;
+                    }
+                }
+                by_tag.insert(s.tag, (s.x, s.y));
+            }
+        }
+        assert!(
+            moved,
+            "esperava ao menos uma unidade mudando de posição entre amostras",
+        );
+    }
+
+    #[test]
+    fn last_known_positions_query_matches_walk() {
+        let t = load();
+        for p in &t.players {
+            if p.unit_positions.is_empty() {
+                continue;
+            }
+            // No último loop do replay, o snapshot do helper deve
+            // bater com o resultado do walk manual sobre todas as
+            // amostras (uma por tag, a mais recente).
+            let until = t.game_loops;
+            let snap = p.last_known_positions(until);
+            let mut manual: HashMap<i64, (u8, u8)> = HashMap::new();
+            for s in &p.unit_positions {
+                manual.insert(s.tag, (s.x, s.y));
+            }
+            assert_eq!(snap.len(), manual.len());
+            for (tag, pos) in &manual {
+                assert_eq!(snap.get(tag), Some(pos));
             }
         }
     }
