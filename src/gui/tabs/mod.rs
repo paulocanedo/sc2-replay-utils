@@ -1,6 +1,7 @@
 // Macro-abas de conteúdo do app.
 
 pub mod build_order;
+pub mod chat;
 pub mod charts;
 pub mod timeline;
 
@@ -9,6 +10,7 @@ pub enum Tab {
     Timeline,
     BuildOrder,
     Charts,
+    Chat,
 }
 
 impl Tab {
@@ -17,8 +19,9 @@ impl Tab {
             Tab::Timeline => "Timeline",
             Tab::BuildOrder => "Build Order",
             Tab::Charts => "Gráficos",
+            Tab::Chat => "Chat",
         }
     }
 
-    pub const ALL: [Tab; 3] = [Tab::Timeline, Tab::BuildOrder, Tab::Charts];
+    pub const ALL: [Tab; 4] = [Tab::Timeline, Tab::BuildOrder, Tab::Charts, Tab::Chat];
 }

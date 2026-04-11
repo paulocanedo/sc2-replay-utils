@@ -44,6 +44,10 @@ pub struct AppState {
     pub toast: Option<(String, Instant)>,
     pub library: ReplayLibrary,
     pub library_filter: String,
+    /// Segundo selecionado no slider da aba Timeline (mini-mapa).
+    /// Resetado a cada `load_path` para que troca de replay sempre
+    /// comece em t=0.
+    pub timeline_tab_second: u32,
 }
 
 impl AppState {
@@ -63,6 +67,7 @@ impl AppState {
             toast: None,
             library: ReplayLibrary::new(),
             library_filter: String::new(),
+            timeline_tab_second: 0,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -97,6 +102,9 @@ impl AppState {
             Ok(r) => {
                 self.loaded = Some(r);
                 self.load_error = None;
+                // Reset do scrubbing da aba Timeline: replay novo
+                // sempre começa em t=0.
+                self.timeline_tab_second = 0;
                 // Carregar com sucesso sempre transiciona para a Tela
                 // Análise — é a única forma de chegar lá.
                 self.screen = Screen::Analysis;
@@ -360,9 +368,15 @@ impl eframe::App for AppState {
                 Screen::Analysis => match self.loaded.as_ref() {
                     None => empty_state(ui),
                     Some(loaded) => match self.active_tab {
-                        Tab::Timeline => tabs::timeline::show(ui, loaded, &self.config),
+                        Tab::Timeline => tabs::timeline::show(
+                            ui,
+                            loaded,
+                            &self.config,
+                            &mut self.timeline_tab_second,
+                        ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
                         Tab::Charts => tabs::charts::show(ui, loaded, &self.config),
+                        Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                     },
                 },
             }
