@@ -75,6 +75,13 @@ pub fn render_build_order(
         return Err("sem entradas para renderizar".to_string());
     }
 
+    let entries_filtered: Vec<BuildOrderEntry> = entries
+        .iter()
+        .filter(|e| !is_worker(&e.action))
+        .cloned()
+        .collect();
+    let entries = entries_filtered.as_slice();
+
     let font = FontRef::try_from_slice(FONT_BYTES)
         .map_err(|e| format!("fonte inválida: {:?}", e))?;
     let scale = PxScale::from(FONT_SIZE);
@@ -421,6 +428,10 @@ fn assign_slots(xis: &[(usize, i32)]) -> Vec<usize> {
         result.push(slot);
     }
     result
+}
+
+fn is_worker(action: &str) -> bool {
+    matches!(action, "SCV" | "Probe" | "Drone")
 }
 
 fn blit_alpha(dst: &mut RgbaImage, src: &RgbaImage, x: i32, y: i32) {

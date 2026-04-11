@@ -35,13 +35,14 @@ pub fn extract_chat(path: &Path, max_time_seconds: u32) -> Result<ChatResult, St
             .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
 
     // user_id (1-based index in player_list) → display name
+    // user_id em message events é 0-based (índice direto em player_list)
     let user_names: HashMap<i64, String> = details
         .player_list
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let (_, name) = extract_clan_and_name(&p.name);
-            ((i + 1) as i64, name)
+            (i as i64, name)
         })
         .collect();
 

@@ -127,6 +127,7 @@ pub fn resolve_dir(opt: Option<PathBuf>) -> PathBuf {
 }
 
 /// Lista todos os arquivos `.SC2Replay` em `dir`, ordenados por nome.
+/// Varredura **não recursiva** — só olha para filhos diretos.
 pub fn list_replays(dir: &Path) -> Vec<PathBuf> {
     let mut replays: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|e| {
@@ -144,6 +145,36 @@ pub fn list_replays(dir: &Path) -> Vec<PathBuf> {
         .collect();
     replays.sort();
     replays
+}
+
+/// Lista todos os arquivos `.SC2Replay` em `dir` **recursivamente**, ordenados
+/// por nome. Usada pela GUI ao apontar para pastas no estilo do SC2, onde os
+/// replays ficam em subpastas tipo `Accounts/<id>/<região>/Replays/Multiplayer`.
+/// Ao contrário da versão flat, esta função retorna um `Vec` vazio em caso de
+/// erro em qualquer subdiretório — não aborta o processo.
+#[allow(dead_code)] // usada apenas pelo binário GUI
+pub fn list_replays_recursive(base: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut queue = vec![base.to_path_buf()];
+    while let Some(dir) = queue.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                queue.push(path);
+            } else if path
+                .extension()
+                .map_or(false, |ext| ext.eq_ignore_ascii_case("SC2Replay"))
+            {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 // ── Descoberta de replay mais recente ────────────────────────────────────────

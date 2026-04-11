@@ -7,6 +7,8 @@ use crate::army_value::{extract_army_value, to_army_value_csv};
 use crate::army_value_image::write_army_value_png;
 use crate::build_order::{extract_build_order, to_fixed_csv};
 use crate::chat::{extract_chat, to_chat_txt};
+use crate::production_gap::{extract_production_gaps, to_production_gap_csv};
+use crate::production_gap_image::write_production_gap_png;
 use crate::supply_block::{extract_supply_blocks, to_supply_block_csv};
 use crate::supply_block_image::write_supply_block_png;
 use crate::build_order_image::write_build_order_png;
@@ -382,6 +384,96 @@ pub fn cmd_supply_block(
 
         for replay_path in &replays {
             supply_block_one(replay_path, &out_dir, max_time, image);
+        }
+    }
+
+    println!("Concluído.");
+}
+
+fn production_gap_one(
+    replay_path: &std::path::Path,
+    out_dir: &std::path::Path,
+    max_time: u32,
+    image: bool,
+) {
+    let result = match extract_production_gaps(replay_path, max_time) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  SKIP {}: {}", replay_path.display(), e);
+            return;
+        }
+    };
+
+    let base = if result.players.len() >= 2 {
+        let p1 = &result.players[0];
+        let p2 = &result.players[1];
+        replay_base(&result.datetime, &result.map_name, &p1.name, &p1.race, &p2.name, &p2.race)
+    } else {
+        replay_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "replay".to_string())
+    };
+
+    let effective_end = if max_time == 0 {
+        result.game_loops
+    } else {
+        result.game_loops.min((max_time as f64 * result.loops_per_second).round() as u32)
+    };
+
+    for (i, player) in result.players.iter().enumerate() {
+        let n = i + 1;
+        let player_suffix = if player.name.is_empty() {
+            format!("p{}", n)
+        } else {
+            format!("{}({})", sanitize(&player.name), race_letter(&player.race))
+        };
+
+        let csv = to_production_gap_csv(player, result.loops_per_second);
+        let out_file = out_dir.join(format!("{}_prodgap_{}.csv", base, player_suffix));
+        match fs::write(&out_file, &csv) {
+            Ok(_) => println!("  {} -> {}", replay_path.display(), out_file.display()),
+            Err(e) => eprintln!("  ERRO ao gravar {}: {}", out_file.display(), e),
+        }
+
+        if image && !player.is_zerg {
+            let png_file = out_dir.join(format!("{}_prodgap_{}.png", base, player_suffix));
+            match write_production_gap_png(
+                n, &player.name, &player.race, player.mmr,
+                &player.entries, player.efficiency_pct,
+                effective_end, result.loops_per_second,
+                &png_file,
+            ) {
+                Ok(_) => println!("  {} -> {}", replay_path.display(), png_file.display()),
+                Err(e) => eprintln!("  ERRO ao gerar PNG {}: {}", png_file.display(), e),
+            }
+        }
+    }
+}
+
+pub fn cmd_production_gap(
+    path: Option<PathBuf>,
+    output: Option<PathBuf>,
+    max_time: u32,
+    latest: bool,
+    sc2_replay_dir: Option<PathBuf>,
+    image: bool,
+) {
+    let path = resolve_dump_path(path, latest, sc2_replay_dir);
+
+    if path.is_file() {
+        let out_dir = output.unwrap_or_else(|| PathBuf::from("."));
+        production_gap_one(&path, &out_dir, max_time, image);
+    } else {
+        let replays = list_replays(&path);
+        if replays.is_empty() {
+            eprintln!("Nenhum arquivo .SC2Replay encontrado em '{}'", path.display());
+            process::exit(1);
+        }
+        println!("Encontrados {} replays", replays.len());
+
+        let out_dir = output.unwrap_or_else(|| PathBuf::from("out"));
+        prepare_out_dir(&out_dir);
+
+        for replay_path in &replays {
+            production_gap_one(replay_path, &out_dir, max_time, image);
         }
     }
 

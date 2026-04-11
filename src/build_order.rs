@@ -7,6 +7,7 @@ use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct BuildOrderEntry {
     pub supply: u8,
     pub game_loop: u32,

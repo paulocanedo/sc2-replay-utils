@@ -91,21 +91,31 @@ fn player_column(
                     .show(ui, |ui| {
                         ui.label(RichText::new("tempo").small().strong());
                         ui.label(RichText::new("supply").small().strong());
-                        ui.label(RichText::new("").small());
+                        ui.label(RichText::new("tipo").small().strong());
                         ui.label(RichText::new("ação").small().strong());
                         ui.end_row();
 
                         for entry in &player.entries {
                             ui.monospace(fmt_time(entry.game_loop, lps));
                             ui.monospace(format!("{:>3}", entry.supply));
-                            let icon = if entry.is_upgrade {
-                                "▲"
+                            // Indicador de tipo como letra colorida —
+                            // ASCII puro garante renderização com a
+                            // fonte padrão do egui (os glifos unicode
+                            // ▲/■/● caíam no fallback e apareciam como
+                            // tofu). U=unidade, E=estrutura, P=pesquisa.
+                            let (letter, color) = if entry.is_upgrade {
+                                ("P", Color32::from_rgb(180, 140, 230)) // roxo
                             } else if entry.is_structure {
-                                "■"
+                                ("E", Color32::from_rgb(230, 170, 80)) // laranja
                             } else {
-                                "●"
+                                ("U", Color32::from_gray(180)) // cinza neutro
                             };
-                            ui.label(icon);
+                            ui.label(
+                                RichText::new(letter)
+                                    .monospace()
+                                    .strong()
+                                    .color(color),
+                            );
                             let action = if entry.count > 1 {
                                 format!("{} x{}", entry.action, entry.count)
                             } else {
