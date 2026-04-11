@@ -15,10 +15,14 @@
 
 use std::collections::HashMap;
 
-use egui::{pos2, vec2, Color32, Pos2, Rect, RichText, Sense, Slider, Stroke, Ui};
+use egui::{
+    pos2, vec2, Color32, ColorImage, Pos2, Rect, RichText, Sense, Slider, Stroke, TextureOptions,
+    Ui,
+};
 
 use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
+use crate::map_image::MapImage;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
 use crate::replay_state::{fmt_time, LoadedReplay};
 
@@ -106,8 +110,24 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
         let (rect, _resp) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
         let painter = ui.painter_at(rect);
 
-        // Fundo do mapa (placeholder pra futura textura) + borda.
+        // Fundo do mapa: se temos a imagem rasterizada do mapa atual,
+        // upload pra GPU (cacheado por nome do replay) e pinta como
+        // background. Caso contrário fica o cinza placeholder.
         painter.rect_filled(rect, 4.0, Color32::from_gray(22));
+        if let Some(img) = loaded.map_image.as_ref() {
+            let key = format!("map:{}", loaded.path.display());
+            let texture = ui.ctx().load_texture(
+                key,
+                map_image_to_color_image(img),
+                TextureOptions::LINEAR,
+            );
+            painter.image(
+                texture.id(),
+                rect,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
         painter.rect_stroke(rect, 4.0, Stroke::new(1.5, Color32::from_gray(90)));
 
         // Desenha cada jogador. Estruturas vão por cima das unidades
@@ -125,6 +145,17 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
             }
         }
     });
+}
+
+/// Converte um `MapImage` (RGBA8 bruto) para o `ColorImage` que `egui`
+/// consome ao criar uma textura. A criação real da `TextureHandle` é
+/// cacheada pelo `ui.ctx().load_texture(key, ...)` — o callback abaixo
+/// só é chamado de fato na primeira vez que a key aparece.
+fn map_image_to_color_image(img: &MapImage) -> ColorImage {
+    ColorImage::from_rgba_unmultiplied(
+        [img.width as usize, img.height as usize],
+        &img.rgba,
+    )
 }
 
 /// Mapeia coordenadas de mapa (u8 0..=255) para coordenadas de tela

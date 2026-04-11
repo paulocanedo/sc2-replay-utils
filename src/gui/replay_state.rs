@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
+use crate::map_image::{self, MapImage};
 use crate::production_gap::{self, ProductionGapResult};
 use crate::replay::{self, ReplayTimeline};
 use crate::supply_block::{self, SupplyBlockEntry};
@@ -23,6 +24,11 @@ pub struct LoadedReplay {
     pub production: Option<ProductionGapResult>,
     /// Supply blocks por jogador, mesmo índice que `timeline.players`.
     pub supply_blocks_per_player: Vec<Vec<SupplyBlockEntry>>,
+    /// Imagem rasterizada do mapa do replay (Minimap.tga embutido no
+    /// `.SC2Map`/`.s2ma`). `None` quando o arquivo do mapa não foi
+    /// encontrado em nenhum dos diretórios padrão ou quando a extração
+    /// falhou — não é fatal, a aba Timeline cai pro fundo cinza.
+    pub map_image: Option<MapImage>,
 }
 
 impl LoadedReplay {
@@ -73,6 +79,14 @@ impl LoadedReplay {
             .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops))
             .collect();
 
+        let map_image = match map_image::load_for_title(&timeline.map) {
+            Ok(img) => Some(img),
+            Err(e) => {
+                eprintln!("map_image: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             path: path.to_path_buf(),
             timeline,
@@ -81,6 +95,7 @@ impl LoadedReplay {
             army,
             production,
             supply_blocks_per_player,
+            map_image,
         })
     }
 

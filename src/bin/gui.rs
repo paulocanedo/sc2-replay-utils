@@ -22,6 +22,8 @@ mod production_gap;
 mod supply_block;
 #[path = "../utils.rs"]
 mod utils;
+#[path = "../map_image/mod.rs"]
+mod map_image;
 
 // Módulos exclusivos da GUI.
 #[path = "../gui/colors.rs"]
