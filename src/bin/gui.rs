@@ -8,8 +8,8 @@
 // Módulos de domínio (parser + extractors puros sobre ReplayTimeline).
 #[path = "../replay/mod.rs"]
 mod replay;
-#[path = "../build_times.rs"]
-mod build_times;
+#[path = "../balance_data.rs"]
+mod balance_data;
 #[path = "../build_order.rs"]
 mod build_order;
 #[path = "../chat.rs"]

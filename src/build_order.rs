@@ -7,11 +7,11 @@
 //
 // Cada entrada armazena o `game_loop` no instante de **início** da
 // ação, não de conclusão. Para upgrades, unidades e morphs (que vêm
-// do parser com o loop de conclusão) subtraímos o `build_time_seconds`
+// do parser com o loop de conclusão) subtraímos o `build_time_loops`
 // da ação. Estruturas vindas de `UnitInit` já são start-time e ficam
 // como estão.
 
-use crate::build_times::build_time_seconds;
+use crate::balance_data::build_time_loops;
 use crate::replay::{
     EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
 };
@@ -58,7 +58,7 @@ pub struct BuildOrderResult {
 /// Constrói o `BuildOrderResult` a partir de um `ReplayTimeline` já
 /// parseado. Chama O(eventos), sem I/O.
 pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult, String> {
-    let lps = timeline.loops_per_second;
+    let base_build = timeline.base_build;
     let players = timeline
         .players
         .iter()
@@ -66,7 +66,7 @@ pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult
             name: p.name.clone(),
             race: p.race.clone(),
             mmr: p.mmr,
-            entries: build_player_entries(p, lps),
+            entries: build_player_entries(p, base_build),
         })
         .collect();
 
@@ -78,7 +78,7 @@ pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult
     })
 }
 
-fn build_player_entries(player: &PlayerTimeline, lps: f64) -> Vec<BuildOrderEntry> {
+fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOrderEntry> {
     let mut raw: Vec<BuildOrderEntry> = Vec::new();
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
@@ -114,10 +114,10 @@ fn build_player_entries(player: &PlayerTimeline, lps: f64) -> Vec<BuildOrderEntr
         // conclusão e precisam do recuo para o instante de início.
         let raw_loop = ev.game_loop;
         let (start_loop, finish_loop) = if from_unit_init {
-            (raw_loop, add_build_time(raw_loop, &ev.entity_type, lps))
+            (raw_loop, add_build_time(raw_loop, &ev.entity_type, base_build))
         } else {
             (
-                subtract_build_time(raw_loop, &ev.entity_type, lps),
+                subtract_build_time(raw_loop, &ev.entity_type, base_build),
                 raw_loop,
             )
         };
@@ -147,7 +147,7 @@ fn build_player_entries(player: &PlayerTimeline, lps: f64) -> Vec<BuildOrderEntr
             continue;
         }
         let finish_loop = u.game_loop;
-        let start_loop = subtract_build_time(finish_loop, &u.name, lps);
+        let start_loop = subtract_build_time(finish_loop, &u.name, base_build);
         let (supply, supply_made) = supply_at(player, start_loop);
         raw.push(BuildOrderEntry {
             supply,
@@ -169,27 +169,20 @@ fn build_player_entries(player: &PlayerTimeline, lps: f64) -> Vec<BuildOrderEntr
     deduplicate(raw)
 }
 
-/// Subtrai o `build_time_seconds(action) * lps` do `raw_loop`. Quando
-/// não há entrada na tabela (`secs == 0`) o loop original é mantido —
-/// fallback seguro pra ações desconhecidas.
-fn subtract_build_time(raw_loop: u32, action: &str, lps: f64) -> u32 {
-    let secs = build_time_seconds(action);
-    if secs == 0 || lps <= 0.0 {
-        return raw_loop;
-    }
-    let delta = (secs as f64 * lps).round() as u32;
+/// Subtrai o `build_time_loops(action, base_build)` do `raw_loop`.
+/// Quando o nome não consta no balance data (`delta == 0`) o loop
+/// original é mantido — fallback seguro pra ações desconhecidas.
+fn subtract_build_time(raw_loop: u32, action: &str, base_build: u32) -> u32 {
+    let delta = build_time_loops(action, base_build);
     raw_loop.saturating_sub(delta)
 }
 
-/// Soma o `build_time_seconds(action) * lps` ao `raw_loop`. Usado
+/// Soma o `build_time_loops(action, base_build)` ao `raw_loop`. Usado
 /// para estruturas vindas de `UnitInit`, cujo loop bruto é o início:
-/// projetamos o tempo de conclusão somando o build time da tabela.
-fn add_build_time(raw_loop: u32, action: &str, lps: f64) -> u32 {
-    let secs = build_time_seconds(action);
-    if secs == 0 || lps <= 0.0 {
-        return raw_loop;
-    }
-    let delta = (secs as f64 * lps).round() as u32;
+/// projetamos o tempo de conclusão somando o build time do balance
+/// data.
+fn add_build_time(raw_loop: u32, action: &str, base_build: u32) -> u32 {
+    let delta = build_time_loops(action, base_build);
     raw_loop.saturating_add(delta)
 }
 
@@ -361,13 +354,16 @@ mod tests {
 
     #[test]
     fn upgrade_start_time_subtracts_build_time() {
-        // Stimpack pesquisa por 100s no LotV current; o `game_loop` cru
-        // no UpgradeEntry é o instante de conclusão. A entrada do build
-        // order deve estar em loop_finish - 100s*lps, e `finish_loop`
-        // deve casar com o loop bruto do upgrade.
+        // Stimpack tem 140s Normal speed (= 2240 game loops) no LotV
+        // atual. O `game_loop` cru no UpgradeEntry é o instante de
+        // conclusão; a entrada do build order deve estar em
+        // `finish - build_time_loops("Stimpack")`, e `finish_loop` deve
+        // casar com o loop bruto do upgrade. O delta vem do balance
+        // data versionado por `base_build`, não de uma constante.
+        use crate::balance_data::build_time_loops;
+
         let t = parse_replay(&example(), 0).expect("parse");
         let bo = extract_build_order(&t).expect("bo");
-        let lps = bo.loops_per_second;
 
         let terran = t.players.iter().find(|p| p.race == "Terran").unwrap();
         let stimpack_finish = terran
@@ -376,7 +372,8 @@ mod tests {
             .find(|u| u.name == "Stimpack")
             .map(|u| u.game_loop)
             .expect("stimpack research");
-        let expected_start = stimpack_finish.saturating_sub((100.0 * lps).round() as u32);
+        let expected_start =
+            stimpack_finish.saturating_sub(build_time_loops("Stimpack", t.base_build));
 
         let bo_terran = bo.players.iter().find(|p| p.race == "Terran").unwrap();
         let stimpack_entry = bo_terran
@@ -526,12 +523,17 @@ mod tests {
     fn structure_unit_init_populates_finish_loop() {
         // Estruturas vindas de UnitInit têm `game_loop` no instante de
         // início (quando o SCV/Probe começa a construir). O extractor
-        // precisa projetar `finish_loop = start + build_time`. Para um
-        // SupplyDepot (build time 21s) o gap deve casar.
+        // precisa projetar `finish_loop = start + build_time`. O delta
+        // exato vem do balance data versionado por `base_build`.
+        use crate::balance_data::build_time_loops;
+
         let t = parse_replay(&example(), 0).expect("parse");
         let bo = extract_build_order(&t).expect("bo");
-        let lps = bo.loops_per_second;
-        let expected_delta = (21.0 * lps).round() as u32;
+        let expected_delta = build_time_loops("SupplyDepot", t.base_build);
+        assert!(
+            expected_delta > 0,
+            "balance data deveria conhecer SupplyDepot",
+        );
 
         let bo_terran = bo.players.iter().find(|p| p.race == "Terran").unwrap();
         let depot = bo_terran

@@ -68,6 +68,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
 
     let game_loops = header.m_elapsed_game_loops as u32;
+    let base_build = header.m_version.m_base_build;
     let loops_per_second = game_speed_to_loops_per_second(&details.game_speed);
 
     // player_id (1-indexado no player_list completo) → índice no
@@ -132,6 +133,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         game_loops,
         duration_seconds,
         loops_per_second,
+        base_build,
         max_time_seconds,
         players,
         chat: Vec::new(),

@@ -18,3 +18,19 @@ notify    = "6"
 [[bin]]
 name = "sc2-replay-gui"
 path = "src/bin/gui.rs"
+
+# build.rs gera `balance_data_generated.rs` (tabela
+# `nome → loops` por versão de protocolo) lendo as JSONs de
+# BalanceData embutidas pelo crate s2protocol. Precisamos do
+# `cargo_metadata` para localizar o source dir do s2protocol no
+# .cargo/registry e do `serde_json` para parsear os arquivos.
+#
+# Existe `read_balance_data_from_included_assets()` no s2protocol que
+# em tese faria a mesma coisa, mas ela tem um bug em Windows: o crate
+# `include_assets` produz nomes de arquivo com `\` como separador, e
+# o s2protocol só faz `split('/')`, então TODAS as entradas são
+# silenciosamente descartadas. O build.rs lê os JSONs direto do
+# disco, evitando esse caminho.
+[build-dependencies]
+cargo_metadata = "0.19"
+serde_json = "1"

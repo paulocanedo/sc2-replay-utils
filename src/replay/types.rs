@@ -137,6 +137,10 @@ pub struct ReplayTimeline {
     pub game_loops: u32,
     pub duration_seconds: u32,
     pub loops_per_second: f64,
+    /// `m_base_build` do header do replay — versão do protocolo que
+    /// gerou o arquivo. Usado pelo `balance_data` para selecionar a
+    /// tabela de tempos correspondente ao patch do replay.
+    pub base_build: u32,
     /// Limite de coleta de eventos em segundos. 0 indica sem limite.
     pub max_time_seconds: u32,
     pub players: Vec<PlayerTimeline>,
