@@ -90,6 +90,7 @@ enum ParseOutcome {
 /// Mensagem enviada pelo worker de volta para a UI.
 struct LibraryResult {
     path: PathBuf,
+    mtime: Option<SystemTime>,
     outcome: ParseOutcome,
 }
 
@@ -99,7 +100,11 @@ pub struct ReplayLibrary {
     /// Cache por caminho — preserva resultados entre refreshes. Guarda
     /// apenas estados "finais e estáveis" (`Parsed` e `Unsupported`);
     /// `Failed` e `Pending` nunca entram aqui — falhas são retentadas.
-    cache: HashMap<PathBuf, MetaState>,
+    /// O `SystemTime` é o mtime do arquivo quando foi parseado, usado
+    /// para invalidar a entrada se o arquivo mudar.
+    cache: HashMap<PathBuf, (SystemTime, MetaState)>,
+    /// `true` quando o cache em memória diverge do que está em disco.
+    cache_dirty: bool,
     /// Canal pelo qual os workers enviam resultados para a UI. Os
     /// workers clonam `tx_result`; o library retém o `Receiver`.
     tx_result: Sender<LibraryResult>,
@@ -109,10 +114,12 @@ pub struct ReplayLibrary {
 impl ReplayLibrary {
     pub fn new() -> Self {
         let (tx_result, rx_result) = mpsc::channel::<LibraryResult>();
+        let cache = crate::cache::load();
         Self {
             entries: Vec::new(),
             working_dir: None,
-            cache: HashMap::new(),
+            cache,
+            cache_dirty: false,
             tx_result,
             rx_result,
         }
@@ -125,7 +132,7 @@ impl ReplayLibrary {
         self.working_dir = Some(dir.to_path_buf());
         let paths = list_replays_recursive(dir);
 
-        let mut to_parse: Vec<PathBuf> = Vec::new();
+        let mut to_parse: Vec<(PathBuf, Option<SystemTime>)> = Vec::new();
         let mut entries: Vec<LibraryEntry> = paths
             .into_iter()
             .map(|path| {
@@ -134,10 +141,12 @@ impl ReplayLibrary {
                     .file_name()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.display().to_string());
-                let meta = match self.cache.get(&path) {
-                    Some(cached) => cached.clone(),
-                    None => {
-                        to_parse.push(path.clone());
+                let meta = match (self.cache.get(&path), mtime) {
+                    (Some((cached_mtime, state)), Some(mt)) if *cached_mtime == mt => {
+                        state.clone()
+                    }
+                    _ => {
+                        to_parse.push((path.clone(), mtime));
                         MetaState::Pending
                     }
                 };
@@ -162,7 +171,7 @@ impl ReplayLibrary {
     /// Sobe um pool efêmero de workers para processar `paths` e retorna
     /// imediatamente. Os workers encerram sozinhos quando a fila esvazia
     /// (drop do `tx_work` ao final desta função fecha o canal de entrada).
-    fn spawn_parse_burst(&self, paths: Vec<PathBuf>) {
+    fn spawn_parse_burst(&self, paths: Vec<(PathBuf, Option<SystemTime>)>) {
         let n = paths.len();
         let n_workers = if n > PARALLEL_THRESHOLD {
             thread::available_parallelism()
@@ -172,7 +181,7 @@ impl ReplayLibrary {
             1
         };
 
-        let (tx_work, rx_work) = mpsc::channel::<PathBuf>();
+        let (tx_work, rx_work) = mpsc::channel::<(PathBuf, Option<SystemTime>)>();
         let rx_work = Arc::new(Mutex::new(rx_work));
 
         for i in 0..n_workers {
@@ -181,9 +190,6 @@ impl ReplayLibrary {
             let _ = thread::Builder::new()
                 .name(format!("replay-library-parser-{i}"))
                 .spawn(move || loop {
-                    // Segura o lock só durante o `recv`; como o parse
-                    // é ordens de grandeza mais caro que a dispatch,
-                    // a contenção do Mutex é desprezível.
                     let next = {
                         let guard = match rx.lock() {
                             Ok(g) => g,
@@ -192,9 +198,16 @@ impl ReplayLibrary {
                         guard.recv()
                     };
                     match next {
-                        Ok(p) => {
+                        Ok((p, mtime)) => {
                             let outcome = parse_meta(&p);
-                            if tx.send(LibraryResult { path: p, outcome }).is_err() {
+                            if tx
+                                .send(LibraryResult {
+                                    path: p,
+                                    mtime,
+                                    outcome,
+                                })
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -203,11 +216,9 @@ impl ReplayLibrary {
                 });
         }
 
-        for p in paths {
-            let _ = tx_work.send(p);
+        for item in paths {
+            let _ = tx_work.send(item);
         }
-        // Ao sair do escopo, `tx_work` é dropado: os `recv()` dos workers
-        // retornam `Err` após drenar a fila e os threads encerram.
     }
 
     /// Drena resultados prontos dos workers. Retorna `true` se alguma
@@ -218,12 +229,18 @@ impl ReplayLibrary {
             let state = match msg.outcome {
                 ParseOutcome::Parsed(meta) => {
                     let st = MetaState::Parsed(meta);
-                    self.cache.insert(msg.path.clone(), st.clone());
+                    if let Some(mt) = msg.mtime {
+                        self.cache.insert(msg.path.clone(), (mt, st.clone()));
+                        self.cache_dirty = true;
+                    }
                     st
                 }
                 ParseOutcome::Unsupported(reason) => {
                     let st = MetaState::Unsupported(reason);
-                    self.cache.insert(msg.path.clone(), st.clone());
+                    if let Some(mt) = msg.mtime {
+                        self.cache.insert(msg.path.clone(), (mt, st.clone()));
+                        self.cache_dirty = true;
+                    }
                     st
                 }
                 ParseOutcome::Failed(e) => MetaState::Failed(e),
@@ -233,7 +250,19 @@ impl ReplayLibrary {
                 updated = true;
             }
         }
+        // Salva o cache quando todos os workers terminaram.
+        if self.cache_dirty && self.pending_count() == 0 {
+            self.save_cache();
+        }
         updated
+    }
+
+    /// Persiste o cache em disco (se houver mudanças pendentes).
+    pub fn save_cache(&mut self) {
+        if self.cache_dirty {
+            crate::cache::save(&self.cache);
+            self.cache_dirty = false;
+        }
     }
 
     /// Quantas entradas ainda estão em Pending (para mostrar barra de progresso).

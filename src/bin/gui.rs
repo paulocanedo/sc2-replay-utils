@@ -36,6 +36,8 @@ mod replay_state;
 mod watcher;
 #[path = "../gui/ui_settings.rs"]
 mod ui_settings;
+#[path = "../gui/cache.rs"]
+mod cache;
 #[path = "../gui/library.rs"]
 mod library;
 #[path = "../gui/tabs/mod.rs"]

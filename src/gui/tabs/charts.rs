@@ -14,31 +14,56 @@ use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 
-pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, include_workers: &mut bool) {
-    army_value_plot(ui, loaded, config, include_workers);
+pub fn show(
+    ui: &mut Ui,
+    loaded: &LoadedReplay,
+    config: &AppConfig,
+    show_army: &mut bool,
+    show_workers: &mut bool,
+) {
+    army_value_plot(ui, loaded, config, show_army, show_workers);
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
-    summary_cards(ui, loaded, config, *include_workers);
+    summary_cards(ui, loaded, config, *show_army, *show_workers);
 }
 
 /// Custo em minerals de um worker (SCV / Probe / Drone).
 const WORKER_MINERAL_COST: i32 = 50;
 
-fn army_value_for_snapshot(s: &crate::army_value::ArmySnapshot, include_workers: bool) -> f64 {
-    if include_workers {
-        // army_total já é só exército; soma o custo dos workers
-        (s.army_total + s.workers * WORKER_MINERAL_COST) as f64
-    } else {
-        s.army_total as f64
-    }
+fn army_value_for_snapshot(
+    s: &crate::army_value::ArmySnapshot,
+    show_army: bool,
+    show_workers: bool,
+) -> f64 {
+    let army = if show_army { s.army_total } else { 0 };
+    let workers = if show_workers { s.workers * WORKER_MINERAL_COST } else { 0 };
+    (army + workers) as f64
 }
 
-fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, include_workers: &mut bool) {
+fn army_value_plot(
+    ui: &mut Ui,
+    loaded: &LoadedReplay,
+    config: &AppConfig,
+    show_army: &mut bool,
+    show_workers: &mut bool,
+) {
     ui.horizontal(|ui| {
         ui.heading("Army Value ao longo do tempo");
         ui.add_space(16.0);
-        ui.checkbox(include_workers, "Incluir Workers");
+        // Impede desmarcar ambos: se um está desmarcado, o outro fica desabilitado
+        let only_army = *show_army && !*show_workers;
+        let only_workers = !*show_army && *show_workers;
+        if only_army {
+            ui.add_enabled(false, egui::Checkbox::new(show_army, "Army"));
+        } else {
+            ui.checkbox(show_army, "Army");
+        }
+        if only_workers {
+            ui.add_enabled(false, egui::Checkbox::new(show_workers, "Workers"));
+        } else {
+            ui.checkbox(show_workers, "Workers");
+        }
     });
 
     let Some(army) = loaded.army.as_ref() else {
@@ -149,12 +174,13 @@ fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, inclu
             text
         })
         .show(ui, |plot_ui| {
-            let inc_w = *include_workers;
+            let sa = *show_army;
+            let sw = *show_workers;
             // Altura máxima dos retângulos de supply block = pico global de army
             let y_max = army
                 .players
                 .iter()
-                .flat_map(|p| p.snapshots.iter().map(|s| army_value_for_snapshot(s, inc_w)))
+                .flat_map(|p| p.snapshots.iter().map(|s| army_value_for_snapshot(s, sa, sw)))
                 .fold(0.0_f64, f64::max)
                 .max(1000.0)
                 * 1.05;
@@ -198,7 +224,7 @@ fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, inclu
                 let points: PlotPoints = player
                     .snapshots
                     .iter()
-                    .map(|s| [loop_to_secs(s.game_loop, lps), army_value_for_snapshot(s, inc_w)])
+                    .map(|s| [loop_to_secs(s.game_loop, lps), army_value_for_snapshot(s, sa, sw)])
                     .collect();
                 let name = player.name.clone();
                 let line = Line::new(points)
@@ -210,14 +236,14 @@ fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, inclu
         });
 }
 
-fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, include_workers: bool) {
+fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, show_army: bool, show_workers: bool) {
     ui.columns(4, |cols| {
         // Card 1: pico de army value
         card(&mut cols[0], "Pico de Army Value", |ui| {
             if let Some(army) = loaded.army.as_ref() {
                 for (idx, p) in army.players.iter().enumerate() {
                     let peak = p.snapshots.iter()
-                        .map(|s| army_value_for_snapshot(s, include_workers) as i64)
+                        .map(|s| army_value_for_snapshot(s, show_army, show_workers) as i64)
                         .max()
                         .unwrap_or(0);
                     player_line(ui, &p.name, idx, &format!("{peak}"), config.is_user(&p.name));
