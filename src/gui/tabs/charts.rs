@@ -8,7 +8,7 @@
 // correspondência visual com a sidebar.
 
 use egui::{RichText, Ui};
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use egui_plot::{GridMark, Legend, Line, Plot, PlotPoints};
 
 use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
@@ -38,9 +38,38 @@ fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
     Plot::new("army_value_plot")
         .legend(Legend::default())
-        .height(280.0)
-        .x_axis_label("tempo (s)")
+        .height(360.0)
+        .allow_boxed_zoom(true)
+        .x_axis_label("tempo")
         .y_axis_label("army value")
+        .x_axis_formatter(|mark: GridMark, _range| {
+            let total_secs = mark.value as u32;
+            format!("{}:{:02}", total_secs / 60, total_secs % 60)
+        })
+        .y_axis_formatter(|mark: GridMark, _range| {
+            let v = mark.value as i64;
+            if v >= 1000 {
+                format!("{}.{:03}", v / 1000, (v % 1000).abs())
+            } else {
+                format!("{v}")
+            }
+        })
+        .label_formatter(|name, point| {
+            let secs = point.x as u32;
+            let mm = secs / 60;
+            let ss = secs % 60;
+            let val = point.y as i64;
+            let val_fmt = if val >= 1000 {
+                format!("{}.{:03}", val / 1000, (val % 1000).abs())
+            } else {
+                format!("{val}")
+            };
+            if !name.is_empty() {
+                format!("{name}\nTempo: {mm}:{ss:02}\nArmy Value: {val_fmt}")
+            } else {
+                format!("Tempo: {mm}:{ss:02}\nArmy Value: {val_fmt}")
+            }
+        })
         .show(ui, |plot_ui| {
             for (idx, player) in army.players.iter().enumerate() {
                 let is_user = config.is_user(&player.name);
@@ -49,11 +78,7 @@ fn army_value_plot(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     .iter()
                     .map(|s| [loop_to_secs(s.game_loop, lps), s.army_total as f64])
                     .collect();
-                let name = if is_user {
-                    format!("{} (Você)", player.name)
-                } else {
-                    player.name.clone()
-                };
+                let name = player.name.clone();
                 // Cor do slot (versão brighter para fundo escuro do plot).
                 // P1 vermelho, P2 azul — igual à sidebar.
                 let line = Line::new(points)
