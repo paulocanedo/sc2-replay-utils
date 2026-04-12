@@ -50,6 +50,7 @@ pub struct AppState {
     pub timeline_tab_second: u32,
     /// Se true, inclui custo de workers no gráfico de army value.
     pub charts_include_workers: bool,
+    pub show_about: bool,
 }
 
 impl AppState {
@@ -71,6 +72,7 @@ impl AppState {
             library_filter: String::new(),
             timeline_tab_second: 0,
             charts_include_workers: false,
+            show_about: false,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -217,10 +219,7 @@ impl eframe::App for AppState {
                 ui.menu_button("Ajuda", |ui| {
                     if ui.button("Sobre").clicked() {
                         ui.close_menu();
-                        self.set_toast(format!(
-                            "sc2-replay-utils v{}",
-                            env!("CARGO_PKG_VERSION")
-                        ));
+                        self.show_about = true;
                     }
                 });
             });
@@ -426,6 +425,34 @@ impl eframe::App for AppState {
             if self.config.effective_working_dir() != prev_effective_dir {
                 self.refresh_library();
             }
+        }
+
+        // -------- About window --------
+        if self.show_about {
+            egui::Window::new("Sobre")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        ui.heading("sc2-replay-utils");
+                        ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                        ui.add_space(12.0);
+                        ui.label("Ferramenta de análise de replays de StarCraft II");
+                        ui.add_space(12.0);
+                        ui.label(RichText::new("Autor").strong());
+                        ui.label("Paulo Canedo");
+                        ui.add_space(12.0);
+                        ui.label(RichText::new("Tecnologias").strong());
+                        ui.label("Rust · egui · s2protocol");
+                        ui.add_space(16.0);
+                        if ui.button("Fechar").clicked() {
+                            self.show_about = false;
+                        }
+                        ui.add_space(4.0);
+                    });
+                });
         }
 
         // Mantém o ciclo de polling do watcher vivo mesmo sem input.
