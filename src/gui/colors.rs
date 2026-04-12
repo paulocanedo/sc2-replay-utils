@@ -12,8 +12,8 @@ use egui::Color32;
 /// como identidade visual primária em toda a GUI.
 pub fn player_slot_color(index: usize) -> Color32 {
     match index {
-        0 => Color32::from_rgb(220, 80, 80),  // vermelho P1
-        1 => Color32::from_rgb(80, 140, 220), // azul P2
+        0 => Color32::from_rgb(180, 75, 75),  // vermelho suave P1
+        1 => Color32::from_rgb(75, 120, 185), // azul suave P2
         _ => Color32::from_gray(140),
     }
 }
@@ -29,8 +29,20 @@ pub fn player_slot_color_bright(index: usize) -> Color32 {
     }
 }
 
-/// Tom de realce "Você" — esverdeado escuro, discreto. Usado como
-/// fill sutil ou background de chips. Não compete com a cor do slot.
-pub const USER_FILL: Color32 = Color32::from_rgb(28, 40, 30);
-pub const USER_CHIP_BG: Color32 = Color32::from_rgb(30, 60, 34);
-pub const USER_CHIP_FG: Color32 = Color32::from_rgb(190, 230, 190);
+/// Fill sutil para o card do usuário — tint discreto da cor do slot
+/// em vez de verde, para manter coesão com a borda.
+pub fn user_fill(index: usize) -> Color32 {
+    match index {
+        0 => Color32::from_rgb(42, 30, 30), // warm tint
+        1 => Color32::from_rgb(30, 34, 42), // cool tint
+        _ => Color32::from_gray(38),
+    }
+}
+
+/// Chip "Você" — neutro, sem competir com a cor do slot.
+pub const USER_CHIP_BG: Color32 = Color32::from_rgb(55, 55, 55);
+pub const USER_CHIP_FG: Color32 = Color32::from_rgb(200, 200, 200);
+
+/// Fill e label para cards genéricos (ex: seção "Partida").
+pub const CARD_FILL: Color32 = Color32::from_gray(30);
+pub const LABEL_DIM: Color32 = Color32::from_gray(130);

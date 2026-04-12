@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel};
 
-use crate::colors::{player_slot_color, USER_CHIP_BG, USER_CHIP_FG, USER_FILL};
+use crate::colors::{player_slot_color, user_fill, CARD_FILL, LABEL_DIM, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::library::{self, LibraryAction, ReplayLibrary};
 use crate::replay_state::{fmt_time, LoadedReplay};
@@ -471,95 +471,130 @@ impl eframe::App for AppState {
 
 fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig) {
     ui.add_space(8.0);
-    ui.heading("Jogadores");
-    ui.separator();
-    ui.add_space(4.0);
 
-    ScrollArea::vertical().id_salt("sidebar_players").show(ui, |ui| {
-        // Card externo unificado que contém os sub-cards dos 2 jogadores.
-        // A ideia visual é "um card maior agrupando dois menores" — o
-        // container dá o recorte do grupo, os filhos diferenciam os
-        // jogadores sem precisar de borda completa.
+    ScrollArea::vertical().id_salt("sidebar_scroll").show(ui, |ui| {
+        // ── Resumo ──────────────────────────────────────────────
+        ui.heading("Resumo");
+        ui.separator();
+        ui.add_space(4.0);
+
+        let matchup = build_matchup(&loaded.timeline.players);
+        let duration = fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second);
+        let date_display = format_date_short(&loaded.timeline.datetime);
+
         egui::Frame::none()
-            .fill(Color32::from_gray(22))
-            .stroke(egui::Stroke::new(0.5, Color32::from_gray(60)))
-            .rounding(8.0)
-            .inner_margin(egui::Margin::same(10.0))
+            .fill(CARD_FILL)
+            .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                let last = loaded.timeline.players.len().saturating_sub(1);
-                for (i, p) in loaded.timeline.players.iter().enumerate() {
-                    let is_user = config.is_user(&p.name);
-                    player_card(ui, p, i, is_user);
-                    if i != last {
-                        ui.add_space(8.0);
-                    }
-                }
+                ui.label(
+                    RichText::new(&loaded.timeline.map)
+                        .size(16.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+                ui.label(
+                    RichText::new(format!("{matchup} \u{2022} {duration}"))
+                        .color(Color32::from_gray(180)),
+                );
+                ui.label(
+                    RichText::new(&date_display)
+                        .small()
+                        .color(LABEL_DIM),
+                );
             });
 
-        ui.add_space(8.0);
+        ui.add_space(12.0);
+
+        // ── Jogadores ───────────────────────────────────────────
+        ui.heading("Jogadores");
         ui.separator();
-        ui.heading("Partida");
-        ui.add_space(2.0);
-        ui.small(format!("🗺  {}", loaded.timeline.map));
-        ui.small(format!("🗓  {}", loaded.timeline.datetime));
-        ui.small(format!(
-            "⏱  {} ({} loops)",
-            fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second),
-            loaded.timeline.game_loops
-        ));
-        ui.small(format!("⚙  {:.1} loops/s", loaded.timeline.loops_per_second));
+        ui.add_space(4.0);
+
+        let last = loaded.timeline.players.len().saturating_sub(1);
+        for (i, p) in loaded.timeline.players.iter().enumerate() {
+            let is_user = config.is_user(&p.name);
+            player_card(ui, p, i, is_user);
+            if i != last {
+                ui.add_space(6.0);
+            }
+        }
+
+        ui.add_space(12.0);
+
+        // ── Detalhes ────────────────────────────────────────────
+        ui.heading("Detalhes");
+        ui.separator();
+        ui.add_space(4.0);
+
+        detail_row(ui, "Início", &loaded.timeline.datetime);
+        detail_row(
+            ui,
+            "Loops",
+            &loaded.timeline.game_loops.to_string(),
+        );
+        detail_row(
+            ui,
+            "Veloc.",
+            &format!("{:.1} loops/s", loaded.timeline.loops_per_second),
+        );
     });
 }
 
-/// Renderiza o card de um jogador na sidebar. A identidade visual
-/// primária é a cor do slot do SC2 (P1 = vermelho, P2 = azul) aplicada
-/// na borda. A indicação "Você" é secundária: pequeno chip + leve tom
-/// esverdeado no fill, sem sequestrar a borda colorida do slot.
+/// Renderiza o card de um jogador com borda lateral colorida (cor do slot).
 fn player_card(
     ui: &mut egui::Ui,
     player: &crate::replay::PlayerTimeline,
     index: usize,
     is_user: bool,
 ) {
-    // Cor do slot do jogador (padrão SC2): sempre presente, prioridade
-    // sobre o destaque do usuário.
     let slot_color = player_slot_color(index);
-
-    // Fill base neutro; se é o usuário, ganha um tom esverdeado sutil
-    // (sem virar "verde chapado") só para indicar "sou eu".
     let fill = if is_user {
-        USER_FILL
+        user_fill(index)
     } else {
-        Color32::from_gray(34)
+        CARD_FILL
     };
-    // Borda: sempre a cor do slot. Fica um pouco mais grossa para
-    // reforçar a identidade visual do jogador dentro do card unificado.
-    let stroke = egui::Stroke::new(1.8, slot_color);
 
-    egui::Frame::none()
+    let resp = egui::Frame::none()
         .fill(fill)
-        .stroke(stroke)
+        .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
         .rounding(6.0)
-        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+        .inner_margin(egui::Margin::symmetric(14.0, 10.0))
         .show(ui, |ui| {
-            // Trava a largura no máximo disponível do painel.
             ui.set_width(ui.available_width());
 
-            // Linha 1: nome grande + chip "Você" (discreto) à direita.
+            // Linha 1: nome + chip "VOCÊ" (opcional) + MMR à direita.
             ui.horizontal(|ui| {
-                let name = RichText::new(&player.name)
-                    .size(16.0)
-                    .strong()
-                    .color(Color32::WHITE);
-                ui.label(name);
+                ui.label(
+                    RichText::new(&player.name)
+                        .size(16.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // MMR primeiro (fica mais à direita).
+                    match player.mmr {
+                        Some(mmr) => {
+                            ui.label(
+                                RichText::new(mmr.to_string())
+                                    .size(16.0)
+                                    .strong()
+                                    .color(Color32::from_gray(220)),
+                            );
+                        }
+                        None => {
+                            ui.label(
+                                RichText::new("—")
+                                    .size(16.0)
+                                    .color(Color32::from_gray(100)),
+                            );
+                        }
+                    }
                     if is_user {
-                        // Chip "Você" discreto — tom esverdeado escuro,
-                        // texto claro, sem competir visualmente com a
-                        // borda do slot.
                         ui.label(
-                            RichText::new(" Você ")
+                            RichText::new(" VOCÊ ")
                                 .small()
                                 .strong()
                                 .color(USER_CHIP_FG)
@@ -569,52 +604,57 @@ fn player_card(
                 });
             });
 
-            // Clan opcional (entre nome e linha de raça).
+            // Linha 2: ícone raça + nome da raça.
+            ui.label(
+                RichText::new(format!(
+                    "{} {}",
+                    race_icon(&player.race),
+                    race_full_name(&player.race),
+                ))
+                .color(Color32::from_gray(170)),
+            );
+
+            // Clan opcional abaixo da raça.
             if !player.clan.is_empty() {
-                ui.small(
-                    RichText::new(format!("[{}]", player.clan))
-                        .color(Color32::from_gray(150))
+                ui.label(
+                    RichText::new(format!("    [{}]", player.clan))
+                        .small()
+                        .color(Color32::from_gray(130))
                         .italics(),
                 );
             }
-
-            ui.add_space(6.0);
-
-            // Linha 2: raça (texto simples, sem badge colorido) + MMR.
-            // A cor "tag" do card é a cor do slot — não competimos com ela.
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} {}",
-                        race_letter_char(&player.race),
-                        race_full_name(&player.race)
-                    ))
-                    .color(Color32::from_gray(210)),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match player.mmr {
-                        Some(mmr) => {
-                            ui.label(
-                                RichText::new(format!("MMR {mmr}"))
-                                    .monospace()
-                                    .strong(),
-                            );
-                        }
-                        None => {
-                            ui.label(
-                                RichText::new("MMR —")
-                                    .monospace()
-                                    .color(Color32::from_gray(140)),
-                            );
-                        }
-                    }
-                });
-            });
         });
+
+    // Pinta borda lateral colorida sobre a borda do frame.
+    let rect = resp.response.rect;
+    let accent = egui::Rect::from_min_max(
+        rect.left_top(),
+        egui::pos2(rect.left() + 3.0, rect.bottom()),
+    );
+    ui.painter().rect_filled(
+        accent,
+        egui::Rounding {
+            nw: 6.0,
+            sw: 6.0,
+            ne: 0.0,
+            se: 0.0,
+        },
+        slot_color,
+    );
 }
 
-/// Letra inicial da raça (T/P/Z/R) sem envolver badge colorido.
-fn race_letter_char(race: &str) -> char {
+/// Emoji/ícone para a raça.
+fn race_icon(race: &str) -> &'static str {
+    match race.to_ascii_lowercase().chars().next() {
+        Some('p') => "💎",
+        Some('t') => "⚙",
+        Some('z') => "🦷",
+        _ => "❓",
+    }
+}
+
+/// Letra inicial da raça (T/P/Z/R).
+fn race_letter(race: &str) -> char {
     match race.to_ascii_lowercase().chars().next() {
         Some('t') => 'T',
         Some('p') => 'P',
@@ -632,6 +672,64 @@ fn race_full_name(race: &str) -> &str {
         "zerg" => "Zerg",
         _ => race,
     }
+}
+
+/// Monta o matchup ("PvT", "ZvP", etc.) a partir dos jogadores.
+fn build_matchup(players: &[crate::replay::PlayerTimeline]) -> String {
+    if players.len() >= 2 {
+        format!("{}v{}", race_letter(&players[0].race), race_letter(&players[1].race))
+    } else {
+        String::from("—")
+    }
+}
+
+/// Formata "2026-04-10T17:46:40" → "10 abr 2026".
+fn format_date_short(datetime: &str) -> String {
+    let date_part = datetime.split('T').next().unwrap_or(datetime);
+    let parts: Vec<&str> = date_part.split('-').collect();
+    if parts.len() == 3 {
+        let month = match parts[1] {
+            "01" => "jan",
+            "02" => "fev",
+            "03" => "mar",
+            "04" => "abr",
+            "05" => "mai",
+            "06" => "jun",
+            "07" => "jul",
+            "08" => "ago",
+            "09" => "set",
+            "10" => "out",
+            "11" => "nov",
+            "12" => "dez",
+            _ => parts[1],
+        };
+        let day = parts[2].trim_start_matches('0');
+        format!("{day} {month} {}", parts[0])
+    } else {
+        date_part.to_string()
+    }
+}
+
+/// Row de detalhe com label à esquerda, valor e chevron à direita.
+fn detail_row(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(label)
+                .strong()
+                .color(Color32::from_gray(190)),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new("›")
+                    .color(Color32::from_gray(80)),
+            );
+            ui.label(
+                RichText::new(value)
+                    .color(Color32::from_gray(160)),
+            );
+        });
+    });
+    ui.separator();
 }
 
 fn empty_state(ui: &mut egui::Ui) {
