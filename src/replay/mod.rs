@@ -22,6 +22,7 @@
 
 mod classify;
 mod finalize;
+mod game;
 mod message;
 mod query;
 mod tracker;
@@ -35,7 +36,9 @@ pub use types::{
 // acima, sejam alcançáveis via `crate::replay::*` quando consumers
 // precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
-pub use types::{EntityEvent, StatsSnapshot, UnitPositionSample, UpgradeEntry};
+pub use types::{
+    EntityEvent, ProductionCmd, StatsSnapshot, UnitPositionSample, UpgradeEntry,
+};
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -103,6 +106,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 stats: Vec::new(),
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),
+                production_cmds: Vec::new(),
                 unit_positions: Vec::new(),
                 alive_count: HashMap::new(),
                 worker_capacity: Vec::new(),
@@ -172,11 +176,36 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         (max_time_seconds as f64 * loops_per_second).round() as u32
     };
 
+    let mut index_owner: tracker::IndexOwnerMap = HashMap::new();
     tracker::process_tracker_events(
         path_str,
         &mpq,
         &file_contents,
         &player_idx,
+        &mut timeline.players,
+        &mut index_owner,
+        max_loops,
+    )?;
+
+    // user_id (0-baseado em player_list) → player_idx (índice em
+    // `timeline.players`). Necessário pra `game::process_game_events`
+    // saber em qual player empurrar o `ProductionCmd`.
+    let user_to_player_idx: HashMap<i64, usize> = details
+        .player_list
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.observe == 0)
+        .enumerate()
+        .map(|(out_idx, (in_idx, _))| (in_idx as i64, out_idx))
+        .collect();
+
+    game::process_game_events(
+        path_str,
+        &mpq,
+        &file_contents,
+        &user_to_player_idx,
+        &index_owner,
+        base_build,
         &mut timeline.players,
         max_loops,
     )?;

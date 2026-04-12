@@ -16,6 +16,11 @@ use crate::colors::{player_slot_color, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::replay_state::{fmt_time, LoadedReplay};
 
+/// Cor do ícone de Chrono Boost: azul-ciano elétrico, inspirado no
+/// efeito visual do Chrono Boost in-game (brilho azul claro no
+/// prédio alvo).
+const CHRONO_COLOR: Color32 = Color32::from_rgb(80, 200, 255);
+
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 5] = [
     EntryKind::Worker,
@@ -96,6 +101,14 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             legend_chip(ui, kind);
         }
         ui.add_space(8.0);
+        ui.label(
+            RichText::new("⚡")
+                .strong()
+                .color(CHRONO_COLOR),
+        )
+        .on_hover_text("Chrono Boost (Protoss)");
+        ui.small("chrono");
+        ui.add_space(6.0);
         ui.label(
             RichText::new("⊘")
                 .monospace()
@@ -314,6 +327,23 @@ fn player_column(
                                 let lbl = ui.label(rt);
                                 if let Some(tt) = outcome_tooltip {
                                     lbl.on_hover_text(tt);
+                                }
+                                // Chrono Boost: ⚡ (×N se >1)
+                                if entry.chrono_boosts > 0 {
+                                    let chrono_text = if entry.chrono_boosts > 1 {
+                                        format!("⚡×{}", entry.chrono_boosts)
+                                    } else {
+                                        "⚡".to_string()
+                                    };
+                                    ui.label(
+                                        RichText::new(chrono_text)
+                                            .strong()
+                                            .color(CHRONO_COLOR),
+                                    )
+                                    .on_hover_text(format!(
+                                        "Chrono Boost ×{}",
+                                        entry.chrono_boosts,
+                                    ));
                                 }
                             });
                             ui.end_row();

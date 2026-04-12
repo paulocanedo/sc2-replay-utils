@@ -41,6 +41,31 @@ pub struct UpgradeEntry {
     pub name: String,
 }
 
+/// Comando de produção emitido pelo jogador (treinar unidade,
+/// pesquisar upgrade, morphar prédio). Capturado de
+/// `replay.game.events` (Cmd events). O `build_order` usa estes
+/// registros como o instante de início real do produtor — o
+/// `finish_loop` observado já reflete qualquer aceleração de Chrono
+/// Boost, então não precisamos detectar janelas de chrono.
+#[derive(Clone)]
+pub struct ProductionCmd {
+    pub game_loop: u32,
+    /// Nome bruto da ability (ex. "TrainZealot",
+    /// "ResearchProtossGroundWeaponsLevel1", "MorphToWarpGate").
+    pub ability: String,
+    /// Tags candidatos a produtor — snapshot da seleção ativa do
+    /// jogador no instante do cmd. Cada elemento é o `unit_tag_index`
+    /// (parte alta de um tag completo, comum entre eventos de game e
+    /// tracker). Vazio quando a seleção não pôde ser resolvida (cmd
+    /// órfão). O build_order escolhe o primeiro disponível pra
+    /// associar via FIFO.
+    pub producer_tag_indexes: Vec<u32>,
+    /// `true` quando este cmd já foi consumido pelo build_order.
+    /// Mantido pra permitir varreduras múltiplas (unidades agrupadas
+    /// por produtor + upgrades) sem reprocessar.
+    pub consumed: bool,
+}
+
 /// Tipo semântico de evento sobre unidades e estruturas.
 ///
 /// O parser traduz os eventos crus do replay para uma destas variantes
@@ -88,6 +113,13 @@ pub struct EntityEvent {
     /// `ProductionStarted`. Usado pelo build_order para distinguir
     /// trains/morphs de spawns iniciais.
     pub creator_ability: Option<String>,
+    /// Tag completo do produtor (Gateway/Robo/Stargate/Nexus/CC/etc.)
+    /// vindo de `UnitBornEvent.creator_unit_tag_*`. Só populado em
+    /// `ProductionStarted` originado de Train/Morph (e em morphs
+    /// in-place o produtor é o próprio tag). None para `UnitInit`
+    /// (warp-in / construção via worker) e spawns iniciais — o
+    /// build_order usa esse None pra cair no fallback antigo.
+    pub creator_tag: Option<i64>,
     /// Quem matou a entidade. None quando o evento é uma transformação
     /// (morph) ou quando o killer é desconhecido.
     pub killer_player_id: Option<u8>,
@@ -132,6 +164,14 @@ pub struct PlayerTimeline {
     pub stats: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,
     pub entity_events: Vec<EntityEvent>,
+
+    /// Comandos de produção do jogador (Train/Research/Morph),
+    /// ordenados por `game_loop`. Vêm de `replay.game.events` e são
+    /// consumidos pelo `build_order` pra computar o instante de início
+    /// real (cobrindo Chrono Boost, supply block e idle gaps sem
+    /// estimativa). Vazio em fast-path / quando game events não foram
+    /// processados.
+    pub production_cmds: Vec<ProductionCmd>,
 
     /// Amostras periódicas de posição de unidades vivas, vindas dos
     /// `UnitPositionsEvent` do tracker. Ordenado por `game_loop`. Só

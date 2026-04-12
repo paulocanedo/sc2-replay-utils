@@ -1,21 +1,37 @@
-// Extrator de build order — agora é uma camada pura sobre `ReplayTimeline`.
+// Extrator de build order — camada pura sobre `ReplayTimeline`.
 //
-// Não abre o MPQ nem decodifica eventos: consome `entity_events` e
-// `upgrades` que o parser single-pass já produziu, mapeando cada um
-// para `BuildOrderEntry` na semântica esperada pelos consumers
-// (CSV, GUI, image renderer).
+// Não abre o MPQ nem decodifica eventos: consome `entity_events`,
+// `upgrades` e `production_cmds` que o parser single-pass já produziu,
+// mapeando cada um para `BuildOrderEntry` na semântica esperada pelos
+// consumers (CSV, GUI, image renderer).
 //
 // Cada entrada armazena o `game_loop` no instante de **início** da
-// ação, não de conclusão. Para upgrades, unidades e morphs (que vêm
-// do parser com o loop de conclusão) subtraímos o `build_time_loops`
-// da ação. Estruturas vindas de `UnitInit` já são start-time e ficam
-// como estão.
+// ação. Há dois caminhos para descobrir esse instante:
+//
+// 1. **Cmd matching** (preferido): se o evento tem `creator_tag` (i.e.,
+//    veio de um Train/Morph com produtor identificado) e o parser de
+//    game events capturou um `ProductionCmd` correspondente nesse mesmo
+//    produtor, usamos `start = max(cmd_loop, finish_anterior_no_mesmo
+//    _produtor)`. Isso absorve Chrono Boost (Protoss), supply block e
+//    idle gaps gratuitamente — só usamos tempos observados (clique do
+//    jogador + UnitBorn real). Para upgrades o match é global por
+//    nome (não há fila de pesquisas).
+//
+// 2. **Fallback** (legado): quando não há cmd correspondente — warp-ins
+//    via UnitInit, spawns iniciais, replays sem game events, ou cmds
+//    órfãos por seleção não resolvida — recuamos do `finish_loop`
+//    bruto subtraindo `build_time_loops(action, base_build)`. Estruturas
+//    vindas de `UnitInit` já são start-time e só projetam o
+//    `finish_loop` somando o build time.
 
 use std::collections::HashMap;
 
+use s2protocol::tracker_events::unit_tag_index;
+
 use crate::balance_data::build_time_loops;
 use crate::replay::{
-    EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
+    EntityCategory, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
+    UNIT_INIT_MARKER,
 };
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
@@ -75,6 +91,12 @@ pub struct BuildOrderEntry {
     pub is_upgrade: bool,
     pub is_structure: bool,
     pub outcome: EntryOutcome,
+    /// Número estimado de Chrono Boosts que aceleraram esta produção.
+    /// 0 quando não houve chrono ou quando o start_loop veio do
+    /// fallback (sem cmd matching, não dá pra saber). Calculado
+    /// comparando o tempo real `finish - start` com o
+    /// `build_time_loops` base da ação.
+    pub chrono_boosts: u8,
 }
 
 pub struct PlayerBuildOrder {
@@ -134,6 +156,22 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         }
     }
 
+    // Estado mutável compartilhado pelo cmd matching:
+    // - `cmds_by_producer[producer_index] -> Vec<cmd_idx>` em ordem
+    //   de emissão (game.rs já empurra por game_loop crescente).
+    // - `consumed[i]` marca que o cmd `i` já foi pareado a uma entrada,
+    //   pra não ser reusado por outro evento.
+    // - `prev_finish_by_producer` mantém o último `finish_loop`
+    //   computado por produtor pra encadear `start = max(cmd, prev)`.
+    let mut cmds_by_producer: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, cmd) in player.production_cmds.iter().enumerate() {
+        if let Some(&p) = cmd.producer_tag_indexes.first() {
+            cmds_by_producer.entry(p).or_default().push(i);
+        }
+    }
+    let mut consumed = vec![false; player.production_cmds.len()];
+    let mut prev_finish_by_producer: HashMap<u32, u32> = HashMap::new();
+
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
         if ev.kind != EntityEventKind::ProductionStarted {
@@ -163,17 +201,70 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
 
         // Estruturas via UnitInit já vêm com o `game_loop` de início
         // (UnitInit é emitido quando o SCV/Probe começa a construir).
-        // Os demais (trains, morphs, upgrades) vêm com o loop de
-        // conclusão e precisam do recuo para o instante de início.
+        // Os demais (trains, morphs) vêm com o loop de conclusão.
         let raw_loop = ev.game_loop;
-        let (start_loop, projected_finish) = if from_unit_init {
-            (raw_loop, add_build_time(raw_loop, &ev.entity_type, base_build))
+        let projected_finish = if from_unit_init {
+            add_build_time(raw_loop, &ev.entity_type, base_build)
         } else {
-            (
-                subtract_build_time(raw_loop, &ev.entity_type, base_build),
-                raw_loop,
-            )
+            raw_loop
         };
+
+        // Tenta o caminho 1 (cmd matching) só pra trains/morphs com
+        // creator_tag. UnitInit nunca tem produtor — vai direto pro
+        // fallback de start = raw_loop.
+        //
+        // Restrição de causalidade: o cmd só vale se ocorreu cedo o
+        // suficiente pra ter plausivelmente produzido a unidade. O
+        // SC2 emite Born events para Probes/Drones iniciais com
+        // `creator_unit_tag_*` apontando pro Nexus/Hatchery; sem
+        // filtro, esses spawns "instantâneos" (finish ~loop 11)
+        // canibalizariam os cmds reais que o jogador emitiu para
+        // produzir as próximas Probes. Exigimos
+        // `cmd_loop + build_time/2 <= finish_loop` — chrono boost
+        // (1.5×) acelera no máximo pra ~0.67×build_time, então a
+        // metade é uma margem segura.
+        let max_cmd_loop = projected_finish
+            .saturating_sub(build_time_loops(&ev.entity_type, base_build) / 2);
+        let cmd_match: Option<(u32, u32)> = if from_unit_init {
+            None
+        } else {
+            ev.creator_tag.and_then(|t| {
+                let producer_idx = unit_tag_index(t);
+                consume_producer_cmd(
+                    &cmds_by_producer,
+                    &mut consumed,
+                    &player.production_cmds,
+                    producer_idx,
+                    &ev.entity_type,
+                    max_cmd_loop,
+                )
+                .map(|loop_| (producer_idx, loop_))
+            })
+        };
+
+        let start_loop = if from_unit_init {
+            raw_loop
+        } else if let Some((producer_idx, cmd_loop)) = cmd_match {
+            let prev = prev_finish_by_producer
+                .get(&producer_idx)
+                .copied()
+                .unwrap_or(0);
+            cmd_loop.max(prev)
+        } else {
+            // Fallback: mantém o cálculo legado para entradas sem
+            // produtor identificável (warp-ins e ramos onde game.rs
+            // não conseguiu resolver a seleção ou a versão de balance
+            // data não conhece o `(producer, ability_id, cmd_index)`).
+            subtract_build_time(raw_loop, &ev.entity_type, base_build)
+        };
+
+        // Encadeia o próximo cmd do mesmo produtor no `projected_finish`
+        // observado — assim a próxima unidade da fila não pode começar
+        // antes do término da atual, mesmo que o jogador tenha clicado
+        // o train cedo (queue de cmds enquanto a anterior produz).
+        if let Some((producer_idx, _)) = cmd_match {
+            prev_finish_by_producer.insert(producer_idx, projected_finish);
+        }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou
         // ao fim — o `finish_loop` real é o instante do cancel, e o
@@ -196,6 +287,16 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // que o jogador tinha quando emitiu o comando.
         let (supply, supply_made) = supply_at(player, start_loop);
 
+        // Chrono boost: só estimamos quando temos start via cmd
+        // matching (tempo real) e a entrada completou normalmente.
+        let chrono_boosts = if cmd_match.is_some() && outcome == EntryOutcome::Completed {
+            let expected_bt = build_time_loops(&ev.entity_type, base_build);
+            let actual_bt = projected_finish.saturating_sub(start_loop);
+            estimate_chrono_count(expected_bt, actual_bt)
+        } else {
+            0
+        };
+
         raw.push(BuildOrderEntry {
             supply,
             supply_made,
@@ -207,18 +308,33 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             is_upgrade: false,
             is_structure,
             outcome,
+            chrono_boosts,
         });
     }
 
     // Upgrades — Sprays já filtrados pelo parser. O `game_loop` cru é
-    // de conclusão; recuamos para o início para casar com a semântica
-    // do build order.
+    // de conclusão; recuamos para o início. Tentativa 1: matching
+    // global por nome contra os production_cmds (pesquisas não
+    // enfileiram, então não há chaining por produtor — basta achar o
+    // primeiro cmd com `ability == upgrade.name`). Fallback: subtrai
+    // build_time_loops como antes.
     for u in &player.upgrades {
         if u.game_loop == 0 {
             continue;
         }
         let finish_loop = u.game_loop;
-        let start_loop = subtract_build_time(finish_loop, &u.name, base_build);
+        let expected_bt = build_time_loops(&u.name, base_build);
+        let max_cmd = finish_loop.saturating_sub(expected_bt / 2);
+        let cmd_loop =
+            consume_global_cmd(&mut consumed, &player.production_cmds, &u.name, max_cmd);
+        let start_loop =
+            cmd_loop.unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
+        let chrono_boosts = if cmd_loop.is_some() {
+            let actual_bt = finish_loop.saturating_sub(start_loop);
+            estimate_chrono_count(expected_bt, actual_bt)
+        } else {
+            0
+        };
         let (supply, supply_made) = supply_at(player, start_loop);
         raw.push(BuildOrderEntry {
             supply,
@@ -233,6 +349,7 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             // Upgrades não têm lifecycle cancelável via tag (o tracker
             // só emite o evento quando o research conclui).
             outcome: EntryOutcome::Completed,
+            chrono_boosts,
         });
     }
 
@@ -241,6 +358,101 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     raw.sort_by_key(|e| (e.game_loop, e.seq));
 
     deduplicate(raw)
+}
+
+/// Procura o primeiro cmd não-consumido emitido pelo `producer_idx`
+/// cuja `ability` bate com `action` E cujo `game_loop` satisfaz
+/// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Marca o
+/// cmd como consumido e retorna seu `game_loop`. Quando não há match,
+/// retorna `None` e o caller cai no fallback `subtract_build_time`.
+///
+/// Iteramos a fila inteira (não só o front) porque um produtor pode
+/// receber cmds de tipos diferentes intercalados (ex.: Stargate
+/// alternando Phoenix/Voidray) e queremos sempre achar a próxima
+/// ocorrência da ação certa, não a primeira da fila.
+fn consume_producer_cmd(
+    by_producer: &HashMap<u32, Vec<usize>>,
+    consumed: &mut [bool],
+    cmds: &[ProductionCmd],
+    producer_idx: u32,
+    action: &str,
+    max_cmd_loop: u32,
+) -> Option<u32> {
+    let queue = by_producer.get(&producer_idx)?;
+    for &i in queue {
+        if consumed[i] {
+            continue;
+        }
+        if cmds[i].ability != action {
+            continue;
+        }
+        if cmds[i].game_loop > max_cmd_loop {
+            // A fila está ordenada por game_loop crescente — todos os
+            // próximos seriam ainda mais tarde, então paramos aqui.
+            break;
+        }
+        consumed[i] = true;
+        return Some(cmds[i].game_loop);
+    }
+    None
+}
+
+/// Match global por nome de ação (sem filtrar por produtor). Usado
+/// para upgrades, que são one-shot e não enfileiram — basta o primeiro
+/// cmd disponível com a ability certa que respeite a mesma constraint
+/// de causalidade `cmd_loop <= max_cmd_loop`.
+fn consume_global_cmd(
+    consumed: &mut [bool],
+    cmds: &[ProductionCmd],
+    action: &str,
+    max_cmd_loop: u32,
+) -> Option<u32> {
+    for (i, cmd) in cmds.iter().enumerate() {
+        if consumed[i] {
+            continue;
+        }
+        if cmd.ability != action {
+            continue;
+        }
+        if cmd.game_loop > max_cmd_loop {
+            continue;
+        }
+        consumed[i] = true;
+        return Some(cmd.game_loop);
+    }
+    None
+}
+
+/// Estima quantos Chrono Boosts aceleraram uma produção comparando
+/// o build time observado com o esperado. Só faz sentido quando
+/// `start_loop` veio de cmd matching (tempo real).
+///
+/// Modelo simplificado do Chrono Boost LotV (4.0+):
+/// - Duração: 20s game time = 320 game loops (Normal speed, ×16).
+/// - Efeito: +50% produção durante a janela (1.5× speed).
+/// - Economia por chrono em builds > 320 loops: ~160 loops.
+/// - Economia em builds ≤ 320 loops: ~expected/3 loops (build
+///   inteiro cabe numa janela).
+fn estimate_chrono_count(expected_bt: u32, actual_bt: u32) -> u8 {
+    if actual_bt >= expected_bt || expected_bt == 0 {
+        return 0;
+    }
+    let time_saved = expected_bt - actual_bt;
+
+    // Builds curtos (≤ 320 loops = 20s): cabe dentro de uma janela
+    // de chrono. Máximo 1 chrono, economia ≈ expected/3.
+    if expected_bt <= 320 {
+        let threshold = expected_bt / 6; // metade da economia máxima
+        return if time_saved > threshold { 1 } else { 0 };
+    }
+
+    // Builds longos: cada chrono economiza ~160 loops.
+    const SAVE_PER_CHRONO: u32 = 160;
+    let threshold = SAVE_PER_CHRONO / 2; // 80 loops mínimo
+    if time_saved < threshold {
+        return 0;
+    }
+    ((time_saved + SAVE_PER_CHRONO / 2) / SAVE_PER_CHRONO).min(10) as u8
 }
 
 /// Subtrai o `build_time_loops(action, base_build)` do `raw_loop`.
@@ -278,7 +490,9 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
     for entry in entries {
         match out.last_mut() {
             Some(last) if last.action == entry.action && last.outcome == entry.outcome => {
-                last.count += 1
+                last.count += 1;
+                // Acumula chronos do grupo — o display mostra o total.
+                last.chrono_boosts = last.chrono_boosts.saturating_add(entry.chrono_boosts);
             }
             _ => out.push(entry),
         }

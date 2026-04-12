@@ -70,22 +70,39 @@ struct TagState {
 
 // ── Loop principal ──────────────────────────────────────────────────
 
+/// Mapa global `unit_tag_index → (tag completo, player_idx, último
+/// tipo observado)`, populado pelo tracker e consultado por
+/// `game::process_game_events`. O game events parser usa essa tabela
+/// para descobrir o tipo do produtor (Barracks/Gateway/Forge/etc.) que
+/// recebeu um Cmd, alimentando o lookup
+/// `resolve_ability_command(producer, ability_id, cmd_index)`.
+///
+/// O "último tipo observado" segue a regra "last write wins" — para
+/// morphs in-place (CC→Orbital, Gateway→WarpGate) o tipo final é o que
+/// fica registrado. Cmds emitidos antes do morph podem perder a
+/// resolução, mas isso é raro o suficiente pra justificar a
+/// simplicidade. Ver `game.rs` para o uso.
+pub(super) struct IndexEntry {
+    pub tag: i64,
+    pub player_idx: usize,
+    pub unit_type: String,
+}
+
+pub(super) type IndexOwnerMap = HashMap<u32, IndexEntry>;
+
 pub(super) fn process_tracker_events(
     path_str: &str,
     mpq: &s2protocol::MPQ,
     file_contents: &[u8],
     player_idx: &HashMap<u8, usize>,
     players: &mut [PlayerTimeline],
+    index_owner: &mut IndexOwnerMap,
     max_loops: u32,
 ) -> Result<(), String> {
     let tracker_events = s2protocol::read_tracker_events(path_str, mpq, file_contents)
         .map_err(|e| format!("{:?}", e))?;
 
     let mut tag_map: HashMap<i64, TagState> = HashMap::new();
-    // unit_tag_index → (tag completo, índice do jogador). `UnitPositionsEvent`
-    // só carrega o índice (sem `recycle`), então precisamos deste mapa para
-    // recuperar o tag completo e descobrir a quem cada amostra pertence.
-    let mut index_owner: HashMap<u32, (i64, usize)> = HashMap::new();
     let mut cur_attack: Vec<u8> = vec![0; players.len()];
     let mut cur_armor: Vec<u8> = vec![0; players.len()];
 
@@ -162,10 +179,26 @@ pub(super) fn process_tracker_events(
                     );
                     continue;
                 };
-                index_owner.insert(e.unit_tag_index, (tag, idx));
+                index_owner.insert(
+                    e.unit_tag_index,
+                    IndexEntry {
+                        tag,
+                        player_idx: idx,
+                        unit_type: e.unit_type_name.clone(),
+                    },
+                );
 
                 let category = classify_entity(&e.unit_type_name);
                 let creator_ability = e.creator_ability_name.clone().filter(|s| !s.is_empty());
+                // Tag completo do prédio produtor (Gateway/Robo/Stargate/
+                // Nexus/CC/etc.). Disponível pra unidades treinadas; vem
+                // como None pra spawns iniciais e larvas. O build_order
+                // usa esse tag pra encadear `start = max(cmd, prev_finish)`
+                // por produtor; quando é None ele cai no fallback antigo.
+                let creator_tag = match (e.creator_unit_tag_index, e.creator_unit_tag_recycle) {
+                    (Some(ci), Some(cr)) => Some(unit_tag(ci, cr)),
+                    _ => None,
+                };
 
                 // Decisão baseada no estado atual da tag.
                 let prev_lifecycle = tag_map.get(&tag).map(|s| (s.entity_type.clone(), s.lifecycle));
@@ -186,6 +219,7 @@ pub(super) fn process_tracker_events(
                                 pos_x: e.x,
                                 pos_y: e.y,
                                 creator_ability: creator_ability.clone(),
+                                creator_tag,
                                 killer_player_id: None,
                             },
                         );
@@ -201,6 +235,7 @@ pub(super) fn process_tracker_events(
                                 pos_x: e.x,
                                 pos_y: e.y,
                                 creator_ability: None,
+                                creator_tag: None,
                                 killer_player_id: None,
                             },
                         );
@@ -232,6 +267,8 @@ pub(super) fn process_tracker_events(
                     Some((prev_type, _)) if prev_type != e.unit_type_name => {
                         // Tag existente, type diferente: morph completion
                         // (UnitTypeChange pode ou não ter chegado antes).
+                        // Em morph in-place o produtor é o próprio tag,
+                        // independentemente do `creator_unit_tag` cru.
                         apply_type_change(
                             &mut players[idx],
                             game_loop,
@@ -253,6 +290,9 @@ pub(super) fn process_tracker_events(
                                 lifecycle: Lifecycle::Finished,
                             },
                         );
+                        if let Some(entry) = index_owner.get_mut(&e.unit_tag_index) {
+                            entry.unit_type = e.unit_type_name.clone();
+                        }
                     }
                     Some((_, Lifecycle::InProgress)) => {
                         // Init prévio + Born agora = produção concluída.
@@ -268,6 +308,7 @@ pub(super) fn process_tracker_events(
                                 pos_x: e.x,
                                 pos_y: e.y,
                                 creator_ability: None,
+                                creator_tag: None,
                                 killer_player_id: None,
                             },
                         );
@@ -292,7 +333,14 @@ pub(super) fn process_tracker_events(
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let category = classify_entity(&e.unit_type_name);
-                index_owner.insert(e.unit_tag_index, (tag, idx));
+                index_owner.insert(
+                    e.unit_tag_index,
+                    IndexEntry {
+                        tag,
+                        player_idx: idx,
+                        unit_type: e.unit_type_name.clone(),
+                    },
+                );
 
                 push_event(
                     &mut players[idx],
@@ -309,6 +357,11 @@ pub(super) fn process_tracker_events(
                         // que o build_order possa distinguir warp-ins/
                         // construções de spawns iniciais.
                         creator_ability: Some(UNIT_INIT_MARKER.to_string()),
+                        // UnitInit é a "construção via Probe/SCV" (e
+                        // warp-ins). Não há produtor pra encadear; o
+                        // build_order cai no fallback antigo
+                        // `start = raw + add_build_time`.
+                        creator_tag: None,
                         killer_player_id: None,
                     },
                 );
@@ -346,6 +399,7 @@ pub(super) fn process_tracker_events(
                         pos_x,
                         pos_y,
                         creator_ability: None,
+                        creator_tag: None,
                         killer_player_id: None,
                     },
                 );
@@ -359,7 +413,11 @@ pub(super) fn process_tracker_events(
 
             ReplayTrackerEvent::UnitDied(e) => {
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
-                index_owner.remove(&e.unit_tag_index);
+                // NOTE: deliberadamente NÃO removemos do `index_owner`
+                // — `game::process_game_events` ainda vai consultar
+                // tipos de prédios mortos quando tentar resolver Cmds
+                // antigos. UnitPositions não causa lixo porque o jogo
+                // não emite posição pra unidades mortas.
                 let Some(state) = tag_map.remove(&tag) else { continue };
                 let Some(&idx) = player_idx.get(&state.player_id) else { continue };
                 let category = classify_entity(&state.entity_type);
@@ -385,6 +443,7 @@ pub(super) fn process_tracker_events(
                         pos_x: e.x,
                         pos_y: e.y,
                         creator_ability: None,
+                        creator_tag: None,
                         killer_player_id: e.killer_player_id,
                     },
                 );
@@ -425,6 +484,9 @@ pub(super) fn process_tracker_events(
                         lifecycle: Lifecycle::Finished,
                     },
                 );
+                if let Some(entry) = index_owner.get_mut(&e.unit_tag_index) {
+                    entry.unit_type = e.unit_type_name.clone();
+                }
             }
 
             ReplayTrackerEvent::UnitPosition(e) => {
@@ -438,14 +500,14 @@ pub(super) fn process_tracker_events(
                 // SC2). Para voltar à mesma escala de células usada por
                 // `UnitBornEvent.x/y` (`u8`), dividimos por 4 de novo.
                 for up in e.to_unit_positions_vec() {
-                    let Some(&(full_tag, idx)) = index_owner.get(&up.tag) else {
+                    let Some(entry) = index_owner.get(&up.tag) else {
                         continue;
                     };
                     let cx = (up.x / 4).clamp(0, 255) as u8;
                     let cy = (up.y / 4).clamp(0, 255) as u8;
-                    players[idx].unit_positions.push(UnitPositionSample {
+                    players[entry.player_idx].unit_positions.push(UnitPositionSample {
                         game_loop,
-                        tag: full_tag,
+                        tag: entry.tag,
                         x: cx,
                         y: cy,
                     });
@@ -496,6 +558,7 @@ fn apply_type_change(
             pos_x,
             pos_y,
             creator_ability: None,
+            creator_tag: None,
             killer_player_id: None,
         },
     );
@@ -505,6 +568,10 @@ fn apply_type_change(
     // quando veio de UnitTypeChange (siege, lift, lower depot, etc).
     // O build_order só inclui o caso Some("MorphTo*"); transformações
     // mecânicas (None) não devem aparecer no build order.
+    //
+    // Em morph in-place o "produtor" é o próprio prédio sendo morphado
+    // (CC→Orbital, Gateway→WarpGate, etc.). Setando creator_tag=Some(tag)
+    // o build_order pode pegar o cmd MorphTo* via FIFO.
     push_event(
         player,
         EntityEvent {
@@ -517,6 +584,7 @@ fn apply_type_change(
             pos_x,
             pos_y,
             creator_ability,
+            creator_tag: Some(tag),
             killer_player_id: None,
         },
     );
@@ -532,6 +600,7 @@ fn apply_type_change(
             pos_x,
             pos_y,
             creator_ability: None,
+            creator_tag: None,
             killer_player_id: None,
         },
     );

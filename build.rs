@@ -1,6 +1,16 @@
-// Gera `$OUT_DIR/balance_data_generated.rs` com a tabela
-// `(protocol_version, action_name, build_loops)` extraída das JSONs de
-// BalanceData embutidas pelo crate s2protocol.
+// Gera `$OUT_DIR/balance_data_generated.rs` com duas tabelas extraídas
+// das JSONs de BalanceData embutidas pelo crate s2protocol:
+//
+// 1. `BALANCE_ENTRIES: &[(protocol_version, action_name, build_loops)]`
+//    — usada por `build_time_loops` para o cálculo de build order.
+// 2. `ABILITY_ENTRIES: &[(protocol_version, producer, ability_id,
+//    command_index, action_name)]` — usada por `resolve_ability_command`
+//    no parser de game events para descobrir, dado um Cmd
+//    `(ability_id, cmd_index)` emitido por um produtor (ex.: Barracks),
+//    qual ação foi disparada (ex.: "Marine"). Necessário porque o
+//    `read_game_events` do s2protocol devolve `m_abil.ability` vazio em
+//    versões byte-aligned — só o `SC2EventIterator` enriquece, e a gente
+//    não usa o iterator do s2protocol.
 //
 // Por que aqui e não em runtime: o s2protocol expõe
 // `read_balance_data_from_included_assets()`, mas ela tem um bug em
@@ -23,6 +33,11 @@ use std::path::{Path, PathBuf};
 
 use cargo_metadata::MetadataCommand;
 use serde_json::Value;
+
+/// Uma entrada da tabela de abilities. A chave é
+/// `(version, producer, ability_id, command_index)`; o valor é o
+/// `action_id` (ex.: "Marine", "Stimpack", "TerranInfantryWeaponsLevel1").
+type AbilityKey = (u32, String, u16, i64);
 
 const LOOPS_PER_GAME_SECOND: f32 = 16.0;
 
@@ -54,6 +69,8 @@ fn main() {
     // (versão, nome) → loops. BTreeMap dá saída determinística (e
     // diff-friendly) no arquivo gerado.
     let mut entries: BTreeMap<(u32, String), u32> = BTreeMap::new();
+    // (versão, producer, ability_id, command_index) → action_id.
+    let mut abilities: BTreeMap<AbilityKey, String> = BTreeMap::new();
 
     for version_entry in fs::read_dir(&balance_dir).expect("read_dir BalanceData") {
         let version_entry = version_entry.expect("entry");
@@ -80,6 +97,7 @@ fn main() {
                 Err(e) => panic!("falha ao parsear {}: {e}", unit_path.display()),
             };
             collect_unit(&json, version, &mut entries);
+            collect_abilities(&json, version, &mut abilities);
         }
     }
 
@@ -87,8 +105,12 @@ fn main() {
         !entries.is_empty(),
         "nenhuma entrada de BalanceData extraída — algo está errado"
     );
+    assert!(
+        !abilities.is_empty(),
+        "nenhuma entrada de abilities extraída — algo está errado"
+    );
 
-    write_generated(&entries);
+    write_generated(&entries, &abilities);
 
     // Re-roda o build script se a árvore de balance data mudar (cargo
     // update do s2protocol troca o source dir, e o cargo já invalida
@@ -185,11 +207,72 @@ fn insert(map: &mut BTreeMap<(u32, String), u32>, version: u32, name: String, lo
     map.entry((version, name)).or_insert(loops);
 }
 
+/// Walks `trains.unit[]`, `builds.unit[]` e `researches.upgrade[]` de
+/// um JSON de produtor (Barracks, Gateway, Forge, etc.) e popula a
+/// tabela `(version, producer, ability_id, cmd_index) → action_id`.
+///
+/// É essa tabela que permite ao parser de game events traduzir um Cmd
+/// `(m_abil_link, m_abil_cmd_index)` emitido por um produtor na seleção
+/// ativa para o nome canônico da ação ("Marine", "Stimpack", etc.) que
+/// o build_order pode casar contra o `entity_type` do EntityEvent.
+fn collect_abilities(json: &Value, version: u32, out: &mut BTreeMap<AbilityKey, String>) {
+    let Some(producer) = json.get("@id").and_then(Value::as_str) else {
+        return;
+    };
+
+    for section in ["trains", "builds"] {
+        if let Some(units) = json
+            .get(section)
+            .and_then(|s| s.get("unit"))
+            .and_then(Value::as_array)
+        {
+            for u in units {
+                let Some(action_id) = u.get("@id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(ability_id) = u.get("@ability").and_then(Value::as_u64) else {
+                    continue;
+                };
+                let cmd_index = u.get("@index").and_then(Value::as_i64).unwrap_or(0);
+                if action_id.is_empty() {
+                    continue;
+                }
+                out.entry((version, producer.to_string(), ability_id as u16, cmd_index))
+                    .or_insert_with(|| action_id.to_string());
+            }
+        }
+    }
+
+    if let Some(researches) = json
+        .get("researches")
+        .and_then(|r| r.get("upgrade"))
+        .and_then(Value::as_array)
+    {
+        for r in researches {
+            let Some(action_id) = r.get("@id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(ability_id) = r.get("@ability").and_then(Value::as_u64) else {
+                continue;
+            };
+            let cmd_index = r.get("@index").and_then(Value::as_i64).unwrap_or(0);
+            if action_id.is_empty() {
+                continue;
+            }
+            out.entry((version, producer.to_string(), ability_id as u16, cmd_index))
+                .or_insert_with(|| action_id.to_string());
+        }
+    }
+}
+
 fn seconds_to_loops(seconds_normal_speed: f32) -> u32 {
     (seconds_normal_speed * LOOPS_PER_GAME_SECOND).round() as u32
 }
 
-fn write_generated(entries: &BTreeMap<(u32, String), u32>) {
+fn write_generated(
+    entries: &BTreeMap<(u32, String), u32>,
+    abilities: &BTreeMap<AbilityKey, String>,
+) {
     let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR não definido");
     let out_path = Path::new(&out_dir).join("balance_data_generated.rs");
 
@@ -203,6 +286,19 @@ fn write_generated(entries: &BTreeMap<(u32, String), u32>) {
         // é seguro. Defendendo só por garantia futura:
         let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
         s.push_str(&format!("    ({version}, \"{escaped}\", {loops}),\n"));
+    }
+    s.push_str("];\n\n");
+
+    s.push_str(
+        "// Cada tupla é (protocol_version, producer, ability_id, command_index, action_name).\n",
+    );
+    s.push_str("pub static ABILITY_ENTRIES: &[(u32, &str, u16, i64, &str)] = &[\n");
+    for ((version, producer, ability_id, cmd_index), action) in abilities {
+        let producer_esc = producer.replace('\\', "\\\\").replace('"', "\\\"");
+        let action_esc = action.replace('\\', "\\\\").replace('"', "\\\"");
+        s.push_str(&format!(
+            "    ({version}, \"{producer_esc}\", {ability_id}, {cmd_index}, \"{action_esc}\"),\n",
+        ));
     }
     s.push_str("];\n");
 

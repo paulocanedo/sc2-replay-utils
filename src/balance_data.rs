@@ -41,10 +41,19 @@ include!(concat!(env!("OUT_DIR"), "/balance_data_generated.rs"));
 /// `"TerranInfantryWeaponsLevel1"`).
 type Table = HashMap<&'static str, u32>;
 
+/// Tabela `producer → (ability_id, command_index) → action_id` para
+/// uma única versão de protocolo. Usada pelo parser de game events
+/// para resolver `m_abil_link`/`m_abil_cmd_index` em nomes de ação
+/// canônicos (ex.: `Barracks[(161, 0)] → "Marine"`). É aninhada por
+/// producer para permitir lookup com `&str` em vez de exigir
+/// `&'static str` na chave.
+type AbilityTable = HashMap<&'static str, HashMap<(u16, i64), &'static str>>;
+
 struct Balance {
     /// `BTreeMap` para permitir busca pelo maior `version ≤ alvo` em
     /// O(log n).
     versions: BTreeMap<u32, Table>,
+    abilities: BTreeMap<u32, AbilityTable>,
 }
 
 static GLOBAL: OnceLock<Balance> = OnceLock::new();
@@ -55,7 +64,19 @@ fn load() -> &'static Balance {
         for &(version, name, loops) in BALANCE_ENTRIES {
             versions.entry(version).or_default().insert(name, loops);
         }
-        Balance { versions }
+        let mut abilities: BTreeMap<u32, AbilityTable> = BTreeMap::new();
+        for &(version, producer, ability_id, cmd_index, action) in ABILITY_ENTRIES {
+            abilities
+                .entry(version)
+                .or_default()
+                .entry(producer)
+                .or_default()
+                .insert((ability_id, cmd_index), action);
+        }
+        Balance {
+            versions,
+            abilities,
+        }
     })
 }
 
@@ -71,6 +92,14 @@ fn pick_table(b: &Balance, base_build: u32) -> Option<&Table> {
         .map(|(_, t)| t)
 }
 
+fn pick_ability_table(b: &Balance, base_build: u32) -> Option<&AbilityTable> {
+    b.abilities
+        .range(..=base_build)
+        .next_back()
+        .or_else(|| b.abilities.iter().next())
+        .map(|(_, t)| t)
+}
+
 /// Tempo de build/research/upgrade para `name` em **game loops**,
 /// resolvido contra o `base_build` (protocol version) do replay.
 ///
@@ -81,6 +110,28 @@ pub fn build_time_loops(name: &str, base_build: u32) -> u32 {
     let b = load();
     let Some(table) = pick_table(b, base_build) else { return 0 };
     table.get(name).copied().unwrap_or(0)
+}
+
+/// Resolve um Cmd `(producer, ability_id, command_index)` no nome
+/// canônico da ação que ele dispara — exatamente o `@id` que aparece
+/// nos eventos do tracker (ex.: `"Marine"`, `"Stimpack"`,
+/// `"TerranInfantryWeaponsLevel1"`).
+///
+/// Retorna `None` quando a combinação não corresponde a uma produção
+/// conhecida (cmds que não são train/build/research, ou unidades que
+/// não estão no balance data). O parser usa `None` como sinal de
+/// "ignorar este cmd" — o build_order vai cair no fallback antigo.
+pub fn resolve_ability_command(
+    producer: &str,
+    ability_id: u16,
+    command_index: i64,
+    base_build: u32,
+) -> Option<&'static str> {
+    let b = load();
+    let table = pick_ability_table(b, base_build)?;
+    table
+        .get(producer)
+        .and_then(|inner| inner.get(&(ability_id, command_index)).copied())
 }
 
 #[cfg(test)]
