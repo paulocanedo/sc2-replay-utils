@@ -13,12 +13,13 @@ use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
-const ALL_KINDS: [EntryKind; 5] = [
+const ALL_KINDS: [EntryKind; 6] = [
     EntryKind::Worker,
     EntryKind::Unit,
     EntryKind::Structure,
     EntryKind::Research,
     EntryKind::Upgrade,
+    EntryKind::Inject,
 ];
 
 /// Filtros globais de categoria. Pelo menos um deve estar ativo.
@@ -29,6 +30,7 @@ struct BuildOrderFilter {
     show_structures: bool,
     show_research: bool,
     show_upgrades: bool,
+    show_injects: bool,
 }
 
 impl Default for BuildOrderFilter {
@@ -39,6 +41,7 @@ impl Default for BuildOrderFilter {
             show_structures: true,
             show_research: true,
             show_upgrades: true,
+            show_injects: true,
         }
     }
 }
@@ -52,6 +55,7 @@ impl BuildOrderFilter {
             EntryKind::Structure => self.show_structures,
             EntryKind::Research => self.show_research,
             EntryKind::Upgrade => self.show_upgrades,
+            EntryKind::Inject => self.show_injects,
         }
     }
 
@@ -62,6 +66,7 @@ impl BuildOrderFilter {
             + self.show_structures as u32
             + self.show_research as u32
             + self.show_upgrades as u32
+            + self.show_injects as u32
     }
 }
 
@@ -130,6 +135,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         ui.checkbox(&mut filter.show_structures, "Estruturas");
         ui.checkbox(&mut filter.show_research, "Pesquisa");
         ui.checkbox(&mut filter.show_upgrades, "Upgrades");
+        ui.checkbox(&mut filter.show_injects, "Injects");
 
         if filter.active_count() == 0 {
             filter = prev;
@@ -139,7 +145,8 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             || filter.show_units != prev.show_units
             || filter.show_structures != prev.show_structures
             || filter.show_research != prev.show_research
-            || filter.show_upgrades != prev.show_upgrades;
+            || filter.show_upgrades != prev.show_upgrades
+            || filter.show_injects != prev.show_injects;
     });
     if filter_changed {
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
@@ -351,7 +358,7 @@ fn player_column(
                         if !filter.allows(kind) {
                             continue;
                         }
-                        let display_name = locale::localize(&entry.action, lang);
+                        let display_name = format_display_name(&entry.action, lang);
                         if !query_lower.is_empty()
                             && !entry.action.to_ascii_lowercase().contains(query_lower)
                             && !display_name.to_lowercase().contains(query_lower)
@@ -454,6 +461,27 @@ fn player_column(
         });
 }
 
+/// Formata o nome de exibição de uma entrada. Para injects, parseia o
+/// formato `InjectLarva@Type@X_Y` e exibe como
+/// "Inject Larva @ Hatchery (45, 67)". Para tudo o mais, delega ao
+/// `locale::localize`.
+fn format_display_name(action: &str, lang: locale::Language) -> String {
+    if let Some(rest) = action.strip_prefix("InjectLarva@") {
+        // rest = "Hatchery@45_67"
+        let inject_label = locale::localize("InjectLarva", lang);
+        if let Some((target_type, coords)) = rest.split_once('@') {
+            let target_label = locale::localize(target_type, lang);
+            let coords_display = coords.replace('_', ", ");
+            format!("{inject_label} @ {target_label} ({coords_display})")
+        } else {
+            let target_label = locale::localize(rest, lang);
+            format!("{inject_label} @ {target_label}")
+        }
+    } else {
+        locale::localize(action, lang).to_string()
+    }
+}
+
 /// Cor característica de cada categoria. Escolhidas pra serem
 /// distinguíveis mesmo em scan rápido e não colidirem com as cores
 /// de slot (P1 vermelho / P2 azul) usadas na borda do card.
@@ -464,6 +492,7 @@ fn kind_color(kind: EntryKind) -> Color32 {
         EntryKind::Structure => Color32::from_rgb(230, 170, 80), // laranja
         EntryKind::Research => Color32::from_rgb(180, 140, 230), // roxo
         EntryKind::Upgrade => Color32::from_rgb(240, 210, 120),  // amarelo/dourado
+        EntryKind::Inject => Color32::from_rgb(100, 200, 220),   // ciano/teal
     }
 }
 
@@ -488,11 +517,11 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::La
     out.push_str("tipo  início  fim     supply  ação\n");
     for entry in &player.entries {
         let kind = classify_entry(entry);
-        let display = locale::localize(&entry.action, lang);
+        let display = format_display_name(&entry.action, lang);
         let action_text = if entry.count > 1 {
             format!("{} x{}", display, entry.count)
         } else {
-            display.to_string()
+            display
         };
         let outcome_mark = match entry.outcome {
             EntryOutcome::Completed => "",

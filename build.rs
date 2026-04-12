@@ -263,6 +263,36 @@ fn collect_abilities(json: &Value, version: u32, out: &mut BTreeMap<AbilityKey, 
                 .or_insert_with(|| action_id.to_string());
         }
     }
+
+    // Abilities especiais rastreadas no build order (ex.: SpawnLarva).
+    // Vivem em `abilities.ability[]` com `@index` (ability_id) e
+    // `command[].@index` (cmd_index). Whitelist evita poluir a tabela
+    // com move/stop/attack/burrow.
+    const TRACKED_ABILITIES: &[&str] = &["SpawnLarva"];
+    if let Some(abilities) = json
+        .get("abilities")
+        .and_then(|a| a.get("ability"))
+        .and_then(Value::as_array)
+    {
+        for a in abilities {
+            let Some(aid) = a.get("@id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !TRACKED_ABILITIES.contains(&aid) {
+                continue;
+            }
+            let Some(ability_index) = a.get("@index").and_then(Value::as_u64) else {
+                continue;
+            };
+            if let Some(commands) = a.get("command").and_then(Value::as_array) {
+                for cmd in commands {
+                    let cmd_index = cmd.get("@index").and_then(Value::as_i64).unwrap_or(0);
+                    out.entry((version, producer.to_string(), ability_index as u16, cmd_index))
+                        .or_insert_with(|| aid.to_string());
+                }
+            }
+        }
+    }
 }
 
 fn seconds_to_loops(seconds_normal_speed: f32) -> u32 {

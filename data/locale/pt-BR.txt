@@ -103,3 +103,44 @@ ProtossGroundArmorsLevel3=Blindagem Terrestre Nível 3
 ProtossAirWeaponsLevel1=Armas Aéreas Nível 1
 ProtossAirArmorsLevel1=Blindagem Aérea Nível 1
 ProtossShieldsLevel1=Escudos Nível 1
+
+# ── Unidades Zerg ──
+Drone=Operária
+Queen=Rainha
+Zergling=Zergling
+Baneling=Baneling
+Roach=Barata
+Ravager=Devastador
+Hydralisk=Hidralisca
+LurkerMP=Espreitador
+Mutalisk=Mutalisco
+Corruptor=Corruptor
+BroodLord=Senhor das Ninhadas
+Infestor=Infestador
+SwarmHostMP=Hospedeiro do Enxame
+Viper=Víbora
+Ultralisk=Ultralisco
+Overlord=Soberano
+Overseer=Supervisor
+
+# ── Estruturas Zerg ──
+Hatchery=Incubadora
+Lair=Covil
+Hive=Colmeia
+SpawningPool=Reservatório de Desova
+Extractor=Extrator
+RoachWarren=Ninho de Baratas
+BanelingNest=Ninho de Banelings
+EvolutionChamber=Câmara de Evolução
+HydraliskDen=Toca de Hidralisca
+LurkerDen=Toca de Espreitador
+Spire=Pináculo
+GreaterSpire=Grande Pináculo
+InfestationPit=Fosso de Infestação
+UltraliskCavern=Caverna de Ultralisco
+NydusNetwork=Rede Nydus
+SpineCrawler=Rastejante Espinhal
+SporeCrawler=Rastejante Esporal
+
+# ── Habilidades Zerg ──
+InjectLarva=Injetar Larva

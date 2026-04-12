@@ -353,6 +353,29 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         });
     }
 
+    // Inject Larva — cada inject vira uma entrada própria indicando
+    // a Hatchery/Lair/Hive alvo. A posição é codificada na action
+    // string pra permitir distinguir bases diferentes na UI.
+    for inject in &player.inject_cmds {
+        let (supply, supply_made) = supply_at(player, inject.game_loop);
+        raw.push(BuildOrderEntry {
+            supply,
+            supply_made,
+            game_loop: inject.game_loop,
+            finish_loop: inject.game_loop, // ação instantânea
+            seq: u32::MAX,
+            action: format!(
+                "InjectLarva@{}@{}_{}",
+                inject.target_type, inject.target_x, inject.target_y
+            ),
+            count: 1,
+            is_upgrade: false,
+            is_structure: false,
+            outcome: EntryOutcome::Completed,
+            chrono_boosts: 0,
+        });
+    }
+
     // Sort por (game_loop, seq) — agora `game_loop` é o instante de
     // início, então a ordem cronológica é preservada na display.
     raw.sort_by_key(|e| (e.game_loop, e.seq));
@@ -489,7 +512,11 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
     let mut out: Vec<BuildOrderEntry> = Vec::new();
     for entry in entries {
         match out.last_mut() {
-            Some(last) if last.action == entry.action && last.outcome == entry.outcome => {
+            Some(last)
+                if last.action == entry.action
+                    && last.outcome == entry.outcome
+                    && !last.action.starts_with("InjectLarva") =>
+            {
                 last.count += 1;
                 // Acumula chronos do grupo — o display mostra o total.
                 last.chrono_boosts = last.chrono_boosts.saturating_add(entry.chrono_boosts);
@@ -516,6 +543,7 @@ pub enum EntryKind {
     Structure,
     Research,
     Upgrade,
+    Inject,
 }
 
 #[allow(dead_code)] // consumido apenas pelo binário GUI
@@ -530,6 +558,7 @@ impl EntryKind {
             EntryKind::Structure => "S",
             EntryKind::Research => "R",
             EntryKind::Upgrade => "P",
+            EntryKind::Inject => "I",
         }
     }
 
@@ -541,6 +570,7 @@ impl EntryKind {
             EntryKind::Structure => "Structure",
             EntryKind::Research => "Research",
             EntryKind::Upgrade => "Upgrade",
+            EntryKind::Inject => "Inject",
         }
     }
 }
@@ -550,6 +580,9 @@ impl EntryKind {
 /// bruto da ação para distinguir worker/unit e research/upgrade.
 #[allow(dead_code)] // consumido apenas pelo binário GUI
 pub fn classify_entry(entry: &BuildOrderEntry) -> EntryKind {
+    if entry.action.starts_with("InjectLarva") {
+        return EntryKind::Inject;
+    }
     if entry.is_upgrade {
         if is_leveled_upgrade(&entry.action) {
             EntryKind::Upgrade

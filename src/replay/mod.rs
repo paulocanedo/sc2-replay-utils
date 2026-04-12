@@ -37,7 +37,7 @@ pub use types::{
 // precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
 pub use types::{
-    EntityEvent, ProductionCmd, StatsSnapshot, UnitPositionSample, UpgradeEntry,
+    EntityEvent, InjectCmd, ProductionCmd, StatsSnapshot, UnitPositionSample, UpgradeEntry,
 };
 
 use std::collections::HashMap;
@@ -107,6 +107,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),
                 production_cmds: Vec::new(),
+                inject_cmds: Vec::new(),
                 unit_positions: Vec::new(),
                 alive_count: HashMap::new(),
                 worker_capacity: Vec::new(),

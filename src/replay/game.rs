@@ -21,14 +21,18 @@
 use std::collections::HashMap;
 
 use s2protocol::game_events::{
-    GameEControlGroupUpdate, GameSSelectionMask, ReplayGameEvent,
+    GameEControlGroupUpdate, GameSCmdData, GameSSelectionMask, ReplayGameEvent,
 };
 use s2protocol::tracker_events::unit_tag_index;
 
 use crate::balance_data::resolve_ability_command;
 
 use super::tracker::IndexOwnerMap;
-use super::types::{PlayerTimeline, ProductionCmd};
+use super::types::{InjectCmd, PlayerTimeline, ProductionCmd};
+
+/// Fator de escala das coordenadas de game events → tile coords.
+/// Game events usam fixed-point com 12 bits fracionários.
+const POS_RATIO: i64 = 4096;
 
 /// Mesma constante usada por `s2protocol::state::ACTIVE_UNITS_GROUP_IDX`
 /// — o slot 10 do array de control groups guarda a seleção ativa do
@@ -160,12 +164,35 @@ pub(super) fn process_game_events(
                     abil.m_abil_cmd_index,
                     base_build,
                 ) {
-                    Some(name) => name.to_string(),
+                    Some(name) => name,
                     None => continue,
                 };
+
+                // SpawnLarva (Inject Larva) — captura separada com info
+                // do alvo (Hatchery/Lair/Hive) extraída de m_data.
+                if action == "SpawnLarva" {
+                    if let GameSCmdData::TargetUnit(ref tu) = cmd.m_data {
+                        let target_idx = unit_tag_index(tu.m_tag as i64);
+                        let target_type = index_owner
+                            .get(&target_idx)
+                            .map(|e| e.unit_type.clone())
+                            .unwrap_or_default();
+                        let target_x = (tu.m_snapshot_point.x / POS_RATIO) as u8;
+                        let target_y = (tu.m_snapshot_point.y / POS_RATIO) as u8;
+                        players[player_idx].inject_cmds.push(InjectCmd {
+                            game_loop: game_loop as u32,
+                            target_tag_index: target_idx,
+                            target_type,
+                            target_x,
+                            target_y,
+                        });
+                    }
+                    continue;
+                }
+
                 players[player_idx].production_cmds.push(ProductionCmd {
                     game_loop: game_loop as u32,
-                    ability: action,
+                    ability: action.to_string(),
                     producer_tag_indexes: vec![producer_index],
                     consumed: false,
                 });

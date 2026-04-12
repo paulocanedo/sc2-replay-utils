@@ -148,6 +148,22 @@ pub struct ChatEntry {
     pub message: String,
 }
 
+/// Comando de Inject Larva (SpawnLarva) capturado dos game events.
+/// Cada instância representa uma Queen clicando inject numa Hatchery/
+/// Lair/Hive específica.
+#[derive(Clone)]
+pub struct InjectCmd {
+    pub game_loop: u32,
+    /// `unit_tag_index` da Hatchery/Lair/Hive alvo.
+    pub target_tag_index: u32,
+    /// Tipo resolvido do alvo: "Hatchery", "Lair" ou "Hive".
+    pub target_type: String,
+    /// Posição do alvo em coordenadas de tile (mesma escala que
+    /// `EntityEvent.pos_x/pos_y`).
+    pub target_x: u8,
+    pub target_y: u8,
+}
+
 pub struct PlayerTimeline {
     pub name: String,
     pub clan: String,
@@ -172,6 +188,12 @@ pub struct PlayerTimeline {
     /// estimativa). Vazio em fast-path / quando game events não foram
     /// processados.
     pub production_cmds: Vec<ProductionCmd>,
+
+    /// Comandos de Inject Larva (SpawnLarva) emitidos pelo jogador,
+    /// ordenados por `game_loop`. Cada entrada indica qual Hatchery/
+    /// Lair/Hive foi alvo da injeção. Usado pelo `build_order` para
+    /// gerar entradas de inject na tabela.
+    pub inject_cmds: Vec<InjectCmd>,
 
     /// Amostras periódicas de posição de unidades vivas, vindas dos
     /// `UnitPositionsEvent` do tracker. Ordenado por `game_loop`. Só

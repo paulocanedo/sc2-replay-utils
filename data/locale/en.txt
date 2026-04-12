@@ -103,3 +103,44 @@ ProtossGroundArmorsLevel3=Ground Armor Level 3
 ProtossAirWeaponsLevel1=Air Weapons Level 1
 ProtossAirArmorsLevel1=Air Armor Level 1
 ProtossShieldsLevel1=Shields Level 1
+
+# ── Zerg Units ──
+Drone=Drone
+Queen=Queen
+Zergling=Zergling
+Baneling=Baneling
+Roach=Roach
+Ravager=Ravager
+Hydralisk=Hydralisk
+LurkerMP=Lurker
+Mutalisk=Mutalisk
+Corruptor=Corruptor
+BroodLord=Brood Lord
+Infestor=Infestor
+SwarmHostMP=Swarm Host
+Viper=Viper
+Ultralisk=Ultralisk
+Overlord=Overlord
+Overseer=Overseer
+
+# ── Zerg Structures ──
+Hatchery=Hatchery
+Lair=Lair
+Hive=Hive
+SpawningPool=Spawning Pool
+Extractor=Extractor
+RoachWarren=Roach Warren
+BanelingNest=Baneling Nest
+EvolutionChamber=Evolution Chamber
+HydraliskDen=Hydralisk Den
+LurkerDen=Lurker Den
+Spire=Spire
+GreaterSpire=Greater Spire
+InfestationPit=Infestation Pit
+UltraliskCavern=Ultralisk Cavern
+NydusNetwork=Nydus Network
+SpineCrawler=Spine Crawler
+SporeCrawler=Spore Crawler
+
+# ── Zerg Abilities ──
+InjectLarva=Inject Larva
