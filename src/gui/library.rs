@@ -582,14 +582,13 @@ fn entry_row(
     loadable && inner.response.interact(Sense::click()).clicked()
 }
 
-fn matchup_label(meta: &ParsedMeta, config: &AppConfig) -> String {
+fn matchup_label(meta: &ParsedMeta, _config: &AppConfig) -> String {
     if meta.players.is_empty() {
         return "(sem jogadores)".to_string();
     }
     let mut parts = Vec::with_capacity(meta.players.len());
     for p in &meta.players {
-        let mark = if config.is_user(&p.name) { "★ " } else { "" };
-        parts.push(format!("{mark}{}({})", p.name, race_letter(&p.race)));
+        parts.push(format!("{}({})", p.name, race_letter(&p.race)));
     }
     parts.join(" vs ")
 }

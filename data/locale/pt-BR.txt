@@ -1,0 +1,105 @@
+# SC2 Nomes Localizados — Português Brasileiro (pt-BR)
+#
+# Formato: ChaveMpq=Nome de Exibição
+# Fonte: examples/old_republic_50.SC2Replay (golden)
+
+# ── Unidades Terran ──
+SCV=VCE
+Marine=Soldado
+Reaper=Exterminador
+Marauder=Marauder
+Medivac=Ambunave
+WidowMine=Mina Viúva
+GhostAlternate=Fantasma
+VikingFighter=Viking
+Raven=Corvo
+Battlecruiser=Cruzador de Batalha
+
+# ── Estruturas Terran ──
+CommandCenter=Centro de Comando
+OrbitalCommand=Comando Orbital
+PlanetaryFortress=Fortaleza Planetária
+SupplyDepot=Depósito de Suprimentos
+Refinery=Refinaria
+Barracks=Quartel
+BarracksTechLab=Laboratório do Quartel
+BarracksReactor=Reator do Quartel
+Factory=Fábrica
+FactoryReactor=Reator da Fábrica
+Starport=Estaleiro Sideral
+StarportTechLab=Laboratório do Estaleiro Sideral
+StarportReactor=Reator do Estaleiro Sideral
+EngineeringBay=Polo de Engenharia
+Armory=Arsenal
+FusionCore=Núcleo de Fusão
+GhostAcademy=Academia Fantasma
+Bunker=Casamata
+MissileTurret=Torre de Mísseis
+SensorTower=Torre Sensorial
+
+# ── Pesquisas Terran ──
+Stimpack=Injeção de Esteróides
+PunisherGrenades=Cápsulas Concussivas
+ShieldWall=Escudos de Combate
+PersonalCloaking=Camuflagem Pessoal
+InterferenceMatrix=Matriz de Interferência
+BattlecruiserEnableSpecializations=Reequipamento de Armas
+
+# ── Melhorias Terran ──
+TerranInfantryWeaponsLevel1=Armas de Infantaria Nível 1
+TerranInfantryWeaponsLevel2=Armas de Infantaria Nível 2
+TerranInfantryArmorsLevel1=Blindagem de Infantaria Nível 1
+TerranInfantryArmorsLevel2=Blindagem de Infantaria Nível 2
+TerranShipWeaponsLevel1=Armas de Nave Nível 1
+TerranShipWeaponsLevel2=Armas de Nave Nível 2
+TerranVehicleAndShipArmorsLevel1=Blindagem de Veículo e Nave Nível 1
+TerranVehicleAndShipArmorsLevel2=Blindagem de Veículo e Nave Nível 2
+
+# ── Unidades Protoss ──
+Probe=Sonda
+Zealot=Fanático
+Stalker=Stalker
+Sentry=Sentinela
+HighTemplar=Alto Templário
+Archon=Arconte
+Immortal=Imortal
+Colossus=Colosso
+Observer=Observador
+VoidRay=Destruidora
+Tempest=Tempesto
+
+# ── Estruturas Protoss ──
+Nexus=Nexus
+Pylon=Pilar
+Assimilator=Assimilador
+AssimilatorRich=Assimilador Rico
+Gateway=Portal
+WarpGate=Portal de Translação
+CyberneticsCore=Núcleo Cibernético
+TwilightCouncil=Conselho do Crepúsculo
+Forge=Forja
+Stargate=Portão Estelar
+TemplarArchive=Arquivo Templário
+RoboticsFacility=Centro de Robótica
+RoboticsBay=Baía de Robótica
+FleetBeacon=Farol da Frota
+PhotonCannon=Canhão de Fótons
+ShieldBattery=Bateria de Escudo
+
+# ── Pesquisas Protoss ──
+WarpGateResearch=Portal de Translação
+Charge=Investida
+PsiStormTech=Tempestade Psiônica
+BlinkTech=Teleporte
+ExtendedThermalLance=Lança Térmica Estendida
+
+# ── Melhorias Protoss ──
+ProtossGroundWeaponsLevel1=Armas Terrestres Nível 1
+ProtossGroundWeaponsLevel2=Armas Terrestres Nível 2
+ProtossGroundWeaponsLevel3=Armas Terrestres Nível 3
+ProtossGroundArmorsLevel1=Blindagem Terrestre Nível 1
+ProtossGroundArmorsLevel2=Blindagem Terrestre Nível 2
+ProtossGroundArmorsLevel3=Blindagem Terrestre Nível 3
+ProtossAirWeaponsLevel1=Armas Aéreas Nível 1
+ProtossAirArmorsLevel1=Blindagem Aérea Nível 1
+ProtossShieldsLevel1=Escudos Nível 1

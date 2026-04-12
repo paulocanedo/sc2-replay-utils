@@ -8,6 +8,7 @@
 use egui::{Context, RichText, ScrollArea, Slider, Window};
 
 use crate::config::AppConfig;
+use crate::locale::Language;
 
 #[derive(Default)]
 pub struct SettingsOutcome {
@@ -106,6 +107,19 @@ pub fn show(
                         "Carregar automaticamente quando surgir novo replay",
                     );
                 });
+            });
+
+            ui.separator();
+            ui.heading("Idioma");
+            ui.horizontal(|ui| {
+                ui.label("Nomes de unidades/pesquisas:");
+                egui::ComboBox::from_id_salt("lang_combo")
+                    .selected_text(config.language.label())
+                    .show_ui(ui, |ui| {
+                        for &lang in Language::all() {
+                            ui.selectable_value(&mut config.language, lang, lang.label());
+                        }
+                    });
             });
 
             ui.separator();

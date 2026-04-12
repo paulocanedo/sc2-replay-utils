@@ -8,12 +8,9 @@ use egui::{Color32, Grid, Id, RichText, ScrollArea, TextEdit, Ui};
 use crate::build_order::{classify_entry, EntryKind, EntryOutcome, PlayerBuildOrder};
 use crate::colors::{player_slot_color, user_fill, CARD_FILL, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
+use crate::locale;
 use crate::replay_state::{fmt_time, LoadedReplay};
-
-/// Cor do ícone de Chrono Boost: azul-ciano elétrico, inspirado no
-/// efeito visual do Chrono Boost in-game (brilho azul claro no
-/// prédio alvo).
-const CHRONO_COLOR: Color32 = Color32::from_rgb(80, 200, 255);
+use crate::salt;
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 5] = [
@@ -167,10 +164,43 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             for (i, player) in players.iter().take(n).enumerate() {
                 let ui = &mut cols[i];
                 let is_user = config.is_user(&player.name);
-                player_column(ui, player, i, lps, is_user, &query_lower, &filter);
+                player_column(ui, player, i, lps, is_user, &query_lower, &filter, config.language);
             }
         });
     });
+
+    // ── Modais SALT ─────────────────────────────────────────────
+    for (i, player) in players.iter().take(n).enumerate() {
+        let open_id = Id::new(format!("salt_open_{}", i));
+        let data_id = Id::new(format!("salt_modal_{}", i));
+        let mut is_open: bool = ui.ctx().data(|d| d.get_temp(open_id).unwrap_or(false));
+        if is_open {
+            let encoded: String = ui
+                .ctx()
+                .data(|d| d.get_temp::<String>(data_id).unwrap_or_default());
+            egui::Window::new(format!("SALT Encoding — {}", player.name))
+                .open(&mut is_open)
+                .resizable(true)
+                .default_width(500.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label(RichText::new("Copie a string abaixo para importar em ferramentas como Spawning Tool, Embot Advanced ou SC2 Scrapbook.").small());
+                    ui.add_space(6.0);
+                    let mut text = encoded.clone();
+                    ui.add(
+                        TextEdit::multiline(&mut text)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY)
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    ui.add_space(4.0);
+                    if ui.button("📋 Copiar para área de transferência").clicked() {
+                        ui.ctx().copy_text(encoded);
+                    }
+                });
+            ui.ctx().data_mut(|d| d.insert_temp(open_id, is_open));
+        }
+    }
 
     // ── Legenda fixa no rodapé ──────────────────────────────────
     ui.separator();
@@ -182,8 +212,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         ui.add_space(8.0);
         ui.label(
             RichText::new("⚡")
-                .strong()
-                .color(CHRONO_COLOR),
+                .strong(),
         )
         .on_hover_text("Chrono Boost (Protoss)");
         ui.small("chrono");
@@ -233,6 +262,7 @@ fn player_column(
     is_user: bool,
     query_lower: &str,
     filter: &BuildOrderFilter,
+    lang: locale::Language,
 ) {
     let slot_color = player_slot_color(index);
     let fill = if is_user { user_fill(index) } else { CARD_FILL };
@@ -265,8 +295,14 @@ fn player_column(
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("📋").on_hover_text("Copiar build order para a área de transferência").clicked() {
-                        let text = format_clipboard_single(player, lps);
+                        let text = format_clipboard_single(player, lps, lang);
                         ui.ctx().copy_text(text);
+                    }
+                    let salt_modal_id = Id::new(format!("salt_modal_{}", index));
+                    if ui.small_button("SALT").on_hover_text("Gerar SALT Encoding").clicked() {
+                        let encoded = salt::encode(player, lps);
+                        ui.ctx().data_mut(|d| d.insert_temp::<String>(salt_modal_id, encoded));
+                        ui.ctx().data_mut(|d| d.insert_temp::<bool>(Id::new(format!("salt_open_{}", index)), true));
                     }
                 });
             });
@@ -301,11 +337,11 @@ fn player_column(
                 .spacing([12.0, 2.0])
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label(RichText::new("tipo").small().strong());
                     ui.label(RichText::new("início").small().strong());
                     ui.label(RichText::new("fim").small().strong());
                     ui.label(RichText::new("supply").small().strong());
                     ui.label(RichText::new("ação").small().strong());
+                    ui.label(RichText::new("tipo").small().strong());
                     ui.end_row();
 
                     let mut rendered = 0usize;
@@ -315,8 +351,10 @@ fn player_column(
                         if !filter.allows(kind) {
                             continue;
                         }
+                        let display_name = locale::localize(&entry.action, lang);
                         if !query_lower.is_empty()
                             && !entry.action.to_ascii_lowercase().contains(query_lower)
+                            && !display_name.to_lowercase().contains(query_lower)
                         {
                             continue;
                         }
@@ -341,16 +379,6 @@ fn player_column(
                         };
                         let strike = outcome != EntryOutcome::Completed;
 
-                        // tipo (primeira coluna)
-                        let color = kind_color(kind);
-                        ui.label(
-                            RichText::new(kind.short_letter())
-                                .monospace()
-                                .strong()
-                                .color(color),
-                        )
-                        .on_hover_text(kind.full_name());
-
                         ui.monospace(fmt_time(entry.game_loop, lps));
                         let mut finish_rt =
                             RichText::new(fmt_time(entry.finish_loop, lps)).monospace();
@@ -361,9 +389,9 @@ fn player_column(
                         ui.monospace(format!("{:>3}/{:<3}", entry.supply, entry.supply_made));
 
                         let action_text = if entry.count > 1 {
-                            format!("{} x{}", entry.action, entry.count)
+                            format!("{} x{}", display_name, entry.count)
                         } else {
-                            entry.action.clone()
+                            display_name.to_string()
                         };
                         ui.horizontal(|ui| {
                             if let (Some(icon), Some(tint)) = (outcome_icon, outcome_tint) {
@@ -391,8 +419,7 @@ fn player_column(
                                 };
                                 ui.label(
                                     RichText::new(chrono_text)
-                                        .strong()
-                                        .color(CHRONO_COLOR),
+                                        .strong(),
                                 )
                                 .on_hover_text(format!(
                                     "Chrono Boost ×{}",
@@ -400,6 +427,17 @@ fn player_column(
                                 ));
                             }
                         });
+
+                        // tipo (última coluna)
+                        let color = kind_color(kind);
+                        ui.label(
+                            RichText::new(kind.short_letter())
+                                .monospace()
+                                .strong()
+                                .color(color),
+                        )
+                        .on_hover_text(kind.full_name());
+
                         ui.end_row();
                         rendered += 1;
                     }
@@ -440,7 +478,7 @@ fn race_initial(race: &str) -> char {
 }
 
 /// Formata build order de um jogador como texto para clipboard.
-fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64) -> String {
+fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::Language) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "=== ({}) {} ===\n",
@@ -450,10 +488,11 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64) -> String {
     out.push_str("tipo  início  fim     supply  ação\n");
     for entry in &player.entries {
         let kind = classify_entry(entry);
+        let display = locale::localize(&entry.action, lang);
         let action_text = if entry.count > 1 {
-            format!("{} x{}", entry.action, entry.count)
+            format!("{} x{}", display, entry.count)
         } else {
-            entry.action.clone()
+            display.to_string()
         };
         let outcome_mark = match entry.outcome {
             EntryOutcome::Completed => "",

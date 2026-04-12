@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::locale::Language;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -34,6 +36,8 @@ pub struct AppConfig {
     pub auto_load_on_new_replay: bool,
     /// Multiplicador de tamanho de fonte (0.8..=1.5).
     pub font_scale: f32,
+    /// Idioma da UI para nomes de unidades/pesquisas.
+    pub language: Language,
 }
 
 impl Default for AppConfig {
@@ -48,6 +52,7 @@ impl Default for AppConfig {
             watch_replays: true,
             auto_load_on_new_replay: true,
             font_scale: 1.0,
+            language: Language::default(),
         }
     }
 }
