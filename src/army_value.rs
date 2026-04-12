@@ -14,6 +14,10 @@ pub struct ArmySnapshot {
     pub army_gas: i32,
     pub attack_level: u8,
     pub armor_level: u8,
+    /// Número de workers vivos neste instante (para subtrair do army_total).
+    pub workers: i32,
+    pub supply_used: i32,
+    pub supply_made: i32,
 }
 
 pub struct ArmyUpgradeEvent {
@@ -98,6 +102,9 @@ pub fn extract_army_value(data: &ReplayTimeline) -> Result<ArmyValueResult, Stri
                         army_gas: s.army_value_vespene,
                         attack_level: cur_attack,
                         armor_level: cur_armor,
+                        workers: s.workers,
+                        supply_used: s.supply_used,
+                        supply_made: s.supply_made,
                     }
                 })
                 .collect();

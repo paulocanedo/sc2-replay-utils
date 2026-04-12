@@ -48,6 +48,8 @@ pub struct AppState {
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
     pub timeline_tab_second: u32,
+    /// Se true, inclui custo de workers no gráfico de army value.
+    pub charts_include_workers: bool,
 }
 
 impl AppState {
@@ -68,6 +70,7 @@ impl AppState {
             library: ReplayLibrary::new(),
             library_filter: String::new(),
             timeline_tab_second: 0,
+            charts_include_workers: false,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -375,7 +378,7 @@ impl eframe::App for AppState {
                             &mut self.timeline_tab_second,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
-                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config),
+                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_include_workers),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                     },
                 },
