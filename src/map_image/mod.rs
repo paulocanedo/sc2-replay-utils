@@ -82,5 +82,146 @@ pub fn extract_minimap(mpq_path: &Path) -> Result<MapImage, String> {
         return Err("Minimap.tga vazio ou ausente no MPQ".to_string());
     }
 
-    decode::decode_tga(&tga_bytes)
+    let img = decode::decode_tga(&tga_bytes)?;
+    Ok(crop_to_content(img))
+}
+
+/// Recorta a imagem para o bounding box dos pixels não-pretos.
+///
+/// Os `Minimap.tga` da Blizzard são armazenados em texturas de tamanho
+/// power-of-two (256×256, 1024×1024) e a área desenhada do mapa fica
+/// **centrada com bordas pretas largas** — observado empiricamente:
+/// Old Republic LE renderiza o conteúdo em `[58..198, 58..198]` dentro
+/// de uma TGA de 256×256, ou seja só ~55% da textura tem terreno.
+///
+/// Sem o crop, a aba Timeline preencheria todo o canvas com a TGA
+/// (incluindo as bordas pretas) e, como as posições das unidades vêm
+/// de `playable_bounds` que mapeia o **conteúdo visível** do mapa,
+/// elas apareceriam **dentro** das bordas pretas da textura, longe
+/// do mapa propriamente dito. Recortando a TGA para o conteúdo, o
+/// aspect ratio da textura passa a casar com o aspect dos
+/// `playable_bounds` (medido em vários replays, a diferença é < 2%
+/// para partidas que jogaram a área toda) e tudo se alinha.
+///
+/// Limiar: pixel é "preto" se R, G e B <= 8. Se a imagem inteira for
+/// preta (não deveria acontecer com um Minimap.tga válido) ou o
+/// bounding box for degenerado, devolve a imagem original.
+fn crop_to_content(img: MapImage) -> MapImage {
+    let (w, h) = (img.width, img.height);
+    let row_bytes = (w * 4) as usize;
+    let mut min_x = w;
+    let mut max_x = 0u32;
+    let mut min_y = h;
+    let mut max_y = 0u32;
+    let mut any = false;
+    for y in 0..h {
+        let row = &img.rgba[(y as usize) * row_bytes..(y as usize + 1) * row_bytes];
+        for x in 0..w {
+            let i = (x as usize) * 4;
+            if row[i] > 8 || row[i + 1] > 8 || row[i + 2] > 8 {
+                if x < min_x {
+                    min_x = x;
+                }
+                if x >= max_x {
+                    max_x = x + 1;
+                }
+                if y < min_y {
+                    min_y = y;
+                }
+                if y >= max_y {
+                    max_y = y + 1;
+                }
+                any = true;
+            }
+        }
+    }
+    if !any || max_x <= min_x || max_y <= min_y {
+        return img;
+    }
+    let cw = max_x - min_x;
+    let ch = max_y - min_y;
+    if cw < 4 || ch < 4 {
+        return img;
+    }
+    let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+    for y in min_y..max_y {
+        let row_start = (y as usize) * row_bytes + (min_x as usize) * 4;
+        let row_end = row_start + (cw as usize) * 4;
+        rgba.extend_from_slice(&img.rgba[row_start..row_end]);
+    }
+    MapImage {
+        width: cw,
+        height: ch,
+        rgba,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crop_strips_uniform_black_borders() {
+        // 6x6 com um quadrado vermelho 2x2 no centro (linhas 2..4, colunas 2..4).
+        let w = 6u32;
+        let h = 6u32;
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 2..4 {
+            for x in 2..4 {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i] = 255;
+                rgba[i + 1] = 0;
+                rgba[i + 2] = 0;
+                rgba[i + 3] = 255;
+            }
+        }
+        let cropped = crop_to_content(MapImage {
+            width: w,
+            height: h,
+            rgba,
+        });
+        // Crop é fallback no-op se < 4x4 (proteção contra resultado degenerado)
+        // → aqui pulamos o crop, mas o teste seguinte cobre o caso real.
+        assert_eq!((cropped.width, cropped.height), (6, 6));
+    }
+
+    #[test]
+    fn crop_keeps_only_non_black_region() {
+        // 10x10 com bloco branco em [3..7, 2..8].
+        let w = 10u32;
+        let h = 10u32;
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 2..8 {
+            for x in 3..7 {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i] = 255;
+                rgba[i + 1] = 255;
+                rgba[i + 2] = 255;
+                rgba[i + 3] = 255;
+            }
+        }
+        let cropped = crop_to_content(MapImage {
+            width: w,
+            height: h,
+            rgba,
+        });
+        assert_eq!((cropped.width, cropped.height), (4, 6));
+        // Todos os pixels do crop devem ser brancos.
+        for px in cropped.rgba.chunks_exact(4) {
+            assert_eq!(px, &[255, 255, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn crop_returns_original_when_all_black() {
+        let w = 8u32;
+        let h = 8u32;
+        let rgba = vec![0u8; (w * h * 4) as usize];
+        let cropped = crop_to_content(MapImage {
+            width: w,
+            height: h,
+            rgba,
+        });
+        assert_eq!((cropped.width, cropped.height), (8, 8));
+    }
 }

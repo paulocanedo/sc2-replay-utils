@@ -24,7 +24,7 @@ use egui::{
 use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::map_image::MapImage;
-use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
+use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline};
 use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 
 pub fn show(
@@ -42,23 +42,43 @@ pub fn show(
 
     header_insights(ui, loaded, game_loop);
     ui.separator();
+    transport_bar(ui, tl, current_second, game_loop, max_s);
+    ui.separator();
+    minimap(ui, loaded, game_loop);
+}
 
+// ── Transport bar ─────────────────────────────────────────────────────
+//
+// Slider de scrubbing em estilo "transport bar" de player de vídeo: o
+// rail ocupa quase toda a largura disponível da aba para permitir
+// arrasto granular (cada pixel ≈ 1s mesmo em partidas longas), e o
+// tempo atual / tempo total fica compacto à esquerda. Sem rótulo
+// "Instante:" pra reduzir ruído — o display de tempo já comunica.
+
+fn transport_bar(
+    ui: &mut Ui,
+    tl: &ReplayTimeline,
+    current_second: &mut u32,
+    game_loop: u32,
+    max_s: u32,
+) {
     ui.horizontal(|ui| {
-        ui.label("Instante:");
+        ui.monospace(format!(
+            "{} / {}",
+            fmt_time(game_loop, tl.loops_per_second),
+            fmt_time(tl.game_loops, tl.loops_per_second),
+        ));
+        ui.add_space(12.0);
+        // Toda a largura restante vira rail do slider. O `-12` é folga
+        // pra evitar que o thumb encoste na borda direita.
+        let slider_w = (ui.available_width() - 12.0).max(160.0);
+        ui.spacing_mut().slider_width = slider_w;
         ui.add(
             Slider::new(current_second, 0..=max_s)
                 .integer()
-                .text("s"),
+                .show_value(false),
         );
-        ui.monospace(fmt_time(game_loop, tl.loops_per_second));
-        ui.weak(format!(
-            "/ {}",
-            fmt_time(tl.game_loops, tl.loops_per_second)
-        ));
     });
-
-    ui.add_space(6.0);
-    minimap(ui, loaded, game_loop);
 }
 
 // ── Header de insights ─────────────────────────────────────────────────
@@ -79,8 +99,13 @@ fn header_insights(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
             match p.stats_at(game_loop) {
                 Some(s) => {
                     let army = s.army_value_minerals + s.army_value_vespene;
+                    // SC2 cap-in-game é 200 para todas as raças. O
+                    // `food_made` cru pode ultrapassar (a Blizzard
+                    // soma a contribuição de todos os depots/CCs sem
+                    // clampar) — alinhamos com o que o jogo mostra.
+                    let supply_cap = s.supply_made.min(200);
                     ui.separator();
-                    ui.monospace(format!("Supply {}/{}", s.supply_used, s.supply_made));
+                    ui.monospace(format!("Supply {}/{}", s.supply_used, supply_cap));
                     ui.separator();
                     ui.monospace(format!("Min {}", s.minerals));
                     ui.separator();

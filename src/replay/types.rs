@@ -121,6 +121,13 @@ pub struct PlayerTimeline {
     pub clan: String,
     pub race: String,
     pub mmr: Option<i32>,
+    /// `player_id` 1-baseado do replay (mesmo usado em
+    /// `killer_player_id` dos `EntityEvent`). Precisamos dele para
+    /// distinguir "cancelei meu próprio prédio" (killer == self) de
+    /// "inimigo derrubou meu prédio em construção" (killer != self)
+    /// — os dois casos chegam ao parser como o mesmo `UnitDied` e só
+    /// o campo killer diferencia.
+    pub player_id: u8,
 
     pub stats: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,

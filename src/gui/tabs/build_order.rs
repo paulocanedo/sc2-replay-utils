@@ -11,7 +11,7 @@
 
 use egui::{Color32, Frame, Grid, Id, RichText, ScrollArea, Stroke, TextEdit, Ui};
 
-use crate::build_order::{classify_entry, EntryKind, PlayerBuildOrder};
+use crate::build_order::{classify_entry, EntryKind, EntryOutcome, PlayerBuildOrder};
 use crate::colors::{player_slot_color, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::replay_state::{fmt_time, LoadedReplay};
@@ -88,11 +88,31 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
     // ── Legenda dos tipos ────────────────────────────────────────
     // Chips coloridos mostrando cada categoria com sua letra e nome.
+    // Depois os marcadores de outcome (⊘ = cancelado, ✕ = destruído)
+    // pra o usuário decifrar as linhas riscadas sem precisar hover.
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new("legenda:").small().italics());
         for kind in ALL_KINDS {
             legend_chip(ui, kind);
         }
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("⊘")
+                .monospace()
+                .strong()
+                .color(Color32::from_rgb(220, 180, 80)),
+        )
+        .on_hover_text("cancelado pelo jogador");
+        ui.small("cancelado");
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("✕")
+                .monospace()
+                .strong()
+                .color(Color32::from_rgb(230, 90, 90)),
+        )
+        .on_hover_text("destruído durante a construção");
+        ui.small("destruído");
     });
     ui.separator();
 
@@ -222,8 +242,45 @@ fn player_column(
                                 continue;
                             }
 
+                            // Outcome modula o visual da linha:
+                            // - Completed: cor normal, sem decoração
+                            // - Cancelled: tom âmbar discreto + ⊘ + strikethrough
+                            // - DestroyedInProgress: vermelho + ✕ + strikethrough
+                            // A ideia é que o scan vertical da tabela
+                            // mostre imediatamente quais builds foram
+                            // perdidas e por que, sem precisar hover.
+                            let outcome = entry.outcome;
+                            let (outcome_tint, outcome_icon, outcome_tooltip): (
+                                Option<Color32>,
+                                Option<&str>,
+                                Option<&str>,
+                            ) = match outcome {
+                                EntryOutcome::Completed => (None, None, None),
+                                EntryOutcome::Cancelled => (
+                                    Some(Color32::from_rgb(220, 180, 80)),
+                                    Some("⊘"),
+                                    Some("cancelado pelo jogador"),
+                                ),
+                                EntryOutcome::DestroyedInProgress => (
+                                    Some(Color32::from_rgb(230, 90, 90)),
+                                    Some("✕"),
+                                    Some("destruído durante a construção"),
+                                ),
+                            };
+                            let strike = outcome != EntryOutcome::Completed;
+
+                            // start
                             ui.monospace(fmt_time(entry.game_loop, lps));
-                            ui.monospace(fmt_time(entry.finish_loop, lps));
+                            // finish: quando a build não completou,
+                            // realça o tempo em que ela morreu com a
+                            // cor do outcome pra não ficar parecendo
+                            // um finish normal.
+                            let mut finish_rt = RichText::new(fmt_time(entry.finish_loop, lps))
+                                .monospace();
+                            if let Some(c) = outcome_tint {
+                                finish_rt = finish_rt.color(c);
+                            }
+                            ui.label(finish_rt);
                             ui.monospace(format!("{:>3}/{:<3}", entry.supply, entry.supply_made));
 
                             let color = kind_color(kind);
@@ -235,12 +292,30 @@ fn player_column(
                             )
                             .on_hover_text(kind.full_name());
 
-                            let action = if entry.count > 1 {
+                            let action_text = if entry.count > 1 {
                                 format!("{} x{}", entry.action, entry.count)
                             } else {
                                 entry.action.clone()
                             };
-                            ui.label(action);
+                            ui.horizontal(|ui| {
+                                if let (Some(icon), Some(tint)) = (outcome_icon, outcome_tint) {
+                                    ui.label(
+                                        RichText::new(icon).monospace().strong().color(tint),
+                                    )
+                                    .on_hover_text(outcome_tooltip.unwrap_or(""));
+                                }
+                                let mut rt = RichText::new(action_text);
+                                if strike {
+                                    rt = rt.strikethrough();
+                                }
+                                if let Some(c) = outcome_tint {
+                                    rt = rt.color(c);
+                                }
+                                let lbl = ui.label(rt);
+                                if let Some(tt) = outcome_tooltip {
+                                    lbl.on_hover_text(tt);
+                                }
+                            });
                             ui.end_row();
                             rendered += 1;
                         }

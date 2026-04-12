@@ -11,12 +11,47 @@
 // da ação. Estruturas vindas de `UnitInit` já são start-time e ficam
 // como estão.
 
+use std::collections::HashMap;
+
 use crate::balance_data::build_time_loops;
 use crate::replay::{
     EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
 };
 
 // ── Structs de saída ──────────────────────────────────────────────────────────
+
+/// Desfecho real de uma entrada do build order. A maioria das entradas
+/// são `Completed` (produção terminou normalmente). As duas outras
+/// variantes só se aplicam a estruturas cujo `UnitDied` chegou antes
+/// do `UnitDone`, e são distinguidas pelo `killer_player_id` do
+/// `ProductionCancelled` que o parser emite nesse caso:
+///
+/// - `Cancelled`: jogador clicou "cancel" no prédio em construção
+///   (killer é o próprio dono ou None). SC2 reembolsa 75%.
+/// - `DestroyedInProgress`: o inimigo derrubou o prédio antes de
+///   completar (killer é um player diferente).
+///
+/// Unidades/workers/upgrades que nunca chegam a ser canceláveis ficam
+/// sempre como `Completed` — pra elas o `UnitDied` posterior, se
+/// existir, não afeta o build order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EntryOutcome {
+    Completed,
+    Cancelled,
+    DestroyedInProgress,
+}
+
+impl EntryOutcome {
+    /// Letra usada na coluna `outcome` do golden CSV. `C`/`X`/`D` são
+    /// escolhidas pra serem visualmente distintas num diff.
+    pub fn short_letter(self) -> &'static str {
+        match self {
+            EntryOutcome::Completed => "C",
+            EntryOutcome::Cancelled => "X",
+            EntryOutcome::DestroyedInProgress => "D",
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct BuildOrderEntry {
@@ -26,8 +61,10 @@ pub struct BuildOrderEntry {
     pub supply_made: u8,
     /// Instante de início da ação (start time).
     pub game_loop: u32,
-    /// Instante de conclusão da ação (finish time). Igual ao
-    /// `game_loop` quando o tempo de build não é conhecido.
+    /// Instante de conclusão da ação. Significado depende do `outcome`:
+    /// - `Completed`: instante projetado de conclusão (start + build_time).
+    /// - `Cancelled` / `DestroyedInProgress`: instante real em que o
+    ///   prédio foi cancelado/destruído durante a construção.
     pub finish_loop: u32,
     /// Sequência global vinda do parser, usada como tiebreaker entre
     /// `entity_events` e `upgrades` no mesmo `game_loop`. Não é
@@ -37,6 +74,7 @@ pub struct BuildOrderEntry {
     pub count: u32,
     pub is_upgrade: bool,
     pub is_structure: bool,
+    pub outcome: EntryOutcome,
 }
 
 pub struct PlayerBuildOrder {
@@ -81,6 +119,21 @@ pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult
 fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOrderEntry> {
     let mut raw: Vec<BuildOrderEntry> = Vec::new();
 
+    // Index tag → (loop do cancel/destroy, killer). Só `ProductionCancelled`
+    // — o parser emite essa variante quando `UnitDied` chega enquanto a
+    // tag ainda está `Lifecycle::InProgress` (tracker.rs:367). Entries
+    // cujo tag aparece aqui não chegaram a completar.
+    //
+    // `Died` (com lifecycle=Finished) significa que o prédio completou e
+    // morreu depois — não afeta o outcome do build order, então é
+    // ignorado deliberadamente.
+    let mut cancel_by_tag: HashMap<i64, (u32, Option<u8>)> = HashMap::new();
+    for ev in &player.entity_events {
+        if ev.kind == EntityEventKind::ProductionCancelled {
+            cancel_by_tag.insert(ev.tag, (ev.game_loop, ev.killer_player_id));
+        }
+    }
+
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
         if ev.kind != EntityEventKind::ProductionStarted {
@@ -113,13 +166,30 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // Os demais (trains, morphs, upgrades) vêm com o loop de
         // conclusão e precisam do recuo para o instante de início.
         let raw_loop = ev.game_loop;
-        let (start_loop, finish_loop) = if from_unit_init {
+        let (start_loop, projected_finish) = if from_unit_init {
             (raw_loop, add_build_time(raw_loop, &ev.entity_type, base_build))
         } else {
             (
                 subtract_build_time(raw_loop, &ev.entity_type, base_build),
                 raw_loop,
             )
+        };
+
+        // Se essa tag aparece no cancel_by_tag, a produção não chegou
+        // ao fim — o `finish_loop` real é o instante do cancel, e o
+        // outcome vem do killer_player_id: mesmo player = cancel
+        // intencional, outro player = destruído pelo inimigo.
+        let (finish_loop, outcome) = match cancel_by_tag.get(&ev.tag).copied() {
+            Some((cancel_loop, killer)) => {
+                let outcome = match killer {
+                    Some(kid) if kid != player.player_id => {
+                        EntryOutcome::DestroyedInProgress
+                    }
+                    _ => EntryOutcome::Cancelled,
+                };
+                (cancel_loop, outcome)
+            }
+            None => (projected_finish, EntryOutcome::Completed),
         };
 
         // Supply (used + made) é amostrado no instante de início — é o
@@ -136,6 +206,7 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             count: 1,
             is_upgrade: false,
             is_structure,
+            outcome,
         });
     }
 
@@ -159,6 +230,9 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             count: 1,
             is_upgrade: true,
             is_structure: false,
+            // Upgrades não têm lifecycle cancelável via tag (o tracker
+            // só emite o evento quando o research conclui).
+            outcome: EntryOutcome::Completed,
         });
     }
 
@@ -195,12 +269,17 @@ fn supply_at(player: &PlayerTimeline, loop_: u32) -> (u8, u8) {
         .unwrap_or((0, 0))
 }
 
-/// Funde entradas consecutivas com a mesma ação em uma única com `count` incrementado.
+/// Funde entradas consecutivas com a mesma ação em uma única com `count`
+/// incrementado. Só funde se o **outcome** também for igual — um
+/// SupplyDepot cancelado seguido de um SupplyDepot que completou precisam
+/// aparecer como linhas separadas para que o usuário veja a diferença.
 fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
     let mut out: Vec<BuildOrderEntry> = Vec::new();
     for entry in entries {
         match out.last_mut() {
-            Some(last) if last.action == entry.action => last.count += 1,
+            Some(last) if last.action == entry.action && last.outcome == entry.outcome => {
+                last.count += 1
+            }
             _ => out.push(entry),
         }
     }
@@ -415,7 +494,9 @@ mod tests {
 
     /// Renderiza o build order de um player no formato golden CSV.
     /// Cabeçalho fixo + uma linha por entrada. Tempo em mm:ss para
-    /// facilitar correção manual.
+    /// facilitar correção manual. A coluna `outcome` (C/X/D) existe
+    /// pra que mudanças na detecção de cancelamento/destruição em
+    /// progresso sejam capturadas pelo teste golden.
     fn render_golden_csv(player: &PlayerBuildOrder, lps: f64) -> String {
         let mut out = String::new();
         out.push_str("# old_republic_50.SC2Replay — build order golden\n");
@@ -425,11 +506,13 @@ mod tests {
             player.race,
             player.mmr.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
         ));
-        out.push_str("# columns: start,finish,supply_used,supply_made,kind,action,count\n");
+        out.push_str(
+            "# columns: start,finish,supply_used,supply_made,kind,action,count,outcome\n",
+        );
         for entry in &player.entries {
             let kind = classify_entry(entry).short_letter();
             out.push_str(&format!(
-                "{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{}\n",
                 format_time(entry.game_loop, lps),
                 format_time(entry.finish_loop, lps),
                 entry.supply,
@@ -437,6 +520,7 @@ mod tests {
                 kind,
                 entry.action,
                 entry.count,
+                entry.outcome.short_letter(),
             ));
         }
         out
@@ -517,6 +601,79 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn golden_bunker_at_0244_is_destroyed_in_progress() {
+        // No replay golden, firebat (Terran, p2) começa um Bunker às
+        // 02:44 que é derrubado por Terror (Protoss, p1) antes de
+        // completar. O outcome tem que ser DestroyedInProgress e o
+        // finish_loop tem que estar no instante real da morte
+        // (~03:10, NÃO o 03:13 projetado pelo balance data).
+        let t = parse_replay(&golden_example(), 0).expect("parse");
+        let bo = extract_build_order(&t).expect("bo");
+        let lps = bo.loops_per_second;
+        let firebat = bo
+            .players
+            .iter()
+            .find(|p| p.name == "firebat")
+            .expect("firebat player");
+
+        let bunker = firebat
+            .entries
+            .iter()
+            .find(|e| {
+                e.action == "Bunker" && format_time(e.game_loop, lps) == "02:44"
+            })
+            .expect("bunker em 02:44 no build order");
+        assert_eq!(
+            bunker.outcome,
+            EntryOutcome::DestroyedInProgress,
+            "bunker às 02:44 deveria ter outcome DestroyedInProgress, veio {:?}",
+            bunker.outcome,
+        );
+        // Morte real às 03:10 (loop 4261 conforme lifecycle do replay).
+        assert_eq!(
+            format_time(bunker.finish_loop, lps),
+            "03:10",
+            "finish_loop deveria estar no instante real da morte",
+        );
+    }
+
+    #[test]
+    fn golden_supply_depot_at_0343_is_cancelled_by_player() {
+        // firebat inicia um SupplyDepot às 03:43 e cancela 1-2s depois
+        // (03:45 em mm:ss). killer_player_id = 2 (firebat mesmo),
+        // então é Cancelled (intencional), não DestroyedInProgress.
+        let t = parse_replay(&golden_example(), 0).expect("parse");
+        let bo = extract_build_order(&t).expect("bo");
+        let lps = bo.loops_per_second;
+        let firebat = bo
+            .players
+            .iter()
+            .find(|p| p.name == "firebat")
+            .expect("firebat player");
+
+        let depot = firebat
+            .entries
+            .iter()
+            .find(|e| {
+                e.action == "SupplyDepot"
+                    && format_time(e.game_loop, lps) == "03:43"
+            })
+            .expect("supply depot em 03:43 no build order");
+        assert_eq!(
+            depot.outcome,
+            EntryOutcome::Cancelled,
+            "depot às 03:43 deveria ter outcome Cancelled, veio {:?}",
+            depot.outcome,
+        );
+        // Cancelado ~1.4s depois do start (03:45 em mm:ss arredondado).
+        let finish_mmss = format_time(depot.finish_loop, lps);
+        assert!(
+            finish_mmss == "03:44" || finish_mmss == "03:45",
+            "finish_loop do depot cancelado deveria estar em 03:44/03:45, veio {finish_mmss}",
+        );
     }
 
     #[test]

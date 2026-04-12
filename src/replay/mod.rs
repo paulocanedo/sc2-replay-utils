@@ -85,8 +85,9 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
     let players: Vec<PlayerTimeline> = details
         .player_list
         .iter()
-        .filter(|p| p.observe == 0)
-        .map(|p| {
+        .enumerate()
+        .filter(|(_, p)| p.observe == 0)
+        .map(|(in_idx, p)| {
             let (clan, name) = extract_clan_and_name(&p.name);
             let mmr = init_data
                 .as_ref()
@@ -96,6 +97,9 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 clan,
                 race: p.race.clone(),
                 mmr,
+                // `player_id` 1-baseado, casando com `player_idx` acima
+                // e com o `killer_player_id` dos tracker events.
+                player_id: (in_idx + 1) as u8,
                 stats: Vec::new(),
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),
