@@ -816,7 +816,7 @@ mod tests {
             let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| {
                 panic!(
                     "não consegui ler o golden {}: {e}\n\
-                     dica: rode `cargo test --bin sc2-replay-gui bless_build_order_goldens -- --ignored` \
+                     dica: rode `cargo test --bin sc2-replay-utils bless_build_order_goldens -- --ignored` \
                      para regenerar.",
                     path.display(),
                 )
@@ -833,7 +833,7 @@ mod tests {
                     .map(|(i, (e, a))| format!("linha {}: esperado={:?} atual={:?}", i + 1, e, a));
                 panic!(
                     "build order divergente para {} ({}):\n  golden: {}\n  {}\n\
-                     dica: rode `cargo test --bin sc2-replay-gui bless_build_order_goldens -- --ignored` \
+                     dica: rode `cargo test --bin sc2-replay-utils bless_build_order_goldens -- --ignored` \
                      se a divergência for esperada.",
                     player.name,
                     player.race,

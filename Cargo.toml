@@ -17,7 +17,7 @@ notify    = "6"
 bincode   = { version = "2", features = ["serde"] }
 
 [[bin]]
-name = "sc2-replay-gui"
+name = "sc2-replay-utils"
 path = "src/bin/gui.rs"
 
 # build.rs gera `balance_data_generated.rs` (tabela

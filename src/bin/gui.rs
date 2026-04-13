@@ -1,4 +1,4 @@
-// Entry point do binário GUI (sc2-replay-gui).
+// Entry point do binário GUI (sc2-replay-utils).
 //
 // Plumbing puro: declara via #[path] os módulos de domínio em src/ e os
 // módulos exclusivos da GUI em src/gui/, depois chama eframe::run_native.
