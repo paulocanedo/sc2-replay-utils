@@ -115,7 +115,6 @@ Common scopes: `build_order`, `timeline`, `charts`, `replay`, `gui`, `library`, 
 |---|---|
 | `Cargo.toml` | Version, dependencies, binary target |
 | `build.rs` | Balance data code generation — if builds fail, check this first |
-| `.env.example` | All configurable environment variables |
 | `cliff.toml` | Changelog generation config (git-cliff) |
 | `.github/workflows/ci.yml` | CI pipeline (build + test) |
 | `.github/workflows/release.yml` | Release pipeline (tag-triggered) |

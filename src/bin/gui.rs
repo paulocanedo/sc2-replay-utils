@@ -53,8 +53,6 @@ mod tabs;
 mod app;
 
 fn main() -> eframe::Result<()> {
-    dotenvy::dotenv().ok();
-
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 720.0])

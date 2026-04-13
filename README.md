@@ -43,10 +43,6 @@ cargo build --release
 
 The binary will be at `target/release/sc2-replay-utils` (or `sc2-replay-utils.exe` on Windows).
 
-## Configuration
-
-Copy `.env.example` to `.env` and adjust the paths to match your system. See the file for available options.
-
 ## License
 
 [MIT](LICENSE)

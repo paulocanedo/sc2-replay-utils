@@ -1,7 +1,5 @@
 /target
 /.idea
 /.claude
-.env
-!.env.example
 *.yaml
 /temp
