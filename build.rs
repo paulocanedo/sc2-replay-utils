@@ -71,6 +71,8 @@ fn main() {
     let mut entries: BTreeMap<(u32, String), u32> = BTreeMap::new();
     // (versão, producer, ability_id, command_index) → action_id.
     let mut abilities: BTreeMap<AbilityKey, String> = BTreeMap::new();
+    // (versão, nome) → supply_cost × 10 (ex.: Marine=10, Zergling=5).
+    let mut supply: BTreeMap<(u32, String), u32> = BTreeMap::new();
 
     for version_entry in fs::read_dir(&balance_dir).expect("read_dir BalanceData") {
         let version_entry = version_entry.expect("entry");
@@ -96,7 +98,7 @@ fn main() {
                 Ok(v) => v,
                 Err(e) => panic!("falha ao parsear {}: {e}", unit_path.display()),
             };
-            collect_unit(&json, version, &mut entries);
+            collect_unit(&json, version, &mut entries, &mut supply);
             collect_abilities(&json, version, &mut abilities);
         }
     }
@@ -110,7 +112,7 @@ fn main() {
         "nenhuma entrada de abilities extraída — algo está errado"
     );
 
-    write_generated(&entries, &abilities);
+    write_generated(&entries, &abilities, &supply);
 
     // Re-roda o build script se a árvore de balance data mudar (cargo
     // update do s2protocol troca o source dir, e o cargo já invalida
@@ -127,7 +129,12 @@ fn main() {
 /// 3. `upgrades.upgrade[].level[].cost.@time` — upgrades com níveis
 ///    (Weapons/Armor 1/2/3, Shields, etc). O `@id` do level já vem
 ///    com o sufixo `Level1/2/3` que casa com o evento do tracker.
-fn collect_unit(json: &Value, version: u32, out: &mut BTreeMap<(u32, String), u32>) {
+fn collect_unit(
+    json: &Value,
+    version: u32,
+    out: &mut BTreeMap<(u32, String), u32>,
+    supply_out: &mut BTreeMap<(u32, String), u32>,
+) {
     let Some(id) = json.get("@id").and_then(Value::as_str) else {
         return;
     };
@@ -139,6 +146,18 @@ fn collect_unit(json: &Value, version: u32, out: &mut BTreeMap<(u32, String), u3
     {
         if time > 0.0 {
             insert(out, version, id.to_string(), seconds_to_loops(time as f32));
+        }
+    }
+
+    // Supply cost (×10 para preservar precisão de 0.5 — ex.: Zergling).
+    if let Some(supply) = json
+        .get("cost")
+        .and_then(|c| c.get("@supply"))
+        .and_then(Value::as_f64)
+    {
+        if supply > 0.0 {
+            let cost_x10 = (supply * 10.0).round() as u32;
+            insert(supply_out, version, id.to_string(), cost_x10);
         }
     }
 
@@ -268,7 +287,7 @@ fn collect_abilities(json: &Value, version: u32, out: &mut BTreeMap<AbilityKey, 
     // Vivem em `abilities.ability[]` com `@index` (ability_id) e
     // `command[].@index` (cmd_index). Whitelist evita poluir a tabela
     // com move/stop/attack/burrow.
-    const TRACKED_ABILITIES: &[&str] = &["SpawnLarva"];
+    const TRACKED_ABILITIES: &[&str] = &["SpawnLarva", "SupplyDrop"];
     if let Some(abilities) = json
         .get("abilities")
         .and_then(|a| a.get("ability"))
@@ -302,6 +321,7 @@ fn seconds_to_loops(seconds_normal_speed: f32) -> u32 {
 fn write_generated(
     entries: &BTreeMap<(u32, String), u32>,
     abilities: &BTreeMap<AbilityKey, String>,
+    supply: &BTreeMap<(u32, String), u32>,
 ) {
     let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR não definido");
     let out_path = Path::new(&out_dir).join("balance_data_generated.rs");
@@ -329,6 +349,15 @@ fn write_generated(
         s.push_str(&format!(
             "    ({version}, \"{producer_esc}\", {ability_id}, {cmd_index}, \"{action_esc}\"),\n",
         ));
+    }
+    s.push_str("];\n\n");
+
+    s.push_str("// Cada tupla é (protocol_version, unit_name, supply_cost_x10).\n");
+    s.push_str("// supply_cost_x10 = custo real × 10 (ex.: Marine=10, Zergling=5).\n");
+    s.push_str("pub static SUPPLY_ENTRIES: &[(u32, &str, u32)] = &[\n");
+    for ((version, name), cost_x10) in supply {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        s.push_str(&format!("    ({version}, \"{escaped}\", {cost_x10}),\n"));
     }
     s.push_str("];\n");
 

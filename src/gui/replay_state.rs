@@ -96,7 +96,7 @@ impl LoadedReplay {
         let supply_blocks_per_player = timeline
             .players
             .iter()
-            .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops))
+            .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops, timeline.base_build))
             .collect();
 
         let map_image = match map_image::load_for_replay(&timeline.map, &timeline.cache_handles)
