@@ -35,6 +35,25 @@ pub fn extract_clan_and_name(raw: &str) -> (String, String) {
     }
 }
 
+/// Substitui caracteres não alfanuméricos (exceto `-` e `_`) por `_`.
+/// Usada para gerar nomes de arquivo seguros a partir de nomes de jogadores e mapas.
+pub fn sanitize(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// Letra inicial da raça SC2: T (Terran), P (Protoss), Z (Zerg), R (Random).
+pub fn race_letter(race: &str) -> char {
+    match race.to_ascii_lowercase().chars().next() {
+        Some('t') => 'T',
+        Some('p') => 'P',
+        Some('z') => 'Z',
+        Some('r') => 'R',
+        _ => '?',
+    }
+}
+
 // ── Filesystem ──────────────────────────────────────────────────────────────
 
 /// Lista todos os arquivos `.SC2Replay` em `base` **recursivamente**, ordenados

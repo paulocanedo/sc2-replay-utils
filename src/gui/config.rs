@@ -20,8 +20,6 @@ pub struct AppConfig {
     /// "mais recente" e observar via file watcher. Se `None`, o app usa o
     /// diretório padrão do SC2 detectado por `utils::sc2_default_dir()`.
     pub working_dir: Option<PathBuf>,
-    /// Pasta de saída padrão (para futuras ações de export).
-    pub output_dir: Option<PathBuf>,
     /// Nicks do próprio usuário. Usado para identificar visualmente o próprio jogador.
     pub user_nicknames: Vec<String>,
     /// Limite padrão de tempo em segundos para os extracts (0 = sem limite).
@@ -44,7 +42,6 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             working_dir: None,
-            output_dir: None,
             user_nicknames: Vec::new(),
             default_max_time: 0,
             dark_mode: true,

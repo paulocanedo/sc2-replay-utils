@@ -312,6 +312,7 @@ pub enum LibraryAction {
     Load(PathBuf),
     Refresh,
     PickWorkingDir(PathBuf),
+    OpenRename,
 }
 
 pub fn show(
@@ -329,6 +330,9 @@ pub fn show(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("↻").on_hover_text("Recarregar lista").clicked() {
                 action = LibraryAction::Refresh;
+            }
+            if ui.small_button("✏").on_hover_text("Renomear replays em lote").clicked() {
+                action = LibraryAction::OpenRename;
             }
             if ui
                 .small_button("📂")
@@ -594,12 +598,7 @@ fn matchup_label(meta: &ParsedMeta, _config: &AppConfig) -> String {
 }
 
 fn race_letter(race: &str) -> char {
-    match race.to_ascii_lowercase().chars().next() {
-        Some('t') => 'T',
-        Some('p') => 'P',
-        Some('z') => 'Z',
-        _ => '?',
-    }
+    crate::utils::race_letter(race)
 }
 
 fn short_datetime(dt: &str) -> String {

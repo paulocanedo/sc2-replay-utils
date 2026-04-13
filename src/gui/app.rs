@@ -30,6 +30,7 @@ const TOAST_TTL: Duration = Duration::from_secs(4);
 pub enum Screen {
     Library,
     Analysis,
+    Rename,
 }
 
 pub struct AppState {
@@ -53,6 +54,12 @@ pub struct AppState {
     pub charts_show_workers: bool,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
+    /// Template de renomeação em lote.
+    pub rename_template: String,
+    /// Previews gerados a partir do template + biblioteca.
+    pub rename_previews: Vec<(std::path::PathBuf, String)>,
+    /// Status da última operação de rename.
+    pub rename_status: Option<String>,
 }
 
 impl AppState {
@@ -77,6 +84,9 @@ impl AppState {
             charts_show_workers: false,
             show_about: false,
             timeline_show_heatmap: false,
+            rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
+            rename_previews: Vec::new(),
+            rename_status: None,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -214,6 +224,11 @@ impl eframe::App for AppState {
                         self.screen = Screen::Analysis;
                         ui.close_menu();
                     }
+                    if ui.button("Renomear").clicked() {
+                        self.rename_previews = crate::rename::generate_previews(&self.library, &self.rename_template);
+                        self.screen = Screen::Rename;
+                        ui.close_menu();
+                    }
                     ui.separator();
                     if ui.button("Configurações…").clicked() {
                         self.show_settings = true;
@@ -228,6 +243,25 @@ impl eframe::App for AppState {
                 });
             });
         });
+
+        // -------- Barra de navegação Rename --------
+        if self.screen == Screen::Rename {
+            TopBottomPanel::top("rename_bar").show(ctx, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("📚 Biblioteca")
+                        .on_hover_text("Voltar para a biblioteca de replays")
+                        .clicked()
+                    {
+                        self.screen = Screen::Library;
+                    }
+                    ui.separator();
+                    ui.label(RichText::new("Renomear Replays em Lote").strong());
+                });
+                ui.add_space(4.0);
+            });
+        }
 
         // -------- Replay bar + Tab bar (apenas Tela Análise) --------
         if self.screen == Screen::Analysis {
@@ -386,6 +420,15 @@ impl eframe::App for AppState {
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                     },
                 },
+                Screen::Rename => {
+                    crate::rename::show(
+                        ui,
+                        &self.library,
+                        &mut self.rename_template,
+                        &mut self.rename_previews,
+                        &mut self.rename_status,
+                    );
+                }
             }
         });
 
@@ -401,6 +444,11 @@ impl eframe::App for AppState {
                     self.set_toast(format!("Erro ao salvar: {e}"));
                 }
                 self.refresh_library();
+            }
+            LibraryAction::OpenRename => {
+                self.rename_previews = crate::rename::generate_previews(&self.library, &self.rename_template);
+                self.rename_status = None;
+                self.screen = Screen::Rename;
             }
         }
 
@@ -658,13 +706,7 @@ fn race_icon(race: &str) -> &'static str {
 
 /// Letra inicial da raça (T/P/Z/R).
 fn race_letter(race: &str) -> char {
-    match race.to_ascii_lowercase().chars().next() {
-        Some('t') => 'T',
-        Some('p') => 'P',
-        Some('z') => 'Z',
-        Some('r') => 'R',
-        _ => '?',
-    }
+    crate::utils::race_letter(race)
 }
 
 /// Normaliza o nome da raça para exibição.

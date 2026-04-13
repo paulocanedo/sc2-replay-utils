@@ -39,9 +39,6 @@ pub fn show(
             );
             ui.add_space(4.0);
 
-            path_row(ui, "Pasta de saída", &mut config.output_dir);
-            ui.small("Destino padrão para exports (CSVs, PNGs, YAMLs).");
-
             ui.separator();
             ui.heading("Nicknames do usuário");
             ui.small("Replays com estes nicks serão destacados como 'Você' na UI.");
@@ -205,24 +202,3 @@ fn working_dir_row(ui: &mut egui::Ui, config: &mut crate::config::AppConfig) {
     });
 }
 
-fn path_row(ui: &mut egui::Ui, label: &str, path: &mut Option<std::path::PathBuf>) {
-    ui.horizontal(|ui| {
-        ui.label(format!("{label}:"));
-        let text = path
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "(não definido)".into());
-        ui.monospace(text);
-    });
-    ui.horizontal(|ui| {
-        ui.add_space(16.0);
-        if ui.button("Escolher…").clicked() {
-            if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                *path = Some(p);
-            }
-        }
-        if ui.button("Limpar").clicked() {
-            *path = None;
-        }
-    });
-}

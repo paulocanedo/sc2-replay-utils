@@ -44,6 +44,8 @@ mod salt;
 mod cache;
 #[path = "../gui/library.rs"]
 mod library;
+#[path = "../gui/rename.rs"]
+mod rename;
 #[path = "../gui/tabs/mod.rs"]
 mod tabs;
 #[path = "../gui/app.rs"]
