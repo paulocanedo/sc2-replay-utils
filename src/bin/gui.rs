@@ -3,6 +3,7 @@
 // Plumbing puro: declara via #[path] os módulos de domínio em src/ e os
 // módulos exclusivos da GUI em src/gui/, depois chama eframe::run_native.
 
+#![windows_subsystem = "windows"]
 #![allow(dead_code)]
 
 // Módulos de domínio (parser + extractors puros sobre ReplayTimeline).
