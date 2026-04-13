@@ -297,7 +297,7 @@ impl eframe::App for AppState {
                         ui.monospace(loaded.file_name());
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Trocar…").clicked() {
+                        if ui.button("Abrir replay…").clicked() {
                             if let Some(p) = rfd::FileDialog::new()
                                 .add_filter("SC2 Replay", &["SC2Replay"])
                                 .pick_file()
