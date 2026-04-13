@@ -187,6 +187,7 @@ pub struct PlayerTimeline {
     /// — os dois casos chegam ao parser como o mesmo `UnitDied` e só
     /// o campo killer diferencia.
     pub player_id: u8,
+    pub result: Option<String>,
 
     pub stats: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,

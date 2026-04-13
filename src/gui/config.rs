@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::library::DateRange;
 use crate::locale::Language;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,6 +37,8 @@ pub struct AppConfig {
     pub font_size: f32,
     /// Idioma da UI para nomes de unidades/pesquisas.
     pub language: Language,
+    /// Filtro de período padrão da biblioteca (salvo entre sessões).
+    pub library_date_range: DateRange,
 }
 
 impl Default for AppConfig {
@@ -50,6 +53,7 @@ impl Default for AppConfig {
             auto_load_on_new_replay: true,
             font_size: 14.0,
             language: Language::default(),
+            library_date_range: DateRange::default(),
         }
     }
 }

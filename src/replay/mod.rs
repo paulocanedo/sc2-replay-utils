@@ -104,6 +104,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 // `player_id` 1-baseado, casando com `player_idx` acima
                 // e com o `killer_player_id` dos tracker events.
                 player_id: (in_idx + 1) as u8,
+                result: Some(p.result.clone()),
                 stats: Vec::new(),
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),

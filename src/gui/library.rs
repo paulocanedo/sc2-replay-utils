@@ -27,6 +27,66 @@ use egui::{Color32, Context, RichText, ScrollArea, Sense, Ui};
 use crate::config::AppConfig;
 use crate::replay::parse_replay;
 
+// ── Filtro e ordenação ───────────────────────────────────────────────
+
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum OutcomeFilter {
+    #[default]
+    All,
+    Wins,
+    Losses,
+}
+
+#[derive(Default, Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum DateRange {
+    All,
+    Today,
+    #[default]
+    ThisWeek,
+    ThisMonth,
+}
+
+#[derive(Default, PartialEq, Clone, Copy)]
+pub enum SortOrder {
+    #[default]
+    Date,
+    Duration,
+    Mmr,
+    Map,
+}
+
+pub struct LibraryFilter {
+    pub search: String,
+    pub race: Option<char>,
+    pub outcome: OutcomeFilter,
+    pub date_range: DateRange,
+    pub sort: SortOrder,
+    pub sort_ascending: bool,
+}
+
+impl Default for LibraryFilter {
+    fn default() -> Self {
+        Self {
+            search: String::new(),
+            race: None,
+            outcome: OutcomeFilter::All,
+            date_range: DateRange::default(),
+            sort: SortOrder::Date,
+            sort_ascending: false,
+        }
+    }
+}
+
+impl LibraryFilter {
+    /// Inicializa o filtro restaurando preferências salvas no config.
+    pub fn from_config(config: &crate::config::AppConfig) -> Self {
+        Self {
+            date_range: config.library_date_range,
+            ..Self::default()
+        }
+    }
+}
+
 /// Acima deste número de novos arquivos a parsear em um único `refresh`,
 /// a biblioteca passa a usar um pool multi-thread. Abaixo disso, um
 /// worker único é suficiente.
@@ -51,6 +111,7 @@ pub struct PlayerMeta {
     pub name: String,
     pub race: String,
     pub mmr: Option<i32>,
+    pub result: String,
 }
 
 #[derive(Clone)]
@@ -404,6 +465,7 @@ fn parse_meta(path: &Path) -> ParseOutcome {
                 name: p.name,
                 race: p.race,
                 mmr: p.mmr,
+                result: p.result.clone().unwrap_or_default(),
             })
             .collect(),
     })
@@ -418,6 +480,7 @@ pub enum LibraryAction {
     Refresh,
     PickWorkingDir(PathBuf),
     OpenRename,
+    SaveDateRange(DateRange),
 }
 
 pub fn show(
@@ -425,17 +488,18 @@ pub fn show(
     library: &ReplayLibrary,
     current_path: Option<&Path>,
     config: &AppConfig,
-    filter: &mut String,
+    filter: &mut LibraryFilter,
 ) -> LibraryAction {
     let mut action = LibraryAction::None;
 
-    // Header
+    // ── Header ───────────────────────────────────────────────────────
     ui.horizontal(|ui| {
         ui.heading("Biblioteca");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("↻").on_hover_text("Recarregar lista").clicked() {
                 action = LibraryAction::Refresh;
             }
+            if ui.small_button("🔎").on_hover_text("Zoom / configurações").clicked() {}
             if ui.small_button("✏").on_hover_text("Renomear replays em lote").clicked() {
                 action = LibraryAction::OpenRename;
             }
@@ -455,7 +519,7 @@ pub fn show(
         Some(dir) => {
             ui.small(
                 RichText::new(format!("📁 {}", dir.display()))
-                    .color(Color32::from_gray(160)),
+                    .color(Color32::from_gray(120)),
             );
         }
         None => {
@@ -463,65 +527,142 @@ pub fn show(
         }
     }
 
-    // Filtro por nome de jogador. Case-insensitive, match por substring
-    // em qualquer jogador da partida. Só afeta entradas `Parsed` —
-    // Pending/Unsupported/Failed ficam escondidas enquanto o filtro
-    // estiver ativo (não temos nomes para comparar).
+    ui.add_space(4.0);
+
+    // ── Barra de busca + contagem/sort ───────────────────────────────
     ui.horizontal(|ui| {
         ui.label("🔎");
         let resp = ui.add(
-            egui::TextEdit::singleline(filter)
-                .hint_text("filtrar por jogador…")
-                .desired_width(f32::INFINITY),
+            egui::TextEdit::singleline(&mut filter.search)
+                .hint_text("Buscar jogador, mapa ou matchup…")
+                .desired_width(ui.available_width() - 150.0),
         );
-        if !filter.is_empty() && resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            filter.clear();
+        if !filter.search.is_empty() && resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            filter.search.clear();
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let total = library.entries.len();
+            let sort_label = match filter.sort {
+                SortOrder::Date => "Data",
+                SortOrder::Duration => "Duração",
+                SortOrder::Mmr => "MMR",
+                SortOrder::Map => "Mapa",
+            };
+            let arrow = if filter.sort_ascending { "↑" } else { "↓" };
+            egui::ComboBox::from_id_salt("library_sort")
+                .selected_text(format!("{total} replays {arrow}"))
+                .width(120.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut filter.sort, SortOrder::Date, "Data");
+                    ui.selectable_value(&mut filter.sort, SortOrder::Duration, "Duração");
+                    ui.selectable_value(&mut filter.sort, SortOrder::Mmr, "MMR");
+                    ui.selectable_value(&mut filter.sort, SortOrder::Map, "Mapa");
+                    ui.separator();
+                    let asc_label = if filter.sort_ascending { "▸ Crescente" } else { "  Crescente" };
+                    let desc_label = if !filter.sort_ascending { "▸ Decrescente" } else { "  Decrescente" };
+                    if ui.selectable_label(filter.sort_ascending, asc_label).clicked() {
+                        filter.sort_ascending = true;
+                    }
+                    if ui.selectable_label(!filter.sort_ascending, desc_label).clicked() {
+                        filter.sort_ascending = false;
+                    }
+                });
+            let _ = sort_label; // utilizado no ComboBox acima
+        });
+    });
+
+    ui.add_space(2.0);
+
+    // ── Chips de filtro rápido ────────────────────────────────────────
+    let has_nicknames = !config.user_nicknames.is_empty();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+
+        let todos_active = filter.race.is_none()
+            && filter.outcome == OutcomeFilter::All
+            && filter.date_range == DateRange::All;
+        if chip(ui, "Todos", todos_active, None).clicked() {
+            filter.race = None;
+            filter.outcome = OutcomeFilter::All;
+            filter.date_range = DateRange::All;
+        }
+
+        ui.add_space(4.0);
+
+        for (label, letter, color) in [
+            ("Terran", 'T', RACE_COLOR_TERRAN),
+            ("Protoss", 'P', RACE_COLOR_PROTOSS),
+            ("Zerg", 'Z', RACE_COLOR_ZERG),
+        ] {
+            let selected = filter.race == Some(letter);
+            let resp = chip(ui, label, selected, Some(color));
+            if resp.clicked() && has_nicknames {
+                filter.race = if selected { None } else { Some(letter) };
+            }
+            if !has_nicknames {
+                resp.on_hover_text("Configure seus nicknames para filtrar por raça");
+            }
+        }
+
+        ui.add_space(4.0);
+
+        let wins_selected = filter.outcome == OutcomeFilter::Wins;
+        let resp = chip(ui, "Vitórias", wins_selected, Some(Color32::from_rgb(80, 180, 80)));
+        if resp.clicked() && has_nicknames {
+            filter.outcome = if wins_selected { OutcomeFilter::All } else { OutcomeFilter::Wins };
+        }
+        if !has_nicknames {
+            resp.on_hover_text("Configure seus nicknames para filtrar por resultado");
+        }
+
+        let losses_selected = filter.outcome == OutcomeFilter::Losses;
+        let resp = chip(ui, "Derrotas", losses_selected, Some(Color32::from_rgb(180, 80, 80)));
+        if resp.clicked() && has_nicknames {
+            filter.outcome = if losses_selected { OutcomeFilter::All } else { OutcomeFilter::Losses };
+        }
+        if !has_nicknames {
+            resp.on_hover_text("Configure seus nicknames para filtrar por resultado");
+        }
+
+        ui.add_space(4.0);
+
+        let prev_date_range = filter.date_range;
+        let date_label = match filter.date_range {
+            DateRange::All => "Sempre",
+            DateRange::Today => "Hoje",
+            DateRange::ThisWeek => "Semana",
+            DateRange::ThisMonth => "Mês",
+        };
+        let date_active = filter.date_range != DateRange::All;
+        let date_text_color = if date_active { Color32::WHITE } else { Color32::from_gray(160) };
+        egui::ComboBox::from_id_salt("date_range_chip")
+            .selected_text(RichText::new(format!("{date_label} ▾")).color(date_text_color).small())
+            .width(80.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut filter.date_range, DateRange::All, "Sempre");
+                ui.selectable_value(&mut filter.date_range, DateRange::Today, "Hoje");
+                ui.selectable_value(&mut filter.date_range, DateRange::ThisWeek, "Esta semana");
+                ui.selectable_value(&mut filter.date_range, DateRange::ThisMonth, "Este mês");
+            });
+        if filter.date_range != prev_date_range {
+            action = LibraryAction::SaveDateRange(filter.date_range);
         }
     });
 
-    // Pré-computa os índices visíveis com base no filtro. O vetor
-    // `visible` é construído a cada frame, mas é uma varredura linear
-    // barata (só comparamos strings já em memória) — a economia do
-    // scroll virtualizado continua valendo porque só renderizamos as
-    // linhas dentro da viewport.
-    let needle = filter.trim().to_ascii_lowercase();
-    let filter_active = !needle.is_empty();
-    let visible: Vec<usize> = if filter_active {
-        library
-            .entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| match &e.meta {
-                MetaState::Parsed(meta) => meta
-                    .players
-                    .iter()
-                    .any(|p| p.name.to_ascii_lowercase().contains(&needle)),
-                _ => false,
-            })
-            .map(|(i, _)| i)
-            .collect()
-    } else {
-        (0..library.entries.len()).collect()
-    };
+    ui.add_space(2.0);
 
-    // Status da fila / contador
-    let pending = library.pending_count();
-    let total = library.entries.len();
-    let shown = visible.len();
-    if total > 0 {
-        if filter_active {
-            ui.small(format!("🔎 {shown}/{total} correspondem ao filtro"));
-        } else if library.scanning {
-            ui.small(format!("🔍 varrendo pasta… {total} encontrados"));
-        } else if pending > 0 {
-            ui.small(format!("🔄 {pending}/{total} lendo metadados…"));
-        } else {
-            ui.small(format!("{total} replays"));
+    // ── Status ───────────────────────────────────────────────────────
+    if library.scanning {
+        ui.small(
+            RichText::new(format!("🔍 varrendo pasta… {} encontrados", library.entries.len()))
+                .italics(),
+        );
+    } else {
+        let pending = library.pending_count();
+        if pending > 0 {
+            ui.small(format!("🔄 {pending}/{} lendo metadados…", library.entries.len()));
         }
-    } else if library.scanning {
-        ui.small(RichText::new("🔍 varrendo pasta…").italics());
-    } else if library.working_dir.is_some() {
-        ui.small(RichText::new("(nenhum .SC2Replay nessa pasta)").italics());
     }
 
     ui.separator();
@@ -537,7 +678,103 @@ pub fn show(
         return action;
     }
 
-    if filter_active && shown == 0 {
+    // ── Filtragem ────────────────────────────────────────────────────
+    let needle = filter.search.trim().to_ascii_lowercase();
+    let search_active = !needle.is_empty();
+    let any_filter_active = search_active
+        || filter.race.is_some()
+        || filter.outcome != OutcomeFilter::All
+        || filter.date_range != DateRange::All;
+
+    let today = today_str();
+
+    let mut visible: Vec<usize> = library
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| match &e.meta {
+            MetaState::Parsed(meta) => {
+                if search_active {
+                    let name_match = meta
+                        .players
+                        .iter()
+                        .any(|p| p.name.to_ascii_lowercase().contains(&needle));
+                    let map_match = meta.map.to_ascii_lowercase().contains(&needle);
+                    let mc = matchup_code(meta, config);
+                    let matchup_match = mc.to_ascii_lowercase().contains(&needle);
+                    if !(name_match || map_match || matchup_match) {
+                        return false;
+                    }
+                }
+                if let Some(race_ch) = filter.race {
+                    let user = find_user_player(meta, config);
+                    let matches = user
+                        .map_or(false, |p| race_letter(&p.race) == race_ch);
+                    if !matches {
+                        return false;
+                    }
+                }
+                match filter.outcome {
+                    OutcomeFilter::All => {}
+                    OutcomeFilter::Wins => {
+                        let won = find_user_player(meta, config)
+                            .map_or(false, |p| p.result == "Win");
+                        if !won {
+                            return false;
+                        }
+                    }
+                    OutcomeFilter::Losses => {
+                        let lost = find_user_player(meta, config)
+                            .map_or(false, |p| p.result == "Loss");
+                        if !lost {
+                            return false;
+                        }
+                    }
+                }
+                if !matches_date_range(&meta.datetime, filter.date_range, &today) {
+                    return false;
+                }
+                true
+            }
+            _ => !any_filter_active,
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    // ── Ordenação ────────────────────────────────────────────────────
+    match filter.sort {
+        SortOrder::Date => {
+            // Já ordenado por mtime no entries vec. Se ascendente, inverter.
+            if filter.sort_ascending {
+                visible.reverse();
+            }
+        }
+        SortOrder::Duration => {
+            visible.sort_by(|&a, &b| {
+                let da = get_duration(&library.entries[a]);
+                let db = get_duration(&library.entries[b]);
+                if filter.sort_ascending { da.cmp(&db) } else { db.cmp(&da) }
+            });
+        }
+        SortOrder::Mmr => {
+            visible.sort_by(|&a, &b| {
+                let ma = get_user_mmr(&library.entries[a], config);
+                let mb = get_user_mmr(&library.entries[b], config);
+                if filter.sort_ascending { ma.cmp(&mb) } else { mb.cmp(&ma) }
+            });
+        }
+        SortOrder::Map => {
+            visible.sort_by(|&a, &b| {
+                let ma = get_map(&library.entries[a]);
+                let mb = get_map(&library.entries[b]);
+                if filter.sort_ascending { ma.cmp(mb) } else { mb.cmp(ma) }
+            });
+        }
+    }
+
+    let shown = visible.len();
+
+    if any_filter_active && shown == 0 {
         ui.add_space(8.0);
         ui.label(
             RichText::new("Nenhum replay corresponde ao filtro.")
@@ -547,8 +784,14 @@ pub fn show(
         return action;
     }
 
-    // Lista virtualizada: só as linhas visíveis são renderizadas.
-    // Crítico com 4k+ entradas, onde o layout completo travaria o frame.
+    if any_filter_active {
+        ui.small(
+            RichText::new(format!("🔎 {shown}/{} correspondem ao filtro", library.entries.len()))
+                .color(Color32::from_gray(140)),
+        );
+    }
+
+    // ── Lista virtualizada ───────────────────────────────────────────
     let row_h = row_height(ui);
     ScrollArea::vertical()
         .id_salt("library_list")
@@ -567,35 +810,245 @@ pub fn show(
     action
 }
 
-/// Altura (em pixels) de cada linha da lista virtualizada. Calculada a
-/// partir das alturas atuais dos text styles para respeitar o
-/// `font_scale` do config, já aplicado ao `Style` do contexto.
-/// Todas as linhas — independentemente do estado — terminam com esta
-/// altura porque `entry_row` força `set_min_height` dentro do Frame.
+// ── Helpers de filtro/sort ────────────────────────────────────────────
+
+fn find_user_player<'a>(meta: &'a ParsedMeta, config: &AppConfig) -> Option<&'a PlayerMeta> {
+    if config.user_nicknames.is_empty() {
+        return None;
+    }
+    meta.players.iter().find(|p| {
+        config
+            .user_nicknames
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&p.name))
+    })
+}
+
+fn find_user_index(meta: &ParsedMeta, config: &AppConfig) -> Option<usize> {
+    if config.user_nicknames.is_empty() {
+        return None;
+    }
+    meta.players.iter().position(|p| {
+        config
+            .user_nicknames
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(&p.name))
+    })
+}
+
+fn matchup_code(meta: &ParsedMeta, config: &AppConfig) -> String {
+    if meta.players.len() != 2 {
+        return String::new();
+    }
+    let ui = find_user_index(meta, config);
+    let (first, second) = match ui {
+        Some(0) => (0, 1),
+        Some(1) => (1, 0),
+        _ => (0, 1),
+    };
+    format!(
+        "{}v{}",
+        race_letter(&meta.players[first].race),
+        race_letter(&meta.players[second].race)
+    )
+}
+
+fn today_str() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use std::mem::MaybeUninit;
+        unsafe {
+            let mut st = MaybeUninit::<winapi_local::SYSTEMTIME>::uninit();
+            winapi_local::GetLocalTime(st.as_mut_ptr());
+            let st = st.assume_init();
+            format!("{:04}-{:02}-{:02}", st.w_year, st.w_month, st.w_day)
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let days = now / 86400;
+        let (y, m, d) = civil_from_days(days as i64);
+        format!("{y:04}-{m:02}-{d:02}")
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod winapi_local {
+    #[repr(C)]
+    #[allow(dead_code)]
+    pub struct SYSTEMTIME {
+        pub w_year: u16,
+        pub w_month: u16,
+        pub w_day_of_week: u16,
+        pub w_day: u16,
+        pub w_hour: u16,
+        pub w_minute: u16,
+        pub w_second: u16,
+        pub w_milliseconds: u16,
+    }
+    unsafe extern "system" {
+        pub fn GetLocalTime(lp: *mut SYSTEMTIME);
+    }
+}
+
+/// Days since epoch → (year, month, day). Algorithm from Howard Hinnant.
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m, d)
+}
+
+/// Day of week (0=Monday .. 6=Sunday) from (y, m, d).
+fn day_of_week(y: i32, m: u32, d: u32) -> u32 {
+    // Tomohiko Sakamoto's algorithm
+    let t = [0i32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let y = if m < 3 { y - 1 } else { y };
+    let dow = (y + y / 4 - y / 100 + y / 400 + t[(m - 1) as usize] + d as i32) % 7;
+    // Sakamoto: 0=Sunday. Convert to 0=Monday.
+    ((dow + 6) % 7) as u32
+}
+
+fn parse_date(dt: &str) -> Option<(i32, u32, u32)> {
+    if dt.len() < 10 {
+        return None;
+    }
+    let y: i32 = dt[..4].parse().ok()?;
+    let m: u32 = dt[5..7].parse().ok()?;
+    let d: u32 = dt[8..10].parse().ok()?;
+    Some((y, m, d))
+}
+
+fn matches_date_range(datetime: &str, range: DateRange, today: &str) -> bool {
+    match range {
+        DateRange::All => true,
+        DateRange::Today => datetime.starts_with(today),
+        DateRange::ThisWeek => {
+            let Some((ty, tm, td)) = parse_date(today) else { return true; };
+            let Some((ry, rm, rd)) = parse_date(datetime) else { return false; };
+            let today_dow = day_of_week(ty, tm, td);
+            // Monday of this week
+            let today_days = days_from_civil(ty, tm, td);
+            let week_start = today_days - today_dow as i64;
+            let replay_days = days_from_civil(ry, rm, rd);
+            replay_days >= week_start && replay_days <= today_days
+        }
+        DateRange::ThisMonth => {
+            if today.len() < 7 {
+                return true;
+            }
+            datetime.starts_with(&today[..7])
+        }
+    }
+}
+
+fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+    let y = y as i64 - if m <= 2 { 1 } else { 0 };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe as i64 - 719468
+}
+
+fn get_duration(entry: &LibraryEntry) -> u32 {
+    match &entry.meta {
+        MetaState::Parsed(m) => m.duration_seconds,
+        _ => 0,
+    }
+}
+
+fn get_user_mmr(entry: &LibraryEntry, config: &AppConfig) -> i32 {
+    match &entry.meta {
+        MetaState::Parsed(m) => find_user_player(m, config)
+            .and_then(|p| p.mmr)
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn get_map(entry: &LibraryEntry) -> &str {
+    match &entry.meta {
+        MetaState::Parsed(m) => &m.map,
+        _ => "",
+    }
+}
+
+// ── UI components ────────────────────────────────────────────────────
+
+fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -> egui::Response {
+    let fill = if selected {
+        accent.map_or(Color32::from_rgb(55, 75, 55), |c| {
+            Color32::from_rgb(
+                (c.r() as u16 / 3) as u8 + 20,
+                (c.g() as u16 / 3) as u8 + 20,
+                (c.b() as u16 / 3) as u8 + 20,
+            )
+        })
+    } else {
+        Color32::from_gray(40)
+    };
+    let text_color = if selected {
+        Color32::WHITE
+    } else {
+        Color32::from_gray(160)
+    };
+
+    let icon = if accent.is_some() {
+        if selected {
+            format!("■ {label}")
+        } else {
+            format!("□ {label}")
+        }
+    } else {
+        label.to_string()
+    };
+
+    ui.add(
+        egui::Button::new(RichText::new(icon).color(text_color).small())
+            .fill(fill)
+            .corner_radius(12.0),
+    )
+}
+
+/// Altura de cada linha da lista virtualizada.
 fn row_height(ui: &Ui) -> f32 {
     use egui::TextStyle;
     let body = ui.text_style_height(&TextStyle::Body);
     let small = ui.text_style_height(&TextStyle::Small);
     let gap = ui.spacing().item_spacing.y;
-    // Conteúdo do Frame: 1 body + 2 small + 2 gaps entre eles.
-    // Moldura do Frame: inner_margin 6+6 + stroke 0.5+0.5 ≈ 13.
-    body + small * 2.0 + gap * 2.0 + 13.0
+    body + small * 2.0 + gap * 2.0 + FRAME_CHROME_V
 }
 
-/// Altura de chrome do Frame (margem vertical 6+6 + stroke ~1).
-/// Mantida em sincronia com `row_height` — se mudar um, mude o outro.
 const FRAME_CHROME_V: f32 = 13.0;
 
-/// Renderiza uma linha do catálogo. Retorna `true` se o usuário clicou
-/// em uma entrada *carregável* (i.e. `Parsed`). Entradas `Unsupported`,
-/// `Pending` ou `Failed` não respondem ao clique.
-///
-/// `row_h` é a altura fixa esperada pelo `ScrollArea::show_rows`. Para
-/// garantir que **toda** linha ocupa exatamente essa altura — mesmo as
-/// que mostram só 2 linhas de texto (Pending/Unsupported/Failed) — o
-/// Frame força `set_min_height(row_h - chrome)` internamente antes de
-/// desenhar qualquer label. Sem isso, linhas mais curtas desalinham o
-/// scroll virtualizado porque `show_rows` assume altura uniforme.
+// Cores de raça — distintas das cores de slot P1/P2 (vermelho/azul)
+// para que "raça" e "jogador" nunca se confundam visualmente.
+const RACE_COLOR_TERRAN: Color32 = Color32::from_rgb(90, 130, 180);   // azul aço
+const RACE_COLOR_PROTOSS: Color32 = Color32::from_rgb(120, 180, 100); // verde dourado
+const RACE_COLOR_ZERG: Color32 = Color32::from_rgb(160, 80, 150);     // roxo magenta
+
+/// Cor da borda esquerda baseada na raça.
+fn race_border_color(race: &str) -> Color32 {
+    match race_letter(race) {
+        'T' => RACE_COLOR_TERRAN,
+        'P' => RACE_COLOR_PROTOSS,
+        'Z' => RACE_COLOR_ZERG,
+        _ => Color32::from_gray(100),
+    }
+}
+
 fn entry_row(
     ui: &mut Ui,
     entry: &LibraryEntry,
@@ -628,40 +1081,126 @@ fn entry_row(
         .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            // Trava a altura INTERNA do Frame. Com isso, todo Frame
-            // sai do layout com exatamente `row_h` (chrome + content),
-            // independente de quantas labels foram desenhadas.
             ui.set_min_height(content_h);
-            // Linha 1: filename ou matchup
+
             match &entry.meta {
                 MetaState::Parsed(meta) => {
-                    let matchup = matchup_label(meta, config);
-                    ui.label(
-                        RichText::new(matchup)
-                            .strong()
-                            .color(if is_current { Color32::LIGHT_GREEN } else { Color32::WHITE }),
-                    );
-                    // Linha 2: map + duração
+                    let user_idx = find_user_index(meta, config);
+                    let mc = matchup_code(meta, config);
+
+                    // Player names label: "Player1 vs Player2"
+                    let vs_label = if meta.players.len() == 2 {
+                        format!("{} vs {}", meta.players[0].name, meta.players[1].name)
+                    } else {
+                        meta.players.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(" vs ")
+                    };
+
                     let dur = format!(
                         "{:02}:{:02}",
                         meta.duration_seconds / 60,
                         meta.duration_seconds % 60
                     );
-                    ui.small(format!("🗺 {} • ⏱ {}", meta.map, dur));
-                    // Linha 3: MMRs + data
+
                     let mmrs: Vec<String> = meta
                         .players
                         .iter()
-                        .map(|p| match p.mmr {
-                            Some(v) => v.to_string(),
-                            None => "—".to_string(),
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let v = match p.mmr {
+                                Some(v) => v.to_string(),
+                                None => "—".into(),
+                            };
+                            if user_idx == Some(i) {
+                                format!("{v}")
+                            } else {
+                                v
+                            }
                         })
                         .collect();
-                    ui.small(format!(
-                        "MMR {} • {}",
-                        mmrs.join("/"),
-                        short_datetime(&meta.datetime)
-                    ));
+
+                    let (short_date, time_part) = split_datetime(&meta.datetime);
+
+                    ui.horizontal(|ui| {
+                        // ── Coluna esquerda ──
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(&vs_label)
+                                    .strong()
+                                    .color(if is_current {
+                                        Color32::LIGHT_GREEN
+                                    } else {
+                                        Color32::WHITE
+                                    }),
+                            );
+                            ui.small(
+                                RichText::new(format!("🗺 {} • ⏱ {dur} • {short_date}", meta.map))
+                                    .color(Color32::from_gray(140)),
+                            );
+                            let mmr_user = user_idx.and_then(|i| meta.players[i].mmr);
+                            let mmr_text = format!("MMR {}", mmrs.join(" / "));
+                            if mmr_user.is_some() {
+                                ui.small(
+                                    RichText::new(mmr_text)
+                                        .color(Color32::from_gray(140))
+                                        .strong(),
+                                );
+                            } else {
+                                ui.small(
+                                    RichText::new(mmr_text).color(Color32::from_gray(140)),
+                                );
+                            }
+                        });
+
+                        // ── Coluna direita ──
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                // Botão "abrir"
+                                let btn = ui.add(
+                                    egui::Button::new(
+                                        RichText::new("abrir").color(Color32::from_gray(180)),
+                                    )
+                                    .fill(Color32::from_gray(45))
+                                    .corner_radius(4.0),
+                                );
+                                if btn.clicked() {
+                                    // Handled below via inner.response
+                                }
+
+                                ui.add_space(8.0);
+
+                                ui.vertical(|ui| {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Min),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(&mc)
+                                                    .strong()
+                                                    .size(ui.text_style_height(&egui::TextStyle::Body) * 1.1)
+                                                    .color(Color32::from_gray(200)),
+                                            );
+                                        },
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Min),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(format!("{short_date} "))
+                                                    .small()
+                                                    .color(Color32::from_gray(100)),
+                                            );
+                                            ui.label(
+                                                RichText::new(&time_part)
+                                                    .small()
+                                                    .strong()
+                                                    .color(Color32::from_gray(200)),
+                                            );
+                                        },
+                                    );
+                                });
+                            },
+                        );
+                    });
                 }
                 MetaState::Pending => {
                     ui.label(RichText::new(&entry.filename).monospace());
@@ -690,36 +1229,35 @@ fn entry_row(
             }
         });
 
-    // Só registramos clique como "carregar" se a entrada for carregável.
-    // Entradas Unsupported/Pending/Failed ficam inertes ao clique.
-    loadable && inner.response.interact(Sense::click()).clicked()
-}
+    // Pinta a borda esquerda colorida por raça (sobre o frame já renderizado).
+    if let MetaState::Parsed(meta) = &entry.meta {
+        let user_idx = find_user_index(meta, config).unwrap_or(0);
+        let border_color = race_border_color(&meta.players[user_idx].race);
+        let rect = inner.response.rect;
+        let border_rect = egui::Rect::from_min_max(
+            rect.left_top(),
+            egui::pos2(rect.left() + 3.5, rect.bottom()),
+        );
+        ui.painter().rect_filled(border_rect, 4.0, border_color);
+    }
 
-fn matchup_label(meta: &ParsedMeta, _config: &AppConfig) -> String {
-    if meta.players.is_empty() {
-        return "(sem jogadores)".to_string();
-    }
-    let mut parts = Vec::with_capacity(meta.players.len());
-    for p in &meta.players {
-        parts.push(format!("{}({})", p.name, race_letter(&p.race)));
-    }
-    parts.join(" vs ")
+    loadable && inner.response.interact(Sense::click()).clicked()
 }
 
 fn race_letter(race: &str) -> char {
     crate::utils::race_letter(race)
 }
 
-fn short_datetime(dt: &str) -> String {
-    // "2025-12-18T06:44:53" → "2025-12-18 06:44"
+fn split_datetime(dt: &str) -> (String, String) {
+    // "2025-12-18T06:44:53" → ("2025-12-18", "06:44")
     if dt.len() >= 16 {
-        let mut s = dt[..16].to_string();
-        if let Some(pos) = s.find('T') {
-            s.replace_range(pos..pos + 1, " ");
-        }
-        s
+        let date = dt[..10].to_string();
+        let time = dt[11..16].to_string();
+        (date, time)
+    } else if dt.len() >= 10 {
+        (dt[..10].to_string(), String::new())
     } else {
-        dt.to_string()
+        (dt.to_string(), String::new())
     }
 }
 

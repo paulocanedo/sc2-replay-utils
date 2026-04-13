@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::library::{MetaState, ParsedMeta, PlayerMeta};
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 const CACHE_FILE: &str = "library_meta.bin";
 
 // ── Tipos serializáveis (desacoplados dos tipos da UI) ───────────────
@@ -52,6 +52,7 @@ struct CachedPlayerMeta {
     name: String,
     race: String,
     mmr: Option<i32>,
+    result: String,
 }
 
 // ── Conversões ───────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ fn to_cached_meta(meta: &ParsedMeta) -> CachedParsedMeta {
                 name: p.name.clone(),
                 race: p.race.clone(),
                 mmr: p.mmr,
+                result: p.result.clone(),
             })
             .collect(),
     }
@@ -98,6 +100,7 @@ fn from_cached_meta(c: CachedParsedMeta) -> ParsedMeta {
                 name: p.name,
                 race: p.race,
                 mmr: p.mmr,
+                result: p.result,
             })
             .collect(),
     }
