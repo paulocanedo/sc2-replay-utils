@@ -825,8 +825,13 @@ pub fn apply_style(ctx: &Context, config: &AppConfig) {
         egui::Visuals::light()
     });
     let mut style = (*ctx.global_style()).clone();
-    for (_, font_id) in style.text_styles.iter_mut() {
-        font_id.size *= config.font_scale.clamp(0.5, 2.0);
+    let base = config.font_size.clamp(8.0, 28.0);
+    for (text_style, font_id) in style.text_styles.iter_mut() {
+        font_id.size = match text_style {
+            egui::TextStyle::Small => (base * 0.72).round(),
+            egui::TextStyle::Heading => (base * 1.43).round(),
+            _ => base,
+        };
     }
     ctx.set_global_style(style);
 }

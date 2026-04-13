@@ -124,10 +124,10 @@ pub fn show(
             ui.checkbox(&mut config.dark_mode, "Tema escuro");
 
             ui.horizontal(|ui| {
-                ui.label("Escala da fonte:");
-                ui.add(Slider::new(&mut config.font_scale, 0.8..=1.5).fixed_decimals(2));
+                ui.label("Tamanho da fonte (pt):");
+                ui.add(Slider::new(&mut config.font_size, 8.0..=28.0).fixed_decimals(0));
             });
-            ui.small("HiDPI é detectado automaticamente pelo sistema — este slider só afeta o tamanho do texto.");
+            ui.small("Tamanho em pontos lógicos. HiDPI é tratado automaticamente pelo sistema.");
 
             ui.separator();
             ui.horizontal(|ui| {

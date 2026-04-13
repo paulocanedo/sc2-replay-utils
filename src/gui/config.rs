@@ -32,8 +32,8 @@ pub struct AppConfig {
     pub watch_replays: bool,
     /// Ao detectar novo replay via watcher, carregar automaticamente.
     pub auto_load_on_new_replay: bool,
-    /// Multiplicador de tamanho de fonte (0.8..=1.5).
-    pub font_scale: f32,
+    /// Tamanho base da fonte em pontos lógicos (HiDPI é tratado pelo egui).
+    pub font_size: f32,
     /// Idioma da UI para nomes de unidades/pesquisas.
     pub language: Language,
 }
@@ -48,7 +48,7 @@ impl Default for AppConfig {
             auto_load_latest: false,
             watch_replays: true,
             auto_load_on_new_replay: true,
-            font_scale: 1.0,
+            font_size: 14.0,
             language: Language::default(),
         }
     }
