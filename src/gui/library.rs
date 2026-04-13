@@ -26,7 +26,6 @@ use egui::{Color32, Context, RichText, ScrollArea, Sense, Ui};
 
 use crate::config::AppConfig;
 use crate::replay::parse_replay;
-use crate::utils::list_replays_recursive;
 
 /// Acima deste número de novos arquivos a parsear em um único `refresh`,
 /// a biblioteca passa a usar um pool multi-thread. Abaixo disso, um
@@ -94,6 +93,20 @@ struct LibraryResult {
     outcome: ParseOutcome,
 }
 
+/// Arquivo descoberto pelo scanner de diretório em background.
+struct ScanResult {
+    path: PathBuf,
+    filename: String,
+    mtime: Option<SystemTime>,
+}
+
+/// Mensagem enviada pelo scanner de diretório em background.
+enum ScanMessage {
+    Found(ScanResult),
+    /// Varredura concluída. Contém o replay mais recente encontrado.
+    Done { latest: Option<(PathBuf, SystemTime)> },
+}
+
 pub struct ReplayLibrary {
     pub entries: Vec<LibraryEntry>,
     pub working_dir: Option<PathBuf>,
@@ -109,6 +122,15 @@ pub struct ReplayLibrary {
     /// workers clonam `tx_result`; o library retém o `Receiver`.
     tx_result: Sender<LibraryResult>,
     rx_result: Receiver<LibraryResult>,
+    /// Canal de recepção de arquivos descobertos pelo scanner background.
+    rx_scan: Option<Receiver<ScanMessage>>,
+    /// `true` enquanto o scanner de diretório está rodando.
+    pub scanning: bool,
+    /// Replay mais recente encontrado pelo scanner (para `try_load_latest`).
+    pub scan_latest: Option<PathBuf>,
+    /// Acumulador de arquivos que precisam de parsing, preenchido
+    /// progressivamente pelo scanner e despachado em lotes.
+    scan_parse_queue: Vec<(PathBuf, Option<SystemTime>)>,
 }
 
 impl ReplayLibrary {
@@ -122,50 +144,81 @@ impl ReplayLibrary {
             cache_dirty: false,
             tx_result,
             rx_result,
+            rx_scan: None,
+            scanning: false,
+            scan_latest: None,
+            scan_parse_queue: Vec::new(),
         }
     }
 
-    /// Recarrega a lista a partir do diretório informado. Mantém em cache
-    /// os metadados já parseados. Arquivos ainda não conhecidos são
-    /// enfileirados em um pool de workers criado para esta batelada.
+    /// Recarrega a lista a partir do diretório informado. Inicia um
+    /// scanner em background que descobre arquivos progressivamente —
+    /// a UI não trava mesmo com dezenas de milhares de replays.
     pub fn refresh(&mut self, dir: &Path) {
         self.working_dir = Some(dir.to_path_buf());
-        let paths = list_replays_recursive(dir);
 
-        let mut to_parse: Vec<(PathBuf, Option<SystemTime>)> = Vec::new();
-        let mut entries: Vec<LibraryEntry> = paths
-            .into_iter()
-            .map(|path| {
-                let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
-                let filename = path
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string());
-                let meta = match (self.cache.get(&path), mtime) {
-                    (Some((cached_mtime, state)), Some(mt)) if *cached_mtime == mt => {
-                        state.clone()
+        // Cancela scanner anterior (se houver): dropar o Receiver faz
+        // o send() do scanner falhar e a thread encerrar.
+        self.rx_scan = None;
+        self.entries.clear();
+        self.scan_parse_queue.clear();
+        self.scan_latest = None;
+
+        let (tx_scan, rx_scan) = mpsc::channel::<ScanMessage>();
+        self.rx_scan = Some(rx_scan);
+        self.scanning = true;
+
+        let dir = dir.to_path_buf();
+        let _ = thread::Builder::new()
+            .name("replay-library-scanner".into())
+            .spawn(move || {
+                let mut latest: Option<(PathBuf, SystemTime)> = None;
+                let mut queue = vec![dir];
+
+                while let Some(d) = queue.pop() {
+                    let entries = match fs::read_dir(&d) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            queue.push(path);
+                            continue;
+                        }
+                        if !path
+                            .extension()
+                            .map_or(false, |ext| ext.eq_ignore_ascii_case("SC2Replay"))
+                        {
+                            continue;
+                        }
+                        let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                        let filename = path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.display().to_string());
+
+                        if let Some(mt) = mtime {
+                            if latest.as_ref().map_or(true, |(_, t)| mt > *t) {
+                                latest = Some((path.clone(), mt));
+                            }
+                        }
+
+                        if tx_scan
+                            .send(ScanMessage::Found(ScanResult {
+                                path,
+                                filename,
+                                mtime,
+                            }))
+                            .is_err()
+                        {
+                            return; // Receiver dropado (novo refresh), sair.
+                        }
                     }
-                    _ => {
-                        to_parse.push((path.clone(), mtime));
-                        MetaState::Pending
-                    }
-                };
-                LibraryEntry {
-                    path,
-                    filename,
-                    mtime,
-                    meta,
                 }
-            })
-            .collect();
 
-        // Mais recentes primeiro.
-        entries.sort_by(|a, b| b.mtime.cmp(&a.mtime));
-        self.entries = entries;
-
-        if !to_parse.is_empty() {
-            self.spawn_parse_burst(to_parse);
-        }
+                let _ = tx_scan.send(ScanMessage::Done { latest });
+            });
     }
 
     /// Sobe um pool efêmero de workers para processar `paths` e retorna
@@ -221,10 +274,62 @@ impl ReplayLibrary {
         }
     }
 
-    /// Drena resultados prontos dos workers. Retorna `true` se alguma
-    /// entrada foi atualizada (para a UI pedir repaint).
+    /// Drena resultados prontos dos workers e do scanner. Retorna `true`
+    /// se alguma entrada foi atualizada (para a UI pedir repaint).
     pub fn poll(&mut self) -> bool {
         let mut updated = false;
+
+        // Fase 1: Drena arquivos descobertos pelo scanner background.
+        if self.rx_scan.is_some() {
+            for _ in 0..500 {
+                let msg = match self.rx_scan.as_ref().unwrap().try_recv() {
+                    Ok(m) => m,
+                    Err(_) => break,
+                };
+                match msg {
+                    ScanMessage::Found(result) => {
+                        let meta = match (self.cache.get(&result.path), result.mtime) {
+                            (Some((cached_mtime, state)), Some(mt)) if *cached_mtime == mt => {
+                                state.clone()
+                            }
+                            _ => {
+                                self.scan_parse_queue
+                                    .push((result.path.clone(), result.mtime));
+                                MetaState::Pending
+                            }
+                        };
+                        self.entries.push(LibraryEntry {
+                            path: result.path,
+                            filename: result.filename,
+                            mtime: result.mtime,
+                            meta,
+                        });
+                        updated = true;
+                    }
+                    ScanMessage::Done { latest } => {
+                        self.scanning = false;
+                        self.rx_scan = None;
+                        self.scan_latest = latest.map(|(p, _)| p);
+                        // Ordena por mtime decrescente agora que temos tudo.
+                        self.entries.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+                        // Despacha remanescentes para parsing.
+                        if !self.scan_parse_queue.is_empty() {
+                            let batch = std::mem::take(&mut self.scan_parse_queue);
+                            self.spawn_parse_burst(batch);
+                        }
+                        updated = true;
+                        break;
+                    }
+                }
+            }
+            // Despacha lotes intermediários para começar parsing cedo.
+            if self.scan_parse_queue.len() >= 200 {
+                let batch = std::mem::take(&mut self.scan_parse_queue);
+                self.spawn_parse_burst(batch);
+            }
+        }
+
+        // Fase 2: Drena resultados de parsing dos workers.
         while let Ok(msg) = self.rx_result.try_recv() {
             let state = match msg.outcome {
                 ParseOutcome::Parsed(meta) => {
@@ -251,7 +356,7 @@ impl ReplayLibrary {
             }
         }
         // Salva o cache quando todos os workers terminaram.
-        if self.cache_dirty && self.pending_count() == 0 {
+        if self.cache_dirty && !self.scanning && self.pending_count() == 0 {
             self.save_cache();
         }
         updated
@@ -406,11 +511,15 @@ pub fn show(
     if total > 0 {
         if filter_active {
             ui.small(format!("🔎 {shown}/{total} correspondem ao filtro"));
+        } else if library.scanning {
+            ui.small(format!("🔍 varrendo pasta… {total} encontrados"));
         } else if pending > 0 {
             ui.small(format!("🔄 {pending}/{total} lendo metadados…"));
         } else {
             ui.small(format!("{total} replays"));
         }
+    } else if library.scanning {
+        ui.small(RichText::new("🔍 varrendo pasta…").italics());
     } else if library.working_dir.is_some() {
         ui.small(RichText::new("(nenhum .SC2Replay nessa pasta)").italics());
     }
@@ -616,7 +725,9 @@ fn short_datetime(dt: &str) -> String {
 
 /// Helper para a `app.rs` pedir repaint quando houver trabalho em andamento.
 pub fn keep_alive(ctx: &Context, library: &ReplayLibrary) {
-    if library.pending_count() > 0 {
+    if library.scanning {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    } else if library.pending_count() > 0 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
 }

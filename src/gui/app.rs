@@ -60,6 +60,8 @@ pub struct AppState {
     pub rename_previews: Vec<(std::path::PathBuf, String)>,
     /// Status da última operação de rename.
     pub rename_status: Option<String>,
+    /// Carregamento do replay mais recente adiado até o scanner terminar.
+    pub pending_load_latest: bool,
 }
 
 impl AppState {
@@ -87,11 +89,12 @@ impl AppState {
             rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
             rename_previews: Vec::new(),
             rename_status: None,
+            pending_load_latest: false,
         };
         me.restart_watcher();
         me.refresh_library();
         if me.config.auto_load_latest {
-            me.try_load_latest();
+            me.pending_load_latest = true;
         }
         me
     }
@@ -105,6 +108,11 @@ impl AppState {
     }
 
     fn try_load_latest(&mut self) {
+        // Se o scanner já rodou, usa o resultado dele (sem I/O extra).
+        if let Some(p) = self.library.scan_latest.clone() {
+            self.load_path(p);
+            return;
+        }
         let Some(dir) = self.config.effective_working_dir() else {
             self.set_toast("Diretório de trabalho não definido (veja Configurações).");
             return;
@@ -186,6 +194,13 @@ impl eframe::App for AppState {
         // Drena resultados do worker da biblioteca.
         if self.library.poll() {
             ctx.request_repaint();
+        }
+        // Carrega o replay mais recente quando o scanner terminar.
+        if self.pending_load_latest && !self.library.scanning {
+            self.pending_load_latest = false;
+            if let Some(path) = self.library.scan_latest.clone() {
+                self.load_path(path);
+            }
         }
 
         // Guarda: Tela Análise exige replay carregado. Se por qualquer
