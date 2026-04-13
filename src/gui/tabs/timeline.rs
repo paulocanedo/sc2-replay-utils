@@ -17,8 +17,8 @@
 use std::collections::HashMap;
 
 use egui::{
-    pos2, vec2, Color32, ColorImage, Pos2, Rect, RichText, Sense, Slider, Stroke, TextureOptions,
-    Ui,
+    pos2, vec2, Color32, ColorImage, Pos2, Rect, RichText, Sense, Slider, Stroke, StrokeKind,
+    TextureOptions, Ui,
 };
 
 use crate::colors::player_slot_color_bright;
@@ -188,7 +188,7 @@ fn minimap_with_size(
                 Color32::WHITE,
             );
         }
-        painter.rect_stroke(rect, 4.0, Stroke::new(1.5, Color32::from_gray(90)));
+        painter.rect_stroke(rect, 4.0, Stroke::new(1.5, Color32::from_gray(90)), StrokeKind::Outside);
 
         if show_heatmap {
             // Heatmap: acumula posições da câmera até o instante atual
@@ -303,7 +303,7 @@ fn draw_unit(
     );
     painter.rect_filled(r, 0.0, color);
     if structure {
-        painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE));
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE), StrokeKind::Outside);
     }
 }
 
@@ -340,7 +340,7 @@ fn draw_camera_rect(
     let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 25);
     painter.rect_filled(cam_rect, 0.0, fill);
     let stroke_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
-    painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color));
+    painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color), StrokeKind::Outside);
 }
 
 // ── Heatmap de câmera ─────────────────────────────────────────────────

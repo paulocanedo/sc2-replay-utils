@@ -210,7 +210,7 @@ fn army_value_plot(
                         [x0, y_max],
                     ]
                     .into();
-                    let poly = Polygon::new(rect)
+                    let poly = Polygon::new("", rect)
                         .fill_color(fill)
                         .stroke(egui::Stroke::new(1.0, stroke_color))
                         .allow_hover(false);
@@ -227,8 +227,7 @@ fn army_value_plot(
                     .map(|s| [loop_to_secs(s.game_loop, lps), army_value_for_snapshot(s, sa, sw)])
                     .collect();
                 let name = player.name.clone();
-                let line = Line::new(points)
-                    .name(name)
+                let line = Line::new(name, points)
                     .color(player_slot_color_bright(idx))
                     .width(if is_user { 2.5 } else { 1.8 });
                 plot_ui.line(line);

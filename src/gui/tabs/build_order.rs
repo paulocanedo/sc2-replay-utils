@@ -166,7 +166,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         layout_rect.min,
         egui::vec2(layout_rect.width(), available.max(100.0)),
     );
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |ui| {
         ui.columns(n, |cols| {
             for (i, player) in players.iter().take(n).enumerate() {
                 let ui = &mut cols[i];
@@ -261,11 +261,11 @@ fn player_column(
 
     // ── Cabeçalho estilo sidebar card ───────────────────────────
     let race_letter = race_initial(&player.race);
-    let header_resp = egui::Frame::none()
+    let header_resp = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
-        .rounding(6.0)
-        .inner_margin(egui::Margin::symmetric(14.0, 8.0))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(14, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
 
@@ -308,7 +308,7 @@ fn player_column(
     );
     ui.painter().rect_filled(
         accent,
-        egui::Rounding { nw: 6.0, sw: 6.0, ne: 0.0, se: 0.0 },
+        egui::CornerRadius { nw: 6, sw: 6, ne: 0, se: 0 },
         slot_color,
     );
 

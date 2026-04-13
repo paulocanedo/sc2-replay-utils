@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel};
+use egui::{Color32, Context, Panel, RichText, ScrollArea};
 
 use crate::colors::{player_slot_color, user_fill, CARD_FILL, LABEL_DIM, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
@@ -179,9 +179,10 @@ impl AppState {
 }
 
 impl eframe::App for AppState {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         // Polling do watcher ANTES de qualquer painel.
-        self.poll_watcher(ctx);
+        self.poll_watcher(&ctx);
         // Drena resultados do worker da biblioteca.
         if self.library.poll() {
             ctx.request_repaint();
@@ -194,11 +195,11 @@ impl eframe::App for AppState {
         }
 
         // -------- Menu bar (sempre) --------
-        TopBottomPanel::top("menubar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+        Panel::top("menubar").show_inside(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Arquivo", |ui| {
                     if ui.button("Abrir replay…").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         if let Some(p) = rfd::FileDialog::new()
                             .add_filter("SC2 Replay", &["SC2Replay"])
                             .pick_file()
@@ -207,7 +208,7 @@ impl eframe::App for AppState {
                         }
                     }
                     if ui.button("Carregar mais recente").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.try_load_latest();
                     }
                     ui.separator();
@@ -218,26 +219,26 @@ impl eframe::App for AppState {
                 ui.menu_button("Exibir", |ui| {
                     if ui.button("Biblioteca").clicked() {
                         self.screen = Screen::Library;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.add_enabled(self.loaded.is_some(), egui::Button::new("Análise")).clicked() {
                         self.screen = Screen::Analysis;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Renomear").clicked() {
                         self.rename_previews = crate::rename::generate_previews(&self.library, &self.rename_template);
                         self.screen = Screen::Rename;
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button("Configurações…").clicked() {
                         self.show_settings = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
                 ui.menu_button("Ajuda", |ui| {
                     if ui.button("Sobre").clicked() {
-                        ui.close_menu();
+                        ui.close();
                         self.show_about = true;
                     }
                 });
@@ -246,7 +247,7 @@ impl eframe::App for AppState {
 
         // -------- Barra de navegação Rename --------
         if self.screen == Screen::Rename {
-            TopBottomPanel::top("rename_bar").show(ctx, |ui| {
+            Panel::top("rename_bar").show_inside(ui, |ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
@@ -265,7 +266,7 @@ impl eframe::App for AppState {
 
         // -------- Replay bar + Tab bar (apenas Tela Análise) --------
         if self.screen == Screen::Analysis {
-            TopBottomPanel::top("replay_bar").show(ctx, |ui| {
+            Panel::top("replay_bar").show_inside(ui, |ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
@@ -294,7 +295,7 @@ impl eframe::App for AppState {
                 ui.add_space(4.0);
             });
 
-            TopBottomPanel::top("tabs").show(ctx, |ui| {
+            Panel::top("tabs").show_inside(ui, |ui| {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for tab in Tab::ALL {
@@ -322,7 +323,7 @@ impl eframe::App for AppState {
             .map(|w| w.watched_dir().to_path_buf());
         let toast_msg = self.toast_visible().map(|s| s.to_string());
 
-        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+        Panel::bottom("status_bar").show_inside(ui, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 match &loaded_snapshot {
@@ -350,10 +351,10 @@ impl eframe::App for AppState {
                             .on_hover_text(format!("Observando: {}", dir.display()));
                     }
                     if let Some(msg) = toast_msg {
-                        egui::Frame::none()
+                        egui::Frame::new()
                             .fill(Color32::from_rgb(28, 60, 28))
                             .stroke(egui::Stroke::new(1.0, Color32::LIGHT_GREEN))
-                            .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+                            .inner_margin(egui::Margin::symmetric(8, 2))
                             .show(ui, |ui| {
                                 ui.label(RichText::new(msg).color(Color32::LIGHT_GREEN).small());
                             });
@@ -366,23 +367,23 @@ impl eframe::App for AppState {
         // -------- SidePanel direita: Jogadores/Partida (apenas Análise) --------
         if self.screen == Screen::Analysis && let Some(loaded) = self.loaded.as_ref() {
             let config = &self.config;
-            SidePanel::right("match_info")
+            Panel::right("match_info")
                 .resizable(true)
-                .default_width(280.0)
-                .width_range(240.0..=360.0)
-                .show(ctx, |ui| {
+                .default_size(280.0)
+                .size_range(240.0..=360.0)
+                .show_inside(ui, |ui| {
                     sidebar_content(ui, loaded, config);
                 });
         }
 
         // -------- Central --------
         let mut library_action = LibraryAction::None;
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             if let Some(err) = self.load_error.clone() {
-                egui::Frame::none()
+                egui::Frame::new()
                     .fill(Color32::from_rgb(60, 20, 20))
                     .stroke(egui::Stroke::new(1.0, Color32::LIGHT_RED))
-                    .inner_margin(egui::Margin::same(8.0))
+                    .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(err).color(Color32::LIGHT_RED));
@@ -453,12 +454,12 @@ impl eframe::App for AppState {
         }
 
         // Mantém repaint enquanto a biblioteca estiver parseando em background.
-        library::keep_alive(ctx, &self.library);
+        library::keep_alive(&ctx, &self.library);
 
         // -------- Settings window --------
         let prev_effective_dir = self.config.effective_working_dir();
         let outcome = ui_settings::show(
-            ctx,
+            &ctx,
             &mut self.show_settings,
             &mut self.config,
             &mut self.nickname_input,
@@ -468,13 +469,13 @@ impl eframe::App for AppState {
                 Ok(()) => self.set_toast("Configurações salvas."),
                 Err(e) => self.set_toast(format!("Erro ao salvar: {e}")),
             }
-            apply_style(ctx, &self.config);
+            apply_style(&ctx, &self.config);
             self.restart_watcher();
             if self.config.effective_working_dir() != prev_effective_dir {
                 self.refresh_library();
             }
         } else if outcome.reset_defaults {
-            apply_style(ctx, &self.config);
+            apply_style(&ctx, &self.config);
             if self.config.effective_working_dir() != prev_effective_dir {
                 self.refresh_library();
             }
@@ -486,7 +487,7 @@ impl eframe::App for AppState {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(8.0);
                         ui.heading("sc2-replay-utils");
@@ -533,11 +534,11 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
         let duration = fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second);
         let date_display = format_date_short(&loaded.timeline.datetime);
 
-        egui::Frame::none()
+        egui::Frame::new()
             .fill(CARD_FILL)
             .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
-            .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(12, 10))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
@@ -608,11 +609,11 @@ fn player_card(
         CARD_FILL
     };
 
-    let resp = egui::Frame::none()
+    let resp = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
-        .rounding(6.0)
-        .inner_margin(egui::Margin::symmetric(14.0, 10.0))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
 
@@ -684,11 +685,11 @@ fn player_card(
     );
     ui.painter().rect_filled(
         accent,
-        egui::Rounding {
-            nw: 6.0,
-            sw: 6.0,
-            ne: 0.0,
-            se: 0.0,
+        egui::CornerRadius {
+            nw: 6,
+            sw: 6,
+            ne: 0,
+            se: 0,
         },
         slot_color,
     );
@@ -808,9 +809,9 @@ pub fn apply_style(ctx: &Context, config: &AppConfig) {
     } else {
         egui::Visuals::light()
     });
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     for (_, font_id) in style.text_styles.iter_mut() {
         font_id.size *= config.font_scale.clamp(0.5, 2.0);
     }
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }

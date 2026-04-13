@@ -512,11 +512,11 @@ fn entry_row(
 
     let content_h = (row_h - FRAME_CHROME_V).max(0.0);
 
-    let inner = egui::Frame::none()
+    let inner = egui::Frame::new()
         .fill(fill)
         .stroke(stroke)
-        .rounding(4.0)
-        .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(8, 6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // Trava a altura INTERNA do Frame. Com isso, todo Frame
