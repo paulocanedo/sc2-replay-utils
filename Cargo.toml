@@ -7,7 +7,7 @@ edition = "2024"
 s2protocol = "3.5"
 serde = { version = "1", features = ["derive"] }
 serde_yml = "0.0"
-dirs = "5"
+dirs = "6"
 eframe    = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui      = "0.34"
 egui_plot = "0.35"
