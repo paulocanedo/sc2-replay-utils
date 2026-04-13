@@ -144,9 +144,8 @@ pub fn load() -> HashMap<PathBuf, (SystemTime, MetaState)> {
             return HashMap::new();
         }
     };
-    let config = bincode::config::standard();
-    let disk: DiskCache = match bincode::serde::decode_from_slice(&bytes, config) {
-        Ok((d, _)) => d,
+    let disk: DiskCache = match bitcode::deserialize(&bytes) {
+        Ok(d) => d,
         Err(e) => {
             eprintln!("cache: falha ao decodificar {}: {e}", path.display());
             return HashMap::new();
@@ -196,8 +195,7 @@ pub fn save(cache: &HashMap<PathBuf, (SystemTime, MetaState)>) {
         version: CACHE_VERSION,
         entries,
     };
-    let config = bincode::config::standard();
-    let bytes = match bincode::serde::encode_to_vec(&disk, config) {
+    let bytes = match bitcode::serialize(&disk) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("cache: falha ao serializar: {e}");

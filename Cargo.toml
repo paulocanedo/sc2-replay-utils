@@ -14,7 +14,7 @@ egui      = "0.34"
 egui_plot = "0.35"
 rfd       = "0.15"
 notify    = "6"
-bincode   = { version = "2", features = ["serde"] }
+bitcode   = { version = "0.6", features = ["serde"] }
 
 [[bin]]
 name = "sc2-replay-utils"
