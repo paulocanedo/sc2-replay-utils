@@ -212,53 +212,38 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     // ── Legenda fixa no rodapé ──────────────────────────────────
     ui.separator();
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("legenda:").small().italics());
+        ui.spacing_mut().item_spacing.x = 4.0;
         for kind in ALL_KINDS {
             legend_chip(ui, kind);
         }
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new("⚡")
-                .strong(),
-        )
-        .on_hover_text("Chrono Boost (Protoss)");
-        ui.small("chrono");
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new("⊘")
-                .monospace()
-                .strong()
-                .color(Color32::from_rgb(220, 180, 80)),
-        )
-        .on_hover_text("cancelado pelo jogador");
-        ui.small("cancelado");
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new("✕")
-                .monospace()
-                .strong()
-                .color(Color32::from_rgb(230, 90, 90)),
-        )
-        .on_hover_text("destruído durante a construção");
-        ui.small("destruído");
+        // separador visual entre categorias e status
+        ui.add_space(4.0);
+        ui.label(RichText::new("|").weak());
+        ui.add_space(4.0);
+        legend_icon(ui, "⚡", Color32::from_rgb(180, 200, 255), "chrono");
+        legend_icon(ui, "⊘", Color32::from_rgb(220, 180, 80), "cancelado");
+        legend_icon(ui, "□", Color32::from_rgb(230, 90, 90), "destruído");
     });
 }
 
-/// Pequeno chip colorido exibindo uma categoria na legenda: fundo
-/// com a cor da categoria, letra em negrito e, ao lado, o nome
-/// completo em texto neutro pra leitura.
+/// Chip compacto: [letra] nome
 fn legend_chip(ui: &mut Ui, kind: EntryKind) {
     let color = kind_color(kind);
     ui.label(
         RichText::new(format!(" {} ", kind.short_letter()))
             .monospace()
             .strong()
+            .size(10.0)
             .color(Color32::BLACK)
             .background_color(color),
-    )
-    .on_hover_text(kind.full_name());
-    ui.small(kind.full_name());
-    ui.add_space(4.0);
+    );
+    ui.label(RichText::new(kind.full_name()).small().weak());
+}
+
+/// Ícone de status: símbolo colorido + label
+fn legend_icon(ui: &mut Ui, icon: &str, color: Color32, label: &str) {
+    ui.label(RichText::new(icon).strong().color(color).size(11.0));
+    ui.label(RichText::new(label).small().weak());
 }
 
 fn player_column(
