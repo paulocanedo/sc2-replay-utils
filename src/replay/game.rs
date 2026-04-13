@@ -28,11 +28,17 @@ use s2protocol::tracker_events::unit_tag_index;
 use crate::balance_data::resolve_ability_command;
 
 use super::tracker::IndexOwnerMap;
-use super::types::{InjectCmd, PlayerTimeline, ProductionCmd};
+use super::types::{CameraPosition, InjectCmd, PlayerTimeline, ProductionCmd};
 
-/// Fator de escala das coordenadas de game events → tile coords.
-/// Game events usam fixed-point com 12 bits fracionários.
+/// Fator de escala das coordenadas "full" de game events → tile coords.
+/// `GameSMapCoord3D` / `GameSPoint3D` usam fixed-point com 12 bits
+/// fracionários (20 bits totais).
 const POS_RATIO: i64 = 4096;
+
+/// Fator de escala das coordenadas "mini" de game events → tile coords.
+/// `GameSPointMini` (usado em CameraUpdate) usa fixed-point com 8 bits
+/// fracionários (16 bits totais).
+const POS_RATIO_MINI: i64 = 256;
 
 /// Mesma constante usada por `s2protocol::state::ACTIVE_UNITS_GROUP_IDX`
 /// — o slot 10 do array de control groups guarda a seleção ativa do
@@ -195,6 +201,28 @@ pub(super) fn process_game_events(
                     ability: action.to_string(),
                     producer_tag_indexes: vec![producer_index],
                     consumed: false,
+                });
+            }
+
+            ReplayGameEvent::CameraUpdate(cam) => {
+                let Some(&player_idx) = user_to_player_idx.get(&user_id) else {
+                    continue;
+                };
+                let Some(ref target) = cam.m_target else {
+                    continue;
+                };
+                let x = (target.x / POS_RATIO_MINI) as u8;
+                let y = (target.y / POS_RATIO_MINI) as u8;
+                // Dedup: skip se mesma posição do último sample.
+                if let Some(last) = players[player_idx].camera_positions.last() {
+                    if last.x == x && last.y == y {
+                        continue;
+                    }
+                }
+                players[player_idx].camera_positions.push(CameraPosition {
+                    game_loop: game_loop as u32,
+                    x,
+                    y,
                 });
             }
 

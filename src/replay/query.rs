@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use super::types::{PlayerTimeline, ReplayTimeline, StatsSnapshot, UpgradeEntry};
+use super::types::{CameraPosition, PlayerTimeline, ReplayTimeline, StatsSnapshot, UpgradeEntry};
 
 impl ReplayTimeline {
     /// Converte segundos para game loops usando o `loops_per_second`
@@ -107,6 +107,18 @@ impl PlayerTimeline {
             out.insert(s.tag, (s.x, s.y));
         }
         out
+    }
+
+    /// Última posição conhecida da câmera em ou antes de `game_loop`.
+    /// Binary search → O(log n). `None` antes do primeiro evento de
+    /// câmera (tipicamente nos primeiros loops do replay).
+    pub fn camera_at(&self, game_loop: u32) -> Option<&CameraPosition> {
+        let i = self.camera_positions.partition_point(|c| c.game_loop <= game_loop);
+        if i == 0 {
+            None
+        } else {
+            Some(&self.camera_positions[i - 1])
+        }
     }
 
     /// Capacidade de produção de workers em `game_loop`.

@@ -140,6 +140,17 @@ pub struct UnitPositionSample {
     pub y: u8,
 }
 
+/// Posição da câmera de um jogador num instante específico, extraída
+/// dos `CameraUpdateEvent` dos game events. Coordenadas em células de
+/// tile (mesma escala que `EntityEvent.pos_x/pos_y`). Deduplicado no
+/// parser: entradas consecutivas com mesma posição são descartadas.
+#[derive(Clone, Copy)]
+pub struct CameraPosition {
+    pub game_loop: u32,
+    pub x: u8,
+    pub y: u8,
+}
+
 #[derive(Clone)]
 pub struct ChatEntry {
     pub game_loop: u32,
@@ -201,6 +212,13 @@ pub struct PlayerTimeline {
     /// jogador via `UnitInit`/`UnitBorn`. Estruturas raramente
     /// aparecem aqui — o SC2 só amostra unidades móveis/visíveis.
     pub unit_positions: Vec<UnitPositionSample>,
+
+    /// Posições da câmera do jogador, extraídas dos `CameraUpdateEvent`
+    /// dos game events. Ordenado por `game_loop`, deduplicado por
+    /// posição (entradas consecutivas com mesmo (x,y) são descartadas
+    /// no parser). Usado pela aba Timeline para desenhar o viewport
+    /// da câmera no minimapa.
+    pub camera_positions: Vec<CameraPosition>,
 
     /// Diff cumulativo de "entidades vivas" por tipo. Para cada
     /// `entity_type`, um vetor ordenado de

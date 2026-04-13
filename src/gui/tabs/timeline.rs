@@ -27,6 +27,10 @@ use crate::map_image::MapImage;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline};
 use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 
+/// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
+const CAMERA_WIDTH_TILES: f32 = 24.0;
+const CAMERA_HEIGHT_TILES: f32 = 14.0;
+
 pub fn show(
     ui: &mut Ui,
     loaded: &LoadedReplay,
@@ -182,6 +186,14 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
                 draw_unit(&painter, rect, e.x, e.y, bounds, 6.0, color, true);
             }
         }
+
+        // Retângulo da câmera de cada jogador, por cima das entidades.
+        for (i, p) in loaded.timeline.players.iter().enumerate() {
+            let color = player_slot_color_bright(i);
+            if let Some(cam) = p.camera_at(game_loop) {
+                draw_camera_rect(&painter, rect, cam.x, cam.y, bounds, color);
+            }
+        }
     });
 }
 
@@ -269,6 +281,42 @@ fn draw_unit(
     if structure {
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE));
     }
+}
+
+/// Variante de `to_screen` que aceita coordenadas `f32` para sub-tile
+/// precision (necessária para as bordas do retângulo da câmera).
+fn to_screen_f32(rect: Rect, x: f32, y: f32, b: PlayableBounds) -> Pos2 {
+    let span_x = (b.max_x - b.min_x).max(1) as f32;
+    let span_y = (b.max_y - b.min_y).max(1) as f32;
+    let nx = ((x - b.min_x as f32) / span_x).clamp(0.0, 1.0);
+    let ny = 1.0 - ((y - b.min_y as f32) / span_y).clamp(0.0, 1.0);
+    pos2(
+        rect.left() + nx * rect.width(),
+        rect.top() + ny * rect.height(),
+    )
+}
+
+fn draw_camera_rect(
+    painter: &egui::Painter,
+    rect: Rect,
+    cx: u8,
+    cy: u8,
+    bounds: PlayableBounds,
+    color: Color32,
+) {
+    let half_w = CAMERA_WIDTH_TILES / 2.0;
+    let half_h = CAMERA_HEIGHT_TILES / 2.0;
+    let cx_f = cx as f32;
+    let cy_f = cy as f32;
+
+    let top_left = to_screen_f32(rect, cx_f - half_w, cy_f + half_h, bounds);
+    let bottom_right = to_screen_f32(rect, cx_f + half_w, cy_f - half_h, bounds);
+    let cam_rect = Rect::from_min_max(top_left, bottom_right);
+
+    let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 25);
+    painter.rect_filled(cam_rect, 0.0, fill);
+    let stroke_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
+    painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color));
 }
 
 // ── Reconstrução de entidades vivas ────────────────────────────────────

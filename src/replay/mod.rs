@@ -37,7 +37,8 @@ pub use types::{
 // precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
 pub use types::{
-    EntityEvent, InjectCmd, ProductionCmd, StatsSnapshot, UnitPositionSample, UpgradeEntry,
+    CameraPosition, EntityEvent, InjectCmd, ProductionCmd, StatsSnapshot, UnitPositionSample,
+    UpgradeEntry,
 };
 
 use std::collections::HashMap;
@@ -109,6 +110,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 production_cmds: Vec::new(),
                 inject_cmds: Vec::new(),
                 unit_positions: Vec::new(),
+                camera_positions: Vec::new(),
                 alive_count: HashMap::new(),
                 worker_capacity: Vec::new(),
                 worker_births: Vec::new(),
@@ -632,5 +634,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn camera_positions_collected_and_sorted() {
+        let t = load();
+        let total: usize = t.players.iter().map(|p| p.camera_positions.len()).sum();
+        assert!(total > 0, "esperava ao menos uma amostra de câmera");
+        for p in &t.players {
+            for w in p.camera_positions.windows(2) {
+                assert!(
+                    w[0].game_loop <= w[1].game_loop,
+                    "camera_positions fora de ordem em {}: {} > {}",
+                    p.name, w[0].game_loop, w[1].game_loop,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn camera_positions_deduplicated() {
+        let t = load();
+        for p in &t.players {
+            for w in p.camera_positions.windows(2) {
+                assert!(
+                    w[0].x != w[1].x || w[0].y != w[1].y,
+                    "amostras de câmera consecutivas na mesma posição em {} nos loops {}, {}",
+                    p.name, w[0].game_loop, w[1].game_loop,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn camera_at_returns_latest_le() {
+        let t = load();
+        let p = &t.players[0];
+        if p.camera_positions.is_empty() {
+            return;
+        }
+        if p.camera_positions[0].game_loop > 0 {
+            assert!(p.camera_at(0).is_none());
+        }
+        let first = &p.camera_positions[0];
+        let c = p.camera_at(first.game_loop).unwrap();
+        assert_eq!(c.game_loop, first.game_loop);
+        let last = p.camera_positions.last().unwrap();
+        let c = p.camera_at(u32::MAX).unwrap();
+        assert_eq!(c.game_loop, last.game_loop);
     }
 }

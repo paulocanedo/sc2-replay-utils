@@ -18,6 +18,7 @@ pub(super) fn finalize_indices(players: &mut [PlayerTimeline]) {
         // já está ordenado — mas um sort estável defensivo garante
         // o invariante esperado pelos consumers (`last_known_positions`).
         player.unit_positions.sort_by_key(|s| s.game_loop);
+        player.camera_positions.sort_by_key(|c| c.game_loop);
 
         // alive_count: ProductionFinished ++; Died --; ignora
         // Started/Cancelled.
