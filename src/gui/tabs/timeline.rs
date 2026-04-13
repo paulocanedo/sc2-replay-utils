@@ -31,11 +31,19 @@ use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 const CAMERA_WIDTH_TILES: f32 = 24.0;
 const CAMERA_HEIGHT_TILES: f32 = 14.0;
 
+/// Largura fixa dos painéis laterais de stats dos jogadores.
+const SIDE_PANEL_WIDTH: f32 = 110.0;
+
+/// Resolução do grid de heatmap (células por eixo). Valores maiores
+/// dão mais detalhe mas custam mais memória e iteração na renderização.
+const HEATMAP_GRID: usize = 64;
+
 pub fn show(
     ui: &mut Ui,
     loaded: &LoadedReplay,
     _config: &AppConfig,
     current_second: &mut u32,
+    show_heatmap: &mut bool,
 ) {
     let tl = &loaded.timeline;
     let max_s = tl.duration_seconds.max(1);
@@ -44,11 +52,46 @@ pub fn show(
     }
     let game_loop = (*current_second as f64 * tl.loops_per_second) as u32;
 
-    header_insights(ui, loaded, game_loop);
+    transport_bar(ui, tl, current_second, game_loop, max_s, show_heatmap);
     ui.separator();
-    transport_bar(ui, tl, current_second, game_loop, max_s);
-    ui.separator();
-    minimap(ui, loaded, game_loop);
+
+    // Layout: [P1 stats | minimap | P2 stats]
+    // Pré-calcula o tamanho do minimapa usando toda a altura disponível
+    // para que o ui.horizontal não comprima a altura ao conteúdo dos
+    // painéis laterais.
+    let spacing = ui.spacing().item_spacing.x;
+    let avail = ui.available_size();
+    let center_width = (avail.x - SIDE_PANEL_WIDTH * 2.0 - spacing * 2.0).max(100.0);
+    let map_avail = vec2(center_width, avail.y);
+    let aspect = map_aspect(loaded);
+    let map_size = fit_aspect(map_avail, aspect);
+
+    ui.horizontal(|ui| {
+        // Força a altura do layout horizontal ao tamanho do mapa.
+        ui.set_min_height(map_size.y);
+
+        // P1 — painel esquerdo
+        ui.vertical(|ui| {
+            ui.set_width(SIDE_PANEL_WIDTH);
+            if let Some(p) = loaded.timeline.players.get(0) {
+                player_side_panel(ui, p, 0, game_loop);
+            }
+        });
+
+        // Minimapa central — largura limitada para não empurrar o P2
+        ui.vertical(|ui| {
+            ui.set_width(map_size.x);
+            minimap_with_size(ui, loaded, game_loop, map_size, *show_heatmap);
+        });
+
+        // P2 — painel direito
+        ui.vertical(|ui| {
+            ui.set_width(SIDE_PANEL_WIDTH);
+            if let Some(p) = loaded.timeline.players.get(1) {
+                player_side_panel(ui, p, 1, game_loop);
+            }
+        });
+    });
 }
 
 // ── Transport bar ─────────────────────────────────────────────────────
@@ -65,6 +108,7 @@ fn transport_bar(
     current_second: &mut u32,
     game_loop: u32,
     max_s: u32,
+    show_heatmap: &mut bool,
 ) {
     ui.horizontal(|ui| {
         ui.monospace(format!(
@@ -73,8 +117,8 @@ fn transport_bar(
             fmt_time(tl.game_loops, tl.loops_per_second),
         ));
         ui.add_space(12.0);
-        // Toda a largura restante vira rail do slider. O `-12` é folga
-        // pra evitar que o thumb encoste na borda direita.
+        ui.toggle_value(show_heatmap, "Heatmap");
+        ui.add_space(4.0);
         let slider_w = (ui.available_width() - 12.0).max(160.0);
         ui.spacing_mut().slider_width = slider_w;
         ui.add(
@@ -85,62 +129,39 @@ fn transport_bar(
     });
 }
 
-// ── Header de insights ─────────────────────────────────────────────────
+// ── Painel lateral de stats ────────────────────────────────────────────
 
-/// Renderiza uma linha por jogador com supply, recursos, workers e army
-/// value no instante `game_loop`. Tudo vem do `StatsSnapshot` mais
-/// recente via `PlayerTimeline::stats_at` (binary search O(log n)).
-fn header_insights(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
+/// Renderiza stats de um jogador verticalmente num painel lateral.
+fn player_side_panel(ui: &mut Ui, p: &PlayerTimeline, idx: usize, game_loop: u32) {
+    let slot = player_slot_color_bright(idx);
     ui.add_space(4.0);
-    for (i, p) in loaded.timeline.players.iter().enumerate() {
-        let slot = player_slot_color_bright(i);
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(&p.name)
-                    .strong()
-                    .color(slot),
-            );
-            match p.stats_at(game_loop) {
-                Some(s) => {
-                    let army = s.army_value_minerals + s.army_value_vespene;
-                    // SC2 cap-in-game é 200 para todas as raças. O
-                    // `food_made` cru pode ultrapassar (a Blizzard
-                    // soma a contribuição de todos os depots/CCs sem
-                    // clampar) — alinhamos com o que o jogo mostra.
-                    let supply_cap = s.supply_made.min(200);
-                    ui.separator();
-                    ui.monospace(format!("Supply {}/{}", s.supply_used, supply_cap));
-                    ui.separator();
-                    ui.monospace(format!("Min {}", s.minerals));
-                    ui.separator();
-                    ui.monospace(format!("Gas {}", s.vespene));
-                    ui.separator();
-                    ui.monospace(format!("Wks {}", s.workers));
-                    ui.separator();
-                    ui.monospace(format!("Army {}", army));
-                }
-                None => {
-                    ui.weak("(sem stats neste instante)");
-                }
-            }
-        });
+    ui.label(RichText::new(&p.name).strong().color(slot));
+    ui.add_space(4.0);
+    match p.stats_at(game_loop) {
+        Some(s) => {
+            let supply_cap = s.supply_made.min(200);
+            let army = s.army_value_minerals + s.army_value_vespene;
+            ui.monospace(format!("{}/{} supply", s.supply_used, supply_cap));
+            ui.monospace(format!("{} min", s.minerals));
+            ui.monospace(format!("{} gas", s.vespene));
+            ui.monospace(format!("{} wks", s.workers));
+            ui.monospace(format!("{} army", army));
+        }
+        None => {
+            ui.weak("—");
+        }
     }
-    ui.add_space(2.0);
 }
 
 // ── Mini-mapa ──────────────────────────────────────────────────────────
 
-fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
-    // Ocupa todo o espaço restante da aba e preserva o aspect ratio
-    // da imagem do minimap (que representa a playable area). Letterbox
-    // no centro do canvas disponível.
-    let avail = ui.available_size();
-    let aspect = map_aspect(loaded);
-    let rect_size = fit_aspect(avail, aspect);
-
-    // Bounds da área onde unidades aparecem. Sem playable_bounds (só em
-    // replays vazios) caímos em (0..255) — visual fica meio descalibrado
-    // mas o app não trava.
+fn minimap_with_size(
+    ui: &mut Ui,
+    loaded: &LoadedReplay,
+    game_loop: u32,
+    rect_size: egui::Vec2,
+    show_heatmap: bool,
+) {
     let bounds = loaded.playable_bounds.unwrap_or(PlayableBounds {
         min_x: 0,
         max_x: 255,
@@ -152,9 +173,6 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
         let (rect, _resp) = ui.allocate_exact_size(rect_size, Sense::hover());
         let painter = ui.painter_at(rect);
 
-        // Fundo do mapa: se temos a imagem rasterizada do mapa atual,
-        // upload pra GPU (cacheado por nome do replay) e pinta como
-        // background. Caso contrário fica o cinza placeholder.
         painter.rect_filled(rect, 4.0, Color32::from_gray(22));
         if let Some(img) = loaded.map_image.as_ref() {
             let key = format!("map:{}", loaded.path.display());
@@ -172,26 +190,32 @@ fn minimap(ui: &mut Ui, loaded: &LoadedReplay, game_loop: u32) {
         }
         painter.rect_stroke(rect, 4.0, Stroke::new(1.5, Color32::from_gray(90)));
 
-        // Desenha cada jogador. Estruturas vão por cima das unidades
-        // dentro do mesmo jogador (laço em duas passadas) pra ficarem
-        // visíveis em aglomerados.
-        for (i, p) in loaded.timeline.players.iter().enumerate() {
-            let color = player_slot_color_bright(i);
-            let entities = alive_entities_at(p, game_loop);
-
-            for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, bounds, 4.0, color, false);
+        if show_heatmap {
+            // Heatmap: acumula posições da câmera até o instante atual
+            // num grid e renderiza como overlay semi-transparente.
+            for (i, p) in loaded.timeline.players.iter().enumerate() {
+                let color = player_slot_color_bright(i);
+                draw_heatmap(&painter, rect, p, game_loop, bounds, color);
             }
-            for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                draw_unit(&painter, rect, e.x, e.y, bounds, 6.0, color, true);
-            }
-        }
+        } else {
+            // Modo normal: unidades + câmera.
+            for (i, p) in loaded.timeline.players.iter().enumerate() {
+                let color = player_slot_color_bright(i);
+                let entities = alive_entities_at(p, game_loop);
 
-        // Retângulo da câmera de cada jogador, por cima das entidades.
-        for (i, p) in loaded.timeline.players.iter().enumerate() {
-            let color = player_slot_color_bright(i);
-            if let Some(cam) = p.camera_at(game_loop) {
-                draw_camera_rect(&painter, rect, cam.x, cam.y, bounds, color);
+                for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
+                    draw_unit(&painter, rect, e.x, e.y, bounds, 4.0, color, false);
+                }
+                for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
+                    draw_unit(&painter, rect, e.x, e.y, bounds, 6.0, color, true);
+                }
+            }
+
+            for (i, p) in loaded.timeline.players.iter().enumerate() {
+                let color = player_slot_color_bright(i);
+                if let Some(cam) = p.camera_at(game_loop) {
+                    draw_camera_rect(&painter, rect, cam.x, cam.y, bounds, color);
+                }
             }
         }
     });
@@ -317,6 +341,105 @@ fn draw_camera_rect(
     painter.rect_filled(cam_rect, 0.0, fill);
     let stroke_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
     painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color));
+}
+
+// ── Heatmap de câmera ─────────────────────────────────────────────────
+
+/// Renderiza um heatmap de tempo de câmera do jogador sobre o minimapa.
+///
+/// Para cada posição de câmera, preenche a área inteira do viewport
+/// (~24×14 tiles) no grid, ponderada pela duração (game loops) que a
+/// câmera permaneceu naquela posição. Isso produz um mapa de calor que
+/// realça mais onde o jogador olhou por mais tempo e com uma área de
+/// influência proporcional ao campo de visão real do jogo.
+fn draw_heatmap(
+    painter: &egui::Painter,
+    rect: Rect,
+    player: &PlayerTimeline,
+    until_loop: u32,
+    bounds: PlayableBounds,
+    color: Color32,
+) {
+    let span_x = (bounds.max_x - bounds.min_x).max(1) as f32;
+    let span_y = (bounds.max_y - bounds.min_y).max(1) as f32;
+
+    // Tamanho do viewport da câmera em células do grid.
+    let vp_gx = ((CAMERA_WIDTH_TILES / span_x) * HEATMAP_GRID as f32).ceil() as usize;
+    let vp_gy = ((CAMERA_HEIGHT_TILES / span_y) * HEATMAP_GRID as f32).ceil() as usize;
+    let half_vp_gx = vp_gx / 2;
+    let half_vp_gy = vp_gy / 2;
+
+    let mut grid = vec![0.0f32; HEATMAP_GRID * HEATMAP_GRID];
+
+    // Índice do último sample relevante (para calcular duração).
+    let end_idx = player
+        .camera_positions
+        .partition_point(|c| c.game_loop <= until_loop);
+    let samples = &player.camera_positions[..end_idx];
+
+    for (i, cam) in samples.iter().enumerate() {
+        // Duração: delta até o próximo sample (ou até until_loop para o último).
+        let next_loop = if i + 1 < samples.len() {
+            samples[i + 1].game_loop.min(until_loop)
+        } else {
+            until_loop
+        };
+        let duration = next_loop.saturating_sub(cam.game_loop) as f32;
+        if duration <= 0.0 {
+            continue;
+        }
+
+        // Centro da câmera em coordenadas de grid.
+        let nx = ((cam.x as f32 - bounds.min_x as f32) / span_x).clamp(0.0, 0.999);
+        let ny = ((cam.y as f32 - bounds.min_y as f32) / span_y).clamp(0.0, 0.999);
+        let center_gx = (nx * HEATMAP_GRID as f32) as usize;
+        let center_gy = (ny * HEATMAP_GRID as f32) as usize;
+
+        // Preenche toda a área do viewport no grid.
+        let gy_min = center_gy.saturating_sub(half_vp_gy);
+        let gy_max = (center_gy + half_vp_gy).min(HEATMAP_GRID - 1);
+        let gx_min = center_gx.saturating_sub(half_vp_gx);
+        let gx_max = (center_gx + half_vp_gx).min(HEATMAP_GRID - 1);
+
+        for gy in gy_min..=gy_max {
+            for gx in gx_min..=gx_max {
+                grid[gy * HEATMAP_GRID + gx] += duration;
+            }
+        }
+    }
+
+    let max_val = grid.iter().copied().fold(0.0f32, f32::max);
+    if max_val <= 0.0 {
+        return;
+    }
+
+    let cell_w = rect.width() / HEATMAP_GRID as f32;
+    let cell_h = rect.height() / HEATMAP_GRID as f32;
+
+    for gy in 0..HEATMAP_GRID {
+        for gx in 0..HEATMAP_GRID {
+            let val = grid[gy * HEATMAP_GRID + gx];
+            if val <= 0.0 {
+                continue;
+            }
+            // Curva cúbica: zonas pouco visitadas ficam quase
+            // invisíveis, zonas densas mantêm realce forte.
+            let ratio = val / max_val;
+            let intensity = ratio * ratio * ratio;
+            let alpha = (intensity * 220.0) as u8;
+            let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+            // Y invertido: gy=0 é min_y do jogo (base do mapa) → base da tela.
+            let screen_gy = HEATMAP_GRID - 1 - gy;
+            let cell_rect = Rect::from_min_size(
+                pos2(
+                    rect.left() + gx as f32 * cell_w,
+                    rect.top() + screen_gy as f32 * cell_h,
+                ),
+                vec2(cell_w, cell_h),
+            );
+            painter.rect_filled(cell_rect, 0.0, fill);
+        }
+    }
 }
 
 // ── Reconstrução de entidades vivas ────────────────────────────────────

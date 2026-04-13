@@ -52,6 +52,7 @@ pub struct AppState {
     pub charts_show_army: bool,
     pub charts_show_workers: bool,
     pub show_about: bool,
+    pub timeline_show_heatmap: bool,
 }
 
 impl AppState {
@@ -75,6 +76,7 @@ impl AppState {
             charts_show_army: true,
             charts_show_workers: false,
             show_about: false,
+            timeline_show_heatmap: false,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -377,6 +379,7 @@ impl eframe::App for AppState {
                             loaded,
                             &self.config,
                             &mut self.timeline_tab_second,
+                            &mut self.timeline_show_heatmap,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
                         Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_show_army, &mut self.charts_show_workers),
