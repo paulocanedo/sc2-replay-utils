@@ -44,11 +44,11 @@ pub struct AppState {
     pub watcher: Option<ReplayWatcher>,
     pub toast: Option<(String, Instant)>,
     pub library: ReplayLibrary,
-    pub library_filter: String,
-    /// Segundo selecionado no slider da aba Timeline (mini-mapa).
+    pub library_filter: library::LibraryFilter,
+    /// Game loop selecionado no slider da aba Timeline (mini-mapa).
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
-    pub timeline_tab_second: u32,
+    pub timeline_tab_loop: u32,
     /// Flags de exibição do gráfico de army value.
     pub charts_show_army: bool,
     pub charts_show_workers: bool,
@@ -69,6 +69,7 @@ impl AppState {
         let config = AppConfig::load();
         apply_style(&cc.egui_ctx, &config);
 
+        let library_filter = library::LibraryFilter::from_config(&config);
         let mut me = Self {
             config,
             loaded: None,
@@ -80,8 +81,8 @@ impl AppState {
             watcher: None,
             toast: None,
             library: ReplayLibrary::new(),
-            library_filter: String::new(),
-            timeline_tab_second: 0,
+            library_filter,
+            timeline_tab_loop: 0,
             charts_show_army: true,
             charts_show_workers: false,
             show_about: false,
@@ -131,7 +132,7 @@ impl AppState {
                 self.load_error = None;
                 // Reset do scrubbing da aba Timeline: replay novo
                 // sempre começa em t=0.
-                self.timeline_tab_second = 0;
+                self.timeline_tab_loop = 0;
                 // Carregar com sucesso sempre transiciona para a Tela
                 // Análise — é a única forma de chegar lá.
                 self.screen = Screen::Analysis;
@@ -428,7 +429,7 @@ impl eframe::App for AppState {
                             ui,
                             loaded,
                             &self.config,
-                            &mut self.timeline_tab_second,
+                            &mut self.timeline_tab_loop,
                             &mut self.timeline_show_heatmap,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
@@ -460,6 +461,12 @@ impl eframe::App for AppState {
                     self.set_toast(format!("Erro ao salvar: {e}"));
                 }
                 self.refresh_library();
+            }
+            LibraryAction::SaveDateRange(range) => {
+                self.config.library_date_range = range;
+                if let Err(e) = self.config.save() {
+                    self.set_toast(format!("Erro ao salvar config: {e}"));
+                }
             }
             LibraryAction::OpenRename => {
                 self.rename_previews = crate::rename::generate_previews(&self.library, &self.rename_template);

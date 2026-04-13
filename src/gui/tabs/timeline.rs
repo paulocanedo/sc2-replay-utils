@@ -1,7 +1,7 @@
-// Aba Timeline — mini-mapa estilo SC2 com scrubbing por segundo.
+// Aba Timeline — mini-mapa estilo SC2 com scrubbing por game loop.
 //
 // Reproduz uma versão simplificada do mini-mapa do jogo: um quadrado
-// representando a área do mapa, um slider de 1 segundo de precisão para
+// representando a área do mapa, um slider com precisão de game loop para
 // escolher o instante e pequenos quadrados marcando cada unidade viva
 // daquele jogador na cor do slot (P1 vermelho / P2 azul). O cabeçalho
 // mostra os indicadores rápidos do instante (supply, recursos, workers,
@@ -42,17 +42,17 @@ pub fn show(
     ui: &mut Ui,
     loaded: &LoadedReplay,
     _config: &AppConfig,
-    current_second: &mut u32,
+    current_loop: &mut u32,
     show_heatmap: &mut bool,
 ) {
     let tl = &loaded.timeline;
-    let max_s = tl.duration_seconds.max(1);
-    if *current_second > max_s {
-        *current_second = max_s;
+    let max_loop = tl.game_loops.max(1);
+    if *current_loop > max_loop {
+        *current_loop = max_loop;
     }
-    let game_loop = (*current_second as f64 * tl.loops_per_second) as u32;
+    let game_loop = *current_loop;
 
-    transport_bar(ui, tl, current_second, game_loop, max_s, show_heatmap);
+    transport_bar(ui, tl, current_loop, max_loop, show_heatmap);
     ui.separator();
 
     // Layout: [P1 stats | minimap | P2 stats]
@@ -98,35 +98,85 @@ pub fn show(
 //
 // Slider de scrubbing em estilo "transport bar" de player de vídeo: o
 // rail ocupa quase toda a largura disponível da aba para permitir
-// arrasto granular (cada pixel ≈ 1s mesmo em partidas longas), e o
-// tempo atual / tempo total fica compacto à esquerda. Sem rótulo
-// "Instante:" pra reduzir ruído — o display de tempo já comunica.
+// arrasto granular, e o tempo atual / tempo total fica compacto à
+// esquerda. Botões de step permitem avançar/retroceder 1 game loop
+// (◂/▸) ou 1 segundo (|◂/▸|), com hold-to-repeat.
+
+/// Delay antes de iniciar o repeat ao manter um botão pressionado.
+const HOLD_INITIAL_DELAY: f32 = 0.30;
+/// Intervalo entre steps durante hold-to-repeat (~15 steps/s).
+const HOLD_REPEAT_INTERVAL: f32 = 0.066;
 
 fn transport_bar(
     ui: &mut Ui,
     tl: &ReplayTimeline,
-    current_second: &mut u32,
-    game_loop: u32,
-    max_s: u32,
+    current_loop: &mut u32,
+    max_loop: u32,
     show_heatmap: &mut bool,
 ) {
+    let one_second = tl.loops_per_second.round() as i64;
+
     ui.horizontal(|ui| {
         ui.monospace(format!(
             "{} / {}",
-            fmt_time(game_loop, tl.loops_per_second),
+            fmt_time(*current_loop, tl.loops_per_second),
             fmt_time(tl.game_loops, tl.loops_per_second),
         ));
         ui.add_space(12.0);
         ui.toggle_value(show_heatmap, "Heatmap");
         ui.add_space(4.0);
+        step_button(ui, "|◂", current_loop, -one_second, max_loop);
+        step_button(ui, "◂", current_loop, -1, max_loop);
+        step_button(ui, "▸", current_loop, 1, max_loop);
+        step_button(ui, "▸|", current_loop, one_second, max_loop);
+        ui.add_space(4.0);
         let slider_w = (ui.available_width() - 12.0).max(160.0);
         ui.spacing_mut().slider_width = slider_w;
         ui.add(
-            Slider::new(current_second, 0..=max_s)
+            Slider::new(current_loop, 0..=max_loop)
                 .integer()
                 .show_value(false),
         );
     });
+}
+
+/// Botão de step com hold-to-repeat. Um clique aplica `delta` uma vez;
+/// manter pressionado repete após um delay inicial.
+fn step_button(ui: &mut Ui, label: &str, current_loop: &mut u32, delta: i64, max_loop: u32) {
+    let btn = ui.button(label);
+    if btn.clicked() {
+        apply_delta(current_loop, delta, max_loop);
+    }
+    if btn.is_pointer_button_down_on() {
+        ui.ctx().request_repaint();
+        let held = btn.interact_pointer_pos().map_or(0.0, |_| {
+            ui.input(|i| i.pointer.press_start_time().map_or(0.0, |t| i.time - t))
+        });
+        if held > HOLD_INITIAL_DELAY as f64 {
+            let dt = ui.input(|i| i.unstable_dt);
+            // Accumulate fractional steps via the response's ID-based memory.
+            let accum = ui.memory_mut(|mem| {
+                let a = mem.data.get_temp_mut_or_default::<f32>(btn.id);
+                *a += dt;
+                *a
+            });
+            if accum >= HOLD_REPEAT_INTERVAL {
+                let steps = (accum / HOLD_REPEAT_INTERVAL) as i64;
+                apply_delta(current_loop, delta * steps, max_loop);
+                ui.memory_mut(|mem| {
+                    let a = mem.data.get_temp_mut_or_default::<f32>(btn.id);
+                    *a -= steps as f32 * HOLD_REPEAT_INTERVAL;
+                });
+            }
+        }
+    } else {
+        // Reset accumulator when button is released.
+        ui.memory_mut(|mem| mem.data.remove::<f32>(btn.id));
+    }
+}
+
+fn apply_delta(current_loop: &mut u32, delta: i64, max_loop: u32) {
+    *current_loop = (*current_loop as i64 + delta).clamp(0, max_loop as i64) as u32;
 }
 
 // ── Painel lateral de stats ────────────────────────────────────────────
