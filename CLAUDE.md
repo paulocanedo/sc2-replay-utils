@@ -24,15 +24,22 @@ Binary output: `target/release/sc2-replay-utils` (or `.exe` on Windows).
 src/
 ├── bin/gui.rs              # Entry point — declares modules via #[path], calls eframe::run_native
 ├── replay/                 # Core parser (single-pass, streaming)
-│   ├── mod.rs              # parse() entry, public API
+│   ├── mod.rs              # Plumbing — submodule decls + pub re-exports
+│   ├── parse.rs            # parse_replay orchestrator + lobby/user_id helpers
 │   ├── types.rs            # ReplayTimeline, PlayerTimeline, EntityEvent, StatsSnapshot
 │   ├── tracker.rs          # Tracker events → semantic EntityEvent vocabulary
 │   ├── game.rs             # Game events (Cmd/Selection for production tracking)
 │   ├── message.rs          # Chat extraction
 │   ├── query.rs            # O(log n) binary-search APIs for timeline scrubbing
 │   ├── classify.rs         # Entity classification heuristics (worker/structure/upgrade)
-│   └── finalize.rs         # Post-processing and indexing
-├── build_order.rs          # Production timeline with Chrono Boost, Inject Larva
+│   ├── finalize.rs         # Post-processing and indexing
+│   └── tests.rs            # Integration-style parser tests
+├── build_order/            # Production timeline with Chrono Boost, Inject Larva
+│   ├── mod.rs              # Plumbing — submodule decls + pub re-exports
+│   ├── types.rs            # EntryOutcome, BuildOrderEntry, PlayerBuildOrder, BuildOrderResult
+│   ├── extract.rs          # extract_build_order + cmd-matching / chrono estimation / dedup
+│   ├── classify.rs         # EntryKind + classify_entry heuristics
+│   └── tests.rs            # Golden CSV + regression tests
 ├── balance_data.rs         # Build time lookups from generated BalanceData tables
 ├── army_value.rs           # Army supply/value calculations
 ├── production_gap.rs       # Idle time analysis
@@ -47,11 +54,23 @@ src/
     ├── app.rs              # AppState, eframe::App impl, screen routing
     ├── tabs/               # Analysis tabs
     │   ├── mod.rs          # Tab enum (Timeline, BuildOrder, Charts, Chat)
-    │   ├── timeline.rs     # Minimap with scrubbing and camera heatmap
+    │   ├── timeline/       # Minimap with scrubbing, heatmap, creep
+    │   │   ├── mod.rs      # Panel composition + show() entry point
+    │   │   ├── transport.rs    # Slider + step buttons with hold-to-repeat
+    │   │   ├── side_panel.rs   # Per-player stats side panel
+    │   │   ├── minimap.rs      # Render pipeline + draw primitives + coord mapping
+    │   │   ├── overlays.rs     # Creep layer + camera heatmap
+    │   │   └── entities.rs     # alive_entities_at + structure_attention_at (+ tests)
     │   ├── build_order.rs  # Production timeline visualization
     │   ├── charts.rs       # Army value and worker supply charts
     │   └── chat.rs         # Chat viewer
-    ├── library.rs          # Replay library browser with filtering/caching
+    ├── library/            # Replay library browser with filtering/caching
+    │   ├── mod.rs          # Plumbing — submodule decls + pub re-exports
+    │   ├── types.rs        # MetaState, ParsedMeta, PlayerMeta, LibraryEntry
+    │   ├── filter.rs       # OutcomeFilter, DateRange, SortOrder, LibraryFilter
+    │   ├── scanner.rs      # ReplayLibrary + directory scanner + parser thread pool
+    │   ├── date.rs         # Date utilities for DateRange filtering
+    │   └── ui.rs           # show(), entry_row, chip, LibraryAction, keep_alive
     ├── config.rs           # YAML-based persistent config
     ├── cache.rs            # Metadata cache (bincode serialization)
     ├── replay_state.rs     # LoadedReplay state and UI formatting
@@ -98,8 +117,8 @@ Common scopes: `build_order`, `timeline`, `charts`, `replay`, `gui`, `library`, 
 
 ### Testing
 
-- Tests are inline `#[cfg(test)]` modules within source files.
-- Golden CSV tests in `src/build_order.rs` compare parser output against `examples/golden/*.csv`.
+- Tests live in dedicated `tests.rs` files inside module directories (e.g. `src/replay/tests.rs`, `src/build_order/tests.rs`) or inline `#[cfg(test)]` modules in smaller source files.
+- Golden CSV tests in `src/build_order/tests.rs` compare parser output against `examples/golden/*.csv`.
 - To update goldens: `cargo test --bin sc2-replay-utils bless_build_order_goldens -- --ignored`
 - Run all tests: `cargo test --release`
 
