@@ -3,7 +3,34 @@
 // Tudo aqui é privado ao módulo `replay` — o resto do app só vê o
 // `EntityCategory` já anotado em cada `EntityEvent`.
 
-use super::types::EntityCategory;
+use super::types::{EntityCategory, ResourceKind};
+
+/// Classifica um `unit_type_name` como nó de recurso neutro. `None`
+/// para qualquer outra unidade (incluindo prédios, tropas, etc). Usado
+/// durante o parse do tracker para capturar `MineralField*` e
+/// `*Geyser*` em `ReplayTimeline.resources`.
+///
+/// Os nomes cobrem todas as variantes ladder + campaign observadas
+/// em replays modernos. O match por `starts_with` em vez de lista
+/// explícita reduz o risco de perder variantes novas (ex.:
+/// `MineralField450` apareceu em patches recentes).
+pub(super) fn resource_kind(name: &str) -> Option<ResourceKind> {
+    if name.starts_with("RichMineralField") {
+        Some(ResourceKind::RichMineral)
+    } else if name.starts_with("MineralField")
+        || name.starts_with("LabMineralField")
+        || name.starts_with("BattleStationMineralField")
+        || name.starts_with("PurifierMineralField")
+    {
+        Some(ResourceKind::Mineral)
+    } else if name.starts_with("RichVespeneGeyser") {
+        Some(ResourceKind::RichVespene)
+    } else if name.contains("VespeneGeyser") || name.ends_with("Geyser") {
+        Some(ResourceKind::Vespene)
+    } else {
+        None
+    }
+}
 
 /// Workers (coletores de recursos).
 pub(super) fn is_worker_name(name: &str) -> bool {

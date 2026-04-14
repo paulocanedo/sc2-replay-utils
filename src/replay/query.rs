@@ -109,6 +109,60 @@ impl PlayerTimeline {
         out
     }
 
+    /// Snapshot `tag → (x, y)` com posição interpolada linearmente
+    /// entre as duas amostras adjacentes em `unit_positions` que
+    /// envelopam `at_loop`. Quando o jogador está fora do intervalo
+    /// amostrado de uma unidade (antes da primeira amostra ou depois
+    /// da última), devolve a amostra mais próxima.
+    ///
+    /// Razão de existir: o SC2 emite `UnitPositionsEvent` muito
+    /// esparsamente (tipicamente ~2-3 amostras por unidade ao longo
+    /// da vida dela). Sem interpolação, as unidades aparentam
+    /// "teleportar" no minimapa em vez de se mover. A interpolação
+    /// linear assume movimento em linha reta entre amostras — boa
+    /// aproximação visual mesmo quando a unidade fez detours, porque
+    /// o intervalo entre amostras costuma ser curto comparado à
+    /// escala do mapa.
+    ///
+    /// Custo: O(n) único sweep sobre `unit_positions`. Tags sem
+    /// nenhuma amostra em `unit_positions` (ex.: estruturas) não
+    /// aparecem no resultado — o consumer cai no fallback de posição
+    /// de nascimento.
+    pub fn interpolated_positions(&self, at_loop: u32) -> HashMap<i64, (f32, f32)> {
+        // Por tag, mantemos a última amostra ≤ at_loop vista até agora.
+        // Quando encontramos a primeira amostra > at_loop pra esse tag,
+        // interpolamos e marcamos o tag como "fechado" (não atualizamos
+        // mais). Isso evita um segundo passe ou um agrupamento prévio.
+        let mut prev: HashMap<i64, (u32, u8, u8)> = HashMap::new();
+        let mut out: HashMap<i64, (f32, f32)> = HashMap::new();
+        for s in &self.unit_positions {
+            if out.contains_key(&s.tag) {
+                continue;
+            }
+            if s.game_loop <= at_loop {
+                prev.insert(s.tag, (s.game_loop, s.x, s.y));
+            } else if let Some(&(pl, px, py)) = prev.get(&s.tag) {
+                let total = (s.game_loop - pl) as f32;
+                let frac = if total > 0.0 {
+                    (at_loop - pl) as f32 / total
+                } else {
+                    0.0
+                };
+                let x = px as f32 + (s.x as f32 - px as f32) * frac;
+                let y = py as f32 + (s.y as f32 - py as f32) * frac;
+                out.insert(s.tag, (x, y));
+            }
+            // Amostra > at_loop sem prev: a unidade ainda não foi
+            // vista. Não emite nada — caller cai no fallback.
+        }
+        // Tags com prev mas sem amostra posterior: fica na última
+        // posição conhecida.
+        for (tag, (_, x, y)) in prev {
+            out.entry(tag).or_insert((x as f32, y as f32));
+        }
+        out
+    }
+
     /// Última posição conhecida da câmera em ou antes de `game_loop`.
     /// Binary search → O(log n). `None` antes do primeiro evento de
     /// câmera (tipicamente nos primeiros loops do replay).

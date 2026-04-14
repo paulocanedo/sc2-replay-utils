@@ -179,6 +179,17 @@ fn compute_playable_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> 
             any = true;
         }
     }
+    // Inclui os recursos (mineral fields + geysers). Normalmente já
+    // estão dentro dos bounds das unidades porque cada jogador tem
+    // uma base próxima, mas mapas com expansões remotas sem visitas
+    // antecipadas podem ter patches fora dessa nuvem.
+    for r in &timeline.resources {
+        min_x = min_x.min(r.x);
+        max_x = max_x.max(r.x);
+        min_y = min_y.min(r.y);
+        max_y = max_y.max(r.y);
+        any = true;
+    }
     if !any || max_x <= min_x || max_y <= min_y {
         return None;
     }

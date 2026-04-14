@@ -9,10 +9,13 @@
 //
 // Posições: cada unidade nasce em `EntityEvent.pos_x/pos_y` e, quando
 // o parser captou amostras de movimento via `UnitPositionsEvent`,
-// `alive_entities_at` sobrescreve com a última posição conhecida em
-// `PlayerTimeline.unit_positions`. Estruturas raramente recebem
-// amostras (o SC2 só amostra unidades móveis/visíveis), então
-// permanecem no ponto de nascimento.
+// `alive_entities_at` sobrescreve com a posição interpolada
+// linearmente entre as duas amostras adjacentes em
+// `PlayerTimeline.unit_positions`. A interpolação é necessária porque
+// o SC2 emite as amostras esparsamente (~2-3 por unidade na vida
+// inteira); sem ela as unidades pareceriam teleportar entre poucos
+// pontos. Estruturas raramente recebem amostras (o SC2 só amostra
+// unidades móveis/visíveis), então permanecem no ponto de nascimento.
 
 use std::collections::HashMap;
 
@@ -24,7 +27,9 @@ use egui::{
 use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::map_image::MapImage;
-use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline};
+use crate::replay::{
+    EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, ResourceKind, ResourceNode,
+};
 use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
@@ -272,7 +277,14 @@ fn minimap_with_size(
                 draw_heatmap(&painter, rect, p, game_loop, bounds, color);
             }
         } else {
-            // Modo normal: unidades + câmera.
+            // Modo normal: recursos → unidades → câmera. Os recursos
+            // vão por baixo porque são estáticos e servem de referência
+            // de fundo (bases, expansões), enquanto unidades e câmera
+            // se movimentam e precisam ficar visíveis por cima.
+            for r in &loaded.timeline.resources {
+                draw_resource(&painter, rect, *r, bounds);
+            }
+
             for (i, p) in loaded.timeline.players.iter().enumerate() {
                 let color = player_slot_color_bright(i);
                 let entities = alive_entities_at(p, game_loop);
@@ -280,8 +292,12 @@ fn minimap_with_size(
                 for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
                     draw_unit(&painter, rect, e.x, e.y, bounds, 4.0, color, false);
                 }
+                // Bases (townhalls) renderizadas com o dobro do tamanho
+                // das outras estruturas — 12px contra 6px — pra servir
+                // de âncora visual das bases dos jogadores no minimapa.
                 for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                    draw_unit(&painter, rect, e.x, e.y, bounds, 6.0, color, true);
+                    let side = if e.is_base { 12.0 } else { 6.0 };
+                    draw_unit(&painter, rect, e.x, e.y, bounds, side, color, true);
                 }
             }
 
@@ -348,22 +364,53 @@ fn map_image_to_color_image(img: &MapImage) -> ColorImage {
 /// `playable_bounds` observados (que aproximam a área visível do
 /// `Minimap.tga`). Inverte Y porque no jogo Y cresce para cima, mas na
 /// tela queremos topo = topo.
-fn to_screen(rect: Rect, x: u8, y: u8, b: PlayableBounds) -> Pos2 {
+fn to_screen(rect: Rect, x: f32, y: f32, b: PlayableBounds) -> Pos2 {
     let span_x = (b.max_x - b.min_x).max(1) as f32;
     let span_y = (b.max_y - b.min_y).max(1) as f32;
-    let nx = (x.saturating_sub(b.min_x) as f32 / span_x).clamp(0.0, 1.0);
-    let ny = 1.0 - (y.saturating_sub(b.min_y) as f32 / span_y).clamp(0.0, 1.0);
+    let nx = ((x - b.min_x as f32) / span_x).clamp(0.0, 1.0);
+    let ny = 1.0 - ((y - b.min_y as f32) / span_y).clamp(0.0, 1.0);
     pos2(
         rect.left() + nx * rect.width(),
         rect.top() + ny * rect.height(),
     )
 }
 
+/// Cores estilo minimapa do SC2: minerais em azul-cyan claro, minerais
+/// rich em amarelo-dourado, gás em verde vivo, rich vespene em violeta.
+fn resource_color(kind: ResourceKind) -> Color32 {
+    match kind {
+        ResourceKind::Mineral => Color32::from_rgb(100, 180, 220),
+        ResourceKind::RichMineral => Color32::from_rgb(235, 200, 80),
+        ResourceKind::Vespene => Color32::from_rgb(60, 200, 110),
+        ResourceKind::RichVespene => Color32::from_rgb(170, 90, 220),
+    }
+}
+
+fn draw_resource(painter: &egui::Painter, rect: Rect, node: ResourceNode, bounds: PlayableBounds) {
+    // Patches 6px, geysers 9px — proporcionais às estruturas não-base
+    // (6px) e às bases (12px), dando destaque suficiente pra ler
+    // bases/expansões sem afogar as unidades.
+    let (side, filled) = match node.kind {
+        ResourceKind::Mineral | ResourceKind::RichMineral => (6.0, true),
+        ResourceKind::Vespene | ResourceKind::RichVespene => (9.0, true),
+    };
+    let center = to_screen(rect, node.x as f32, node.y as f32, bounds);
+    let half = side * 0.5;
+    let r = Rect::from_min_max(
+        pos2(center.x - half, center.y - half),
+        pos2(center.x + half, center.y + half),
+    );
+    let color = resource_color(node.kind);
+    if filled {
+        painter.rect_filled(r, 0.0, color);
+    }
+}
+
 fn draw_unit(
     painter: &egui::Painter,
     rect: Rect,
-    x: u8,
-    y: u8,
+    x: f32,
+    y: f32,
     bounds: PlayableBounds,
     side: f32,
     color: Color32,
@@ -381,19 +428,6 @@ fn draw_unit(
     }
 }
 
-/// Variante de `to_screen` que aceita coordenadas `f32` para sub-tile
-/// precision (necessária para as bordas do retângulo da câmera).
-fn to_screen_f32(rect: Rect, x: f32, y: f32, b: PlayableBounds) -> Pos2 {
-    let span_x = (b.max_x - b.min_x).max(1) as f32;
-    let span_y = (b.max_y - b.min_y).max(1) as f32;
-    let nx = ((x - b.min_x as f32) / span_x).clamp(0.0, 1.0);
-    let ny = 1.0 - ((y - b.min_y as f32) / span_y).clamp(0.0, 1.0);
-    pos2(
-        rect.left() + nx * rect.width(),
-        rect.top() + ny * rect.height(),
-    )
-}
-
 fn draw_camera_rect(
     painter: &egui::Painter,
     rect: Rect,
@@ -407,8 +441,8 @@ fn draw_camera_rect(
     let cx_f = cx as f32;
     let cy_f = cy as f32;
 
-    let top_left = to_screen_f32(rect, cx_f - half_w, cy_f + half_h, bounds);
-    let bottom_right = to_screen_f32(rect, cx_f + half_w, cy_f - half_h, bounds);
+    let top_left = to_screen(rect, cx_f - half_w, cy_f + half_h, bounds);
+    let bottom_right = to_screen(rect, cx_f + half_w, cy_f - half_h, bounds);
     let cam_rect = Rect::from_min_max(top_left, bottom_right);
 
     let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 25);
@@ -520,9 +554,34 @@ fn draw_heatmap(
 
 #[derive(Clone, Copy)]
 struct LiveEntity {
-    x: u8,
-    y: u8,
+    /// Coordenadas em tile units, mas em `f32` pra acomodar a posição
+    /// interpolada entre amostras esparsas de `unit_positions`.
+    /// Estruturas usam `pos_x/pos_y as f32` direto do evento de
+    /// nascimento (sempre integer aligned).
+    x: f32,
+    y: f32,
     category: EntityCategory,
+    /// `true` para prédios de main-base (CC, OrbitalCommand,
+    /// PlanetaryFortress, Nexus, Hatchery, Lair, Hive). Usado para
+    /// desenhar esses prédios em tamanho maior no minimapa, já que
+    /// servem de âncora visual pras bases dos jogadores.
+    is_base: bool,
+}
+
+/// Detecta estruturas de main-base (townhalls). Inclui morphs zerg
+/// (Lair, Hive) e terran (OrbitalCommand, PlanetaryFortress) pra que
+/// a aparência visual se mantenha grande após o upgrade.
+fn is_base_type(name: &str) -> bool {
+    matches!(
+        name,
+        "CommandCenter"
+            | "OrbitalCommand"
+            | "PlanetaryFortress"
+            | "Nexus"
+            | "Hatchery"
+            | "Lair"
+            | "Hive"
+    )
 }
 
 /// Lista as entidades vivas do jogador `p` no `until_loop` (inclusivo).
@@ -543,9 +602,10 @@ fn alive_entities_at(p: &PlayerTimeline, until_loop: u32) -> Vec<LiveEntity> {
                 alive.insert(
                     ev.tag,
                     LiveEntity {
-                        x: ev.pos_x,
-                        y: ev.pos_y,
+                        x: ev.pos_x as f32,
+                        y: ev.pos_y as f32,
                         category: ev.category,
+                        is_base: is_base_type(&ev.entity_type),
                     },
                 );
             }
@@ -555,10 +615,11 @@ fn alive_entities_at(p: &PlayerTimeline, until_loop: u32) -> Vec<LiveEntity> {
             EntityEventKind::ProductionStarted | EntityEventKind::ProductionCancelled => {}
         }
     }
-    // Sobrescreve a posição de nascimento com a última amostra de
-    // movimento conhecida. Tags que nunca apareceram em
-    // `unit_positions` (ex.: estruturas) ficam no ponto original.
-    let positions = p.last_known_positions(until_loop);
+    // Sobrescreve a posição de nascimento com a posição interpolada
+    // linearmente entre as duas amostras adjacentes de
+    // `unit_positions`. Tags que nunca apareceram em `unit_positions`
+    // (ex.: estruturas) ficam no ponto original.
+    let positions = p.interpolated_positions(until_loop);
     for (tag, ent) in alive.iter_mut() {
         if let Some(&(x, y)) = positions.get(tag) {
             ent.x = x;

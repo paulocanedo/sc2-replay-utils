@@ -93,6 +93,33 @@ pub enum EntityCategory {
     Structure,
 }
 
+/// Tipo de nó de recurso neutro no mapa. Usado para classificar as
+/// "patch nodes" (mineral fields e vespene geysers) que o parser
+/// captura em `ReplayTimeline.resources` para renderização no minimapa.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResourceKind {
+    /// Mineral comum (branco/azul-claro).
+    Mineral,
+    /// Rich mineral field (amarelo/dourado).
+    RichMineral,
+    /// Vespene geyser padrão (verde).
+    Vespene,
+    /// Rich vespene geyser (roxo no jogo; mapas campaign).
+    RichVespene,
+}
+
+/// Nó de recurso neutro spawnado no início do mapa (mineral field ou
+/// vespene geyser). As posições vêm de `UnitBornEvent` emitidos no
+/// `game_loop = 0` pelo SC2 para unidades neutras. Só a posição
+/// inicial é armazenada — depleção (mineral esgotado) não é
+/// rastreada, mas o usuário pode inferir pelo progresso do timeline.
+#[derive(Clone, Copy)]
+pub struct ResourceNode {
+    pub x: u8,
+    pub y: u8,
+    pub kind: ResourceKind,
+}
+
 #[derive(Clone)]
 pub struct EntityEvent {
     pub game_loop: u32,
@@ -269,4 +296,9 @@ pub struct ReplayTimeline {
     /// (e não por 255). Zero indica que o `init_data` faltou.
     pub map_size_x: u8,
     pub map_size_y: u8,
+    /// Nós de recursos neutros (mineral fields + vespene geysers)
+    /// spawnados no início da partida. Usados para desenhar os patches
+    /// no minimapa. Vazio se o parser não processou game_loop = 0
+    /// (replays muito truncados) — normalmente populado.
+    pub resources: Vec<ResourceNode>,
 }

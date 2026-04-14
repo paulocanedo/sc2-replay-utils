@@ -37,8 +37,8 @@ pub use types::{
 // precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
 pub use types::{
-    CameraPosition, EntityEvent, InjectCmd, ProductionCmd, StatsSnapshot, UnitPositionSample,
-    UpgradeEntry,
+    CameraPosition, EntityEvent, InjectCmd, ProductionCmd, ResourceKind, ResourceNode,
+    StatsSnapshot, UnitPositionSample, UpgradeEntry,
 };
 
 use std::collections::HashMap;
@@ -166,6 +166,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         cache_handles,
         map_size_x,
         map_size_y,
+        resources: Vec::new(),
     };
 
     // Fast path para metadata-only (usado pela biblioteca da GUI):
@@ -188,6 +189,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         &player_idx,
         &mut timeline.players,
         &mut index_owner,
+        &mut timeline.resources,
         max_loops,
     )?;
 
@@ -671,6 +673,114 @@ mod tests {
                 assert_eq!(snap.get(tag), Some(pos));
             }
         }
+    }
+
+    #[test]
+    fn initial_stats_snapshot_prepended_per_race() {
+        // O replay de exemplo tem 1 Terran e 1 Protoss. Depois do
+        // finalize, cada jogador deve ter um snapshot em game_loop=0
+        // com os valores conhecidos de ladder (12 workers, 12/15
+        // supply, 50 minerals, 0 gas).
+        let t = load();
+        for p in &t.players {
+            let first = p.stats.first().expect("at least one stat snapshot");
+            assert_eq!(first.game_loop, 0, "snapshot inicial deve estar em loop 0 para {}", p.name);
+            assert_eq!(first.workers, 12, "workers iniciais: {}", p.name);
+            assert_eq!(first.minerals, 50, "minerals iniciais: {}", p.name);
+            assert_eq!(first.vespene, 0, "gas inicial: {}", p.name);
+            assert_eq!(first.supply_used, 12, "supply usado inicial: {}", p.name);
+            let expected_cap = match p.race.as_str() {
+                "Zerg" => 14,
+                _ => 15,
+            };
+            assert_eq!(first.supply_made, expected_cap, "supply cap inicial: {}", p.name);
+            assert_eq!(first.army_value_minerals, 0);
+            assert_eq!(first.army_value_vespene, 0);
+        }
+    }
+
+    #[test]
+    fn resources_captured_with_mix_of_mineral_and_vespene() {
+        // Todo mapa de ladder spawna ~8 patches de mineral + 2 geysers
+        // por base, em pelo menos 4 bases típicas — pelo menos 16
+        // minerais e 4 geysers no total. Aceita um piso bem conservador
+        // pra tolerar mapas pequenos.
+        let t = load();
+        let mins = t
+            .resources
+            .iter()
+            .filter(|r| matches!(r.kind, ResourceKind::Mineral | ResourceKind::RichMineral))
+            .count();
+        let gas = t
+            .resources
+            .iter()
+            .filter(|r| matches!(r.kind, ResourceKind::Vespene | ResourceKind::RichVespene))
+            .count();
+        assert!(mins >= 8, "poucos mineral fields: {}", mins);
+        assert!(gas >= 2, "poucos vespene geysers: {}", gas);
+        // Coordenadas devem estar dentro do map_size (nenhum overflow
+        // de conversão).
+        for r in &t.resources {
+            assert!(r.x <= t.map_size_x, "x fora do mapa: {} > {}", r.x, t.map_size_x);
+            assert!(r.y <= t.map_size_y, "y fora do mapa: {} > {}", r.y, t.map_size_y);
+        }
+    }
+
+    #[test]
+    fn interpolated_positions_match_endpoints_and_midpoint() {
+        // Para alguma unidade com pelo menos duas amostras distintas,
+        // verifica que `interpolated_positions` (1) bate com a amostra
+        // bruta exatamente no game_loop dela e (2) cai no ponto médio
+        // exato no meio do intervalo.
+        let t = load();
+        let mut tested = 0usize;
+        for p in &t.players {
+            // Encontra um par de amostras consecutivas pra mesma tag,
+            // com posições diferentes e intervalo > 1.
+            let mut by_tag: HashMap<i64, Vec<&UnitPositionSample>> = HashMap::new();
+            for s in &p.unit_positions {
+                by_tag.entry(s.tag).or_default().push(s);
+            }
+            for samples in by_tag.values() {
+                if samples.len() < 2 {
+                    continue;
+                }
+                for w in samples.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    if (a.x, a.y) == (b.x, b.y) || b.game_loop - a.game_loop < 2 {
+                        continue;
+                    }
+                    // No game_loop de A: deve bater com (a.x, a.y).
+                    let snap = p.interpolated_positions(a.game_loop);
+                    let &(x, y) = snap.get(&a.tag).expect("tag presente em snap");
+                    assert!((x - a.x as f32).abs() < 0.01);
+                    assert!((y - a.y as f32).abs() < 0.01);
+                    // No meio: posição média entre A e B.
+                    let mid = (a.game_loop + b.game_loop) / 2;
+                    let snap = p.interpolated_positions(mid);
+                    let &(x, y) = snap.get(&a.tag).expect("tag presente em snap mid");
+                    let frac = (mid - a.game_loop) as f32 / (b.game_loop - a.game_loop) as f32;
+                    let exp_x = a.x as f32 + (b.x as f32 - a.x as f32) * frac;
+                    let exp_y = a.y as f32 + (b.y as f32 - a.y as f32) * frac;
+                    assert!(
+                        (x - exp_x).abs() < 0.01,
+                        "midpoint x: {} vs {}", x, exp_x,
+                    );
+                    assert!(
+                        (y - exp_y).abs() < 0.01,
+                        "midpoint y: {} vs {}", y, exp_y,
+                    );
+                    tested += 1;
+                    if tested >= 3 {
+                        return;
+                    }
+                }
+            }
+        }
+        assert!(
+            tested > 0,
+            "esperava ao menos um par de amostras com posições distintas",
+        );
     }
 
     #[test]

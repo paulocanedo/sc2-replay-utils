@@ -9,10 +9,11 @@ use std::collections::HashMap;
 use s2protocol::tracker_events::{unit_tag, ReplayTrackerEvent};
 
 use super::classify::{
-    classify_entity, is_attack_upgrade, is_armor_upgrade, is_worker_producer, upgrade_level,
+    classify_entity, is_attack_upgrade, is_armor_upgrade, is_worker_producer, resource_kind,
+    upgrade_level,
 };
 use super::types::{
-    EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, StatsSnapshot,
+    EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, ResourceNode, StatsSnapshot,
     UnitPositionSample, UpgradeEntry, UNIT_INIT_MARKER,
 };
 
@@ -97,6 +98,7 @@ pub(super) fn process_tracker_events(
     player_idx: &HashMap<u8, usize>,
     players: &mut [PlayerTimeline],
     index_owner: &mut IndexOwnerMap,
+    resources: &mut Vec<ResourceNode>,
     max_loops: u32,
 ) -> Result<(), String> {
     let tracker_events = s2protocol::read_tracker_events(path_str, mpq, file_contents)
@@ -166,6 +168,17 @@ pub(super) fn process_tracker_events(
             ReplayTrackerEvent::UnitBorn(e) => {
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
                 let Some(&idx) = player_idx.get(&e.control_player_id) else {
+                    // Nó de recurso neutro: spawna em game_loop = 0 com
+                    // player_id neutro. Captura a posição pro minimapa
+                    // antes de cair no caminho de tag_map (que só serve
+                    // pra resolver UnitDied postumamente).
+                    if let Some(kind) = resource_kind(&e.unit_type_name) {
+                        resources.push(ResourceNode {
+                            x: e.x,
+                            y: e.y,
+                            kind,
+                        });
+                    }
                     // Insere mesmo assim para resolução posterior se vier UnitDied.
                     tag_map.insert(
                         tag,
