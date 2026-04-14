@@ -43,7 +43,7 @@ mod locale;
 mod salt;
 #[path = "../gui/cache.rs"]
 mod cache;
-#[path = "../gui/library.rs"]
+#[path = "../gui/library/mod.rs"]
 mod library;
 #[path = "../gui/rename.rs"]
 mod rename;
