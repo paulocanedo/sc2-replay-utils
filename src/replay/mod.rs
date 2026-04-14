@@ -191,17 +191,19 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         max_loops,
     )?;
 
-    // user_id (0-baseado em player_list) → player_idx (índice em
+    // user_id (0-baseado, vem dos game events) → player_idx (índice em
     // `timeline.players`). Necessário pra `game::process_game_events`
-    // saber em qual player empurrar o `ProductionCmd`.
-    let user_to_player_idx: HashMap<i64, usize> = details
-        .player_list
-        .iter()
-        .enumerate()
-        .filter(|(_, p)| p.observe == 0)
-        .enumerate()
-        .map(|(out_idx, (in_idx, _))| (in_idx as i64, out_idx))
-        .collect();
+    // saber em qual player empurrar `ProductionCmd`/`InjectCmd`/câmera.
+    //
+    // Cuidado: o `user_id` NÃO corresponde à posição em `details.player_list`
+    // (que só lista jogadores ativos). Em replays com observers no lobby,
+    // o `user_id` 1 pode ser um spectator e o player real estar em `user_id` 2.
+    // A fonte de verdade é `init_data.lobby_state.slots[i].user_id`,
+    // casado com o jogador via `working_set_slot_id`.
+    let user_to_player_idx: HashMap<i64, usize> = build_user_to_player_idx(
+        init_data.as_ref(),
+        &details,
+    );
 
     game::process_game_events(
         path_str,
@@ -226,6 +228,67 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
     finalize::finalize_indices(&mut timeline.players);
 
     Ok(timeline)
+}
+
+// ── user_id mapping ──────────────────────────────────────────────────
+
+/// Constrói o mapa `user_id → player_idx` (índice em `timeline.players`).
+///
+/// Estratégia: cada jogador ativo em `details.player_list` tem um
+/// `working_set_slot_id`; esse mesmo id aparece em
+/// `init_data.lobby_state.slots[i].working_set_slot_id`, e o slot
+/// guarda o `user_id` real que vai aparecer nos game events
+/// (`ev.user_id`). A junção pelos dois lados produz o mapeamento
+/// correto mesmo quando há observers no lobby (que ocupam slots e
+/// "puxam" o user_id dos jogadores reais para fora do range 0..N).
+///
+/// Fallback (sem `init_data`): assume `user_id == in_idx` em
+/// `details.player_list`. É o que o parser fazia antes — funciona
+/// para a maioria dos replays sem observers, mas erra em replays
+/// observadados (LiquidClem em torneios, p.ex.).
+fn build_user_to_player_idx(
+    init_data: Option<&s2protocol::InitData>,
+    details: &s2protocol::details::Details,
+) -> HashMap<i64, usize> {
+    if let Some(init) = init_data {
+        // working_set_slot_id → player_idx em `timeline.players`.
+        let slot_to_player: HashMap<u8, usize> = details
+            .player_list
+            .iter()
+            .filter(|p| p.observe == 0)
+            .enumerate()
+            .filter_map(|(out_idx, p)| p.working_set_slot_id.map(|s| (s, out_idx)))
+            .collect();
+
+        let map: HashMap<i64, usize> = init
+            .sync_lobby_state
+            .lobby_state
+            .slots
+            .iter()
+            .filter_map(|s| {
+                let uid = s.user_id?;
+                let wsid = s.working_set_slot_id?;
+                let &player_idx = slot_to_player.get(&wsid)?;
+                Some((uid as i64, player_idx))
+            })
+            .collect();
+
+        if !map.is_empty() {
+            return map;
+        }
+    }
+
+    // Fallback: comportamento antigo. Só roda se init_data faltou ou
+    // se o cruzamento por slot não produziu nenhuma entrada (replays
+    // muito antigos / corrompidos).
+    details
+        .player_list
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.observe == 0)
+        .enumerate()
+        .map(|(out_idx, (in_idx, _))| (in_idx as i64, out_idx))
+        .collect()
 }
 
 // ── MMR lookup ──────────────────────────────────────────────────────
@@ -665,6 +728,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Regressão pra `build_user_to_player_idx`: o replay
+    /// `replay_observed.SC2Replay` foi gravado por um observador, então
+    /// `user_id` 1 e 3 são spectators e os jogadores reais ficam em
+    /// `user_id` 0 e 2. O parser antigo mapeava o spectator (user_id=1)
+    /// pro player_idx=1, e os ProductionCmds/InjectCmds/CameraPositions
+    /// do Terran (LiquidClem) eram perdidos.
+    #[test]
+    fn user_id_mapping_skips_observer_slots() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/replay_observed.SC2Replay");
+        let t = parse_replay(&path, 0).expect("parse_replay");
+        assert_eq!(t.players.len(), 2);
+        let clem = t
+            .players
+            .iter()
+            .find(|p| p.name.contains("Clem"))
+            .expect("LiquidClem deve estar entre os jogadores");
+        // Antes do fix, Clem tinha 77 amostras de câmera começando em
+        // game_loop=8936 (≈6:39). Agora ele deve ter centenas começando
+        // antes de 1s de jogo (loop ≈ 2).
+        assert!(
+            clem.camera_positions.len() > 500,
+            "esperava centenas de amostras de câmera, achei {}",
+            clem.camera_positions.len()
+        );
+        let first = clem.camera_positions.first().unwrap();
+        assert!(
+            first.game_loop < 100,
+            "primeira amostra de câmera deve estar perto do início (loop < 100), achei {}",
+            first.game_loop
+        );
     }
 
     #[test]
