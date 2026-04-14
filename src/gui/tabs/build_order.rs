@@ -378,7 +378,12 @@ fn player_column(
                             finish_rt = finish_rt.color(c);
                         }
                         ui.label(finish_rt);
-                        ui.monospace(format!("{:>3}/{:<3}", entry.supply, entry.supply_made));
+                        // Clampa `supply_made` ao cap visual de 200 (igual ao painel
+                        // da Timeline e ao HUD do próprio SC2). O `supply_used` cru
+                        // pode estourar transientemente durante morphs/mortes e fica
+                        // sem clamp pra deixar o glitch real do tracker visível.
+                        let supply_cap = entry.supply_made.min(200);
+                        ui.monospace(format!("{:>3}/{:<3}", entry.supply, supply_cap));
 
                         let action_text = if entry.count > 1 {
                             format!("{} x{}", display_name, entry.count)
@@ -519,7 +524,7 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::La
             fmt_time(entry.game_loop, lps),
             fmt_time(entry.finish_loop, lps),
             entry.supply,
-            entry.supply_made,
+            entry.supply_made.min(200),
             action_text,
             outcome_mark,
         ));

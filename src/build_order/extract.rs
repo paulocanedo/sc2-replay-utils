@@ -400,10 +400,18 @@ fn add_build_time(raw_loop: u32, action: &str, base_build: u32) -> u32 {
 
 /// Lê `(supply_used, supply_made)` no instante mais recente <= `loop_`.
 /// Retorna `(0, 0)` se não houver nenhum snapshot prévio.
-fn supply_at(player: &PlayerTimeline, loop_: u32) -> (u8, u8) {
+///
+/// Os valores vêm como `i32` do tracker (já em unidades de supply, divididos
+/// por 4096 pela própria s2protocol). Late-game Zerg/Protoss frequentemente
+/// supera 200 em `food_made` (overlords/pylons além do cap), e morphs/transições
+/// podem fazer `food_used` flutuar acima do cap; portanto preservamos o
+/// número bruto em `u16` em vez de truncar para `u8` (que faria wrap mod 256
+/// para qualquer valor ≥ 256). O `.max(0)` blinda contra valores negativos
+/// inesperados — não devem ocorrer mas o tipo de origem é signed.
+fn supply_at(player: &PlayerTimeline, loop_: u32) -> (u16, u16) {
     player
         .stats_at(loop_)
-        .map(|s| (s.supply_used as u8, s.supply_made as u8))
+        .map(|s| (s.supply_used.max(0) as u16, s.supply_made.max(0) as u16))
         .unwrap_or((0, 0))
 }
 

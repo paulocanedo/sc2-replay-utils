@@ -37,9 +37,11 @@ impl EntryOutcome {
 #[derive(Clone)]
 pub struct BuildOrderEntry {
     /// Supply usado no instante de início.
-    pub supply: u8,
+    pub supply: u16,
     /// Capacidade total de supply no instante de início (food_made).
-    pub supply_made: u8,
+    /// Pode exceder 200: late-game Zerg/Protoss costuma ter overlords/pylons
+    /// além do cap visual. Quem renderiza decide se aplica `min(200)`.
+    pub supply_made: u16,
     /// Instante de início da ação (start time).
     pub game_loop: u32,
     /// Instante de conclusão da ação. Significado depende do `outcome`:
