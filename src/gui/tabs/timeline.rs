@@ -24,6 +24,7 @@ use egui::{
     TextStyle, TextureOptions, Ui,
 };
 
+use crate::balance_data;
 use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::map_image::MapImage;
@@ -35,6 +36,47 @@ use crate::replay_state::{fmt_time, LoadedReplay, PlayableBounds};
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
 const CAMERA_WIDTH_TILES: f32 = 24.0;
 const CAMERA_HEIGHT_TILES: f32 = 14.0;
+
+/// Janela em game loops durante a qual um marcador de morte/
+/// cancelamento permanece visível depois do evento (~1s em Faster,
+/// dado que o SC2 roda a 22.4 loops/s). Marcadores são flash — a
+/// intenção é chamar atenção no momento sem poluir o minimapa.
+const MARKER_DURATION_LOOPS: u32 = 23;
+
+/// Lado do marcador (X/Ø) em pixels.
+const MARKER_SIZE: f32 = 8.0;
+
+/// Lado base (px) do quadrado de uma unidade de 1 supply no minimapa.
+/// Unidades com mais supply escalam a partir daqui via
+/// `unit_scale_for_supply`.
+const UNIT_BASE_SIZE: f32 = 4.0;
+
+/// Lado base (px) de uma estrutura não-base (Barracks, Gateway, etc.).
+/// Bases (townhalls) usam `STRUCTURE_BASE_SIZE * 2` — âncoras visuais.
+/// Ambos já incluem o "inflar 50%" em relação ao tamanho histórico
+/// (6/12 px), para que estruturas fiquem mais legíveis.
+const STRUCTURE_BASE_SIZE: f32 = 9.0;
+const TOWNHALL_BASE_SIZE: f32 = 18.0;
+
+/// Escala de tamanho em função do supply ocupado pela unidade (×10 — é
+/// a unidade retornada por `balance_data::supply_cost_x10`). A fórmula
+/// é `1.0 + (supply - 1) × 0.25`, clampada em 1.0 pra baixo:
+///
+/// | supply | fator |
+/// |--------|-------|
+/// |   1    | 1.00x |
+/// |   2    | 1.25x |
+/// |   3    | 1.50x |
+/// |   4    | 1.75x |
+/// |   5    | 2.00x |
+/// |   6    | 2.25x |
+///
+/// Unidades de meio-supply (zergling = 0.5) e unidades desconhecidas
+/// (supply_x10 == 0) caem no clamp inferior e ficam no tamanho base.
+fn unit_scale_for_supply(supply_x10: u32) -> f32 {
+    let supply = supply_x10 as f32 / 10.0;
+    (1.0 + (supply - 1.0) * 0.25).max(1.0)
+}
 
 /// Número de caracteres monospace que cabem no painel lateral. A
 /// largura real é derivada do glifo "M" da fonte monospace atual, então
@@ -287,17 +329,56 @@ fn minimap_with_size(
 
             for (i, p) in loaded.timeline.players.iter().enumerate() {
                 let color = player_slot_color_bright(i);
-                let entities = alive_entities_at(p, game_loop);
+                let entities = alive_entities_at(p, game_loop, loaded.timeline.base_build);
 
                 for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
-                    draw_unit(&painter, rect, e.x, e.y, bounds, 4.0, color, false);
+                    draw_unit(&painter, rect, e.x, e.y, bounds, e.side, color, false);
                 }
-                // Bases (townhalls) renderizadas com o dobro do tamanho
-                // das outras estruturas — 12px contra 6px — pra servir
-                // de âncora visual das bases dos jogadores no minimapa.
+                // Estruturas renderizadas por cima das unidades, com
+                // borda branca para destacar. Bases (townhalls) usam
+                // `TOWNHALL_BASE_SIZE` (2× uma estrutura normal) —
+                // âncora visual das bases dos jogadores no minimapa.
                 for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                    let side = if e.is_base { 12.0 } else { 6.0 };
-                    draw_unit(&painter, rect, e.x, e.y, bounds, side, color, true);
+                    draw_unit(&painter, rect, e.x, e.y, bounds, e.side, color, true);
+                }
+            }
+
+            // Marcadores de morte/cancelamento: X para unidade morta,
+            // Ø para produção cancelada. Desenhados em cima das unidades
+            // (pra chamar atenção) mas por baixo do retângulo de câmera.
+            // Duração curta (MARKER_DURATION_LOOPS ≈ 1s) — flash visual.
+            for (i, p) in loaded.timeline.players.iter().enumerate() {
+                let color = player_slot_color_bright(i);
+                for ev in &p.entity_events {
+                    if ev.game_loop > game_loop {
+                        break;
+                    }
+                    if game_loop - ev.game_loop > MARKER_DURATION_LOOPS {
+                        continue;
+                    }
+                    match ev.kind {
+                        EntityEventKind::Died => {
+                            draw_death_marker(
+                                &painter,
+                                rect,
+                                ev.pos_x as f32,
+                                ev.pos_y as f32,
+                                bounds,
+                                color,
+                            );
+                        }
+                        EntityEventKind::ProductionCancelled => {
+                            draw_cancel_marker(
+                                &painter,
+                                rect,
+                                ev.pos_x as f32,
+                                ev.pos_y as f32,
+                                bounds,
+                                color,
+                            );
+                        }
+                        _ => {}
+                    }
                 }
             }
 
@@ -451,6 +532,60 @@ fn draw_camera_rect(
     painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color), StrokeKind::Outside);
 }
 
+/// Marcador de morte: dois segmentos diagonais formando um "X" centrado
+/// na posição do evento. Desenhado na cor do slot do jogador que perdeu
+/// a unidade (quem morreu, não quem matou).
+fn draw_death_marker(
+    painter: &egui::Painter,
+    rect: Rect,
+    x: f32,
+    y: f32,
+    bounds: PlayableBounds,
+    color: Color32,
+) {
+    let center = to_screen(rect, x, y, bounds);
+    let half = MARKER_SIZE * 0.5;
+    let stroke = Stroke::new(1.8, color);
+    painter.line_segment(
+        [
+            pos2(center.x - half, center.y - half),
+            pos2(center.x + half, center.y + half),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(center.x - half, center.y + half),
+            pos2(center.x + half, center.y - half),
+        ],
+        stroke,
+    );
+}
+
+/// Marcador de cancelamento: zero cortado (Ø) — um círculo com um
+/// segmento diagonal por cima. Usado quando o jogador cancela a
+/// construção de um prédio ou o treino de uma unidade.
+fn draw_cancel_marker(
+    painter: &egui::Painter,
+    rect: Rect,
+    x: f32,
+    y: f32,
+    bounds: PlayableBounds,
+    color: Color32,
+) {
+    let center = to_screen(rect, x, y, bounds);
+    let half = MARKER_SIZE * 0.5;
+    let stroke = Stroke::new(1.5, color);
+    painter.circle_stroke(center, half, stroke);
+    painter.line_segment(
+        [
+            pos2(center.x - half, center.y + half),
+            pos2(center.x + half, center.y - half),
+        ],
+        stroke,
+    );
+}
+
 // ── Heatmap de câmera ─────────────────────────────────────────────────
 
 /// Renderiza um heatmap de tempo de câmera do jogador sobre o minimapa.
@@ -566,6 +701,11 @@ struct LiveEntity {
     /// desenhar esses prédios em tamanho maior no minimapa, já que
     /// servem de âncora visual pras bases dos jogadores.
     is_base: bool,
+    /// Lado do quadrado no minimapa (px), já com a escala por supply
+    /// aplicada (ver `unit_scale_for_supply`). Pré-computado em
+    /// `alive_entities_at` pra evitar lookup na tabela de balance data
+    /// a cada frame.
+    side: f32,
 }
 
 /// Detecta estruturas de main-base (townhalls). Inclui morphs zerg
@@ -591,7 +731,7 @@ fn is_base_type(name: &str) -> bool {
 /// `replay::tests`). Custo O(n) por chamada — aceitável para milhares
 /// de eventos por replay e como esta função é chamada apenas uma vez
 /// por frame da aba Timeline.
-fn alive_entities_at(p: &PlayerTimeline, until_loop: u32) -> Vec<LiveEntity> {
+fn alive_entities_at(p: &PlayerTimeline, until_loop: u32, base_build: u32) -> Vec<LiveEntity> {
     let mut alive: HashMap<i64, LiveEntity> = HashMap::new();
     for ev in &p.entity_events {
         if ev.game_loop > until_loop {
@@ -599,13 +739,26 @@ fn alive_entities_at(p: &PlayerTimeline, until_loop: u32) -> Vec<LiveEntity> {
         }
         match ev.kind {
             EntityEventKind::ProductionFinished => {
+                let is_base = is_base_type(&ev.entity_type);
+                let side = match ev.category {
+                    EntityCategory::Structure => {
+                        if is_base { TOWNHALL_BASE_SIZE } else { STRUCTURE_BASE_SIZE }
+                    }
+                    // Workers e Unit: 1 supply × fator por supply.
+                    // SCV/Drone/Probe são 1 supply → fator 1.0 → 4px.
+                    _ => {
+                        let cost = balance_data::supply_cost_x10(&ev.entity_type, base_build);
+                        UNIT_BASE_SIZE * unit_scale_for_supply(cost)
+                    }
+                };
                 alive.insert(
                     ev.tag,
                     LiveEntity {
                         x: ev.pos_x as f32,
                         y: ev.pos_y as f32,
                         category: ev.category,
-                        is_base: is_base_type(&ev.entity_type),
+                        is_base,
+                        side,
                     },
                 );
             }
