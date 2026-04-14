@@ -344,28 +344,24 @@ mod tests {
         assert_eq!(encode_char(200), '~');
     }
 
+    /// Cobre as três categorias da tabela `mpq_to_salt`: unit, structure,
+    /// upgrade. Uma amostra por categoria é suficiente — a tabela é estática
+    /// e os paths de resolução são idênticos entre as três.
     #[test]
-    fn mpq_marine_maps_to_unit_5() {
-        assert_eq!(
-            mpq_to_salt("Marine", EntryKind::Unit),
-            Some((STEP_UNIT, 5))
-        );
-    }
-
-    #[test]
-    fn mpq_barracks_maps_to_structure_1() {
-        assert_eq!(
-            mpq_to_salt("Barracks", EntryKind::Structure),
-            Some((STEP_STRUCTURE, 1))
-        );
-    }
-
-    #[test]
-    fn mpq_stimpack_maps_to_upgrade_11() {
-        assert_eq!(
-            mpq_to_salt("Stimpack", EntryKind::Research),
-            Some((STEP_UPGRADE, 11))
-        );
+    fn mpq_action_maps_cover_all_categories() {
+        let cases = [
+            ("Marine", EntryKind::Unit, STEP_UNIT, 5),
+            ("Barracks", EntryKind::Structure, STEP_STRUCTURE, 1),
+            ("Stimpack", EntryKind::Research, STEP_UPGRADE, 11),
+        ];
+        for (name, kind, step, idx) in cases {
+            assert_eq!(
+                mpq_to_salt(name, kind),
+                Some((step, idx)),
+                "{name} ({:?}) deveria mapear para ({step}, {idx})",
+                kind,
+            );
+        }
     }
 
     #[test]

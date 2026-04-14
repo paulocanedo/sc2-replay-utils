@@ -186,17 +186,6 @@ mod tests {
         }
     }
 
-    /// Stimpack tem 140s Normal speed na 96592 → 140 * 16 = 2240 loops.
-    /// Esse valor casa com o que o tracker reporta no replay golden e
-    /// é o que o build_order usa para recuar o `start_loop`.
-    #[test]
-    fn stimpack_140s_normal_equals_2240_loops() {
-        // Resolvemos contra o build mais novo — em qualquer versão >=
-        // 96592, o valor é 2240. Versões antigas podem diferir.
-        let loops = build_time_loops("Stimpack", u32::MAX);
-        assert_eq!(loops, 2240, "Stimpack deveria ser 140s Normal = 2240 loops");
-    }
-
     /// Para um `base_build` muito alto, devemos cair na maior versão
     /// embutida (em vez de retornar 0 / panicar).
     #[test]

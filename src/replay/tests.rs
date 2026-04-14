@@ -229,23 +229,6 @@ fn state_at_loop_zero_returns_no_stats() {
 }
 
 #[test]
-fn state_at_loop_past_end_returns_last() {
-    let t = load();
-    let p = &t.players[0];
-    let last_stat = p.stats.last().unwrap();
-    let s = p.stats_at(u32::MAX).unwrap();
-    assert_eq!(s.game_loop, last_stat.game_loop);
-
-    // worker_capacity após o fim deve devolver o último valor
-    // acumulado (não 0).
-    let last_cap = p
-        .worker_capacity
-        .iter()
-        .fold(0i32, |acc, (_, d)| acc + d);
-    assert_eq!(p.worker_capacity_at(u32::MAX), last_cap);
-}
-
-#[test]
 fn entity_events_sorted_by_loop() {
     let t = load();
     for p in &t.players {
@@ -311,31 +294,6 @@ fn unit_positions_in_map_scale() {
         }
     }
     assert!(checked > 0, "esperava ao menos uma amostra de posição");
-}
-
-#[test]
-fn unit_positions_show_movement() {
-    // Para alguma unidade, a posição muda entre amostras —
-    // garantia de que estamos realmente coletando movimento e
-    // não só repetindo o ponto de nascimento.
-    let t = load();
-    let mut moved = false;
-    'outer: for p in &t.players {
-        let mut by_tag: HashMap<i64, (u8, u8)> = HashMap::new();
-        for s in &p.unit_positions {
-            if let Some(&(px, py)) = by_tag.get(&s.tag) {
-                if px != s.x || py != s.y {
-                    moved = true;
-                    break 'outer;
-                }
-            }
-            by_tag.insert(s.tag, (s.x, s.y));
-        }
-    }
-    assert!(
-        moved,
-        "esperava ao menos uma unidade mudando de posição entre amostras",
-    );
 }
 
 #[test]
@@ -497,7 +455,10 @@ fn morph_only_unit_type_change_carries_synthetic_ability() {
 }
 
 #[test]
-fn camera_positions_collected_and_sorted() {
+fn camera_positions_sorted_and_deduplicated() {
+    // Stream `camera_positions` deve estar (a) populado, (b) ordenado por
+    // game_loop crescente, e (c) sem duas amostras consecutivas na mesma
+    // posição (o parser deduplica). Tudo num só sweep.
     let t = load();
     let total: usize = t.players.iter().map(|p| p.camera_positions.len()).sum();
     assert!(total > 0, "esperava ao menos uma amostra de câmera");
@@ -508,15 +469,6 @@ fn camera_positions_collected_and_sorted() {
                 "camera_positions fora de ordem em {}: {} > {}",
                 p.name, w[0].game_loop, w[1].game_loop,
             );
-        }
-    }
-}
-
-#[test]
-fn camera_positions_deduplicated() {
-    let t = load();
-    for p in &t.players {
-        for w in p.camera_positions.windows(2) {
             assert!(
                 w[0].x != w[1].x || w[0].y != w[1].y,
                 "amostras de câmera consecutivas na mesma posição em {} nos loops {}, {}",

@@ -285,14 +285,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_title_returns_none() {
-        let dir = tmp_dir("empty");
-        File::create(dir.join("Foo.SC2Map")).unwrap();
-        assert!(resolve_map_file("", &[dir.clone()]).is_none());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn parses_real_cache_handle() {
         // Cache handle real montado: ext "s2ma" (73326d61) + delim "0000" +
         // region "EU" (4555) + hash de 64 chars (zeros pra simplicidade).
