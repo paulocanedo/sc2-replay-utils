@@ -11,7 +11,7 @@
 mod replay;
 #[path = "../balance_data.rs"]
 mod balance_data;
-#[path = "../build_order.rs"]
+#[path = "../build_order/mod.rs"]
 mod build_order;
 #[path = "../chat.rs"]
 mod chat;
