@@ -37,8 +37,8 @@ pub use types::{
 // precisarem nomeá-los explicitamente.
 #[allow(unused_imports)]
 pub use types::{
-    CameraPosition, EntityEvent, InjectCmd, ProductionCmd, ResourceKind, ResourceNode,
-    StatsSnapshot, UnitPositionSample, UpgradeEntry,
+    CameraPosition, CreepEntry, CreepKind, EntityEvent, InjectCmd, ProductionCmd, ResourceKind,
+    ResourceNode, StatsSnapshot, UnitPositionSample, UpgradeEntry,
 };
 
 use std::collections::HashMap;
@@ -116,6 +116,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 worker_capacity: Vec::new(),
                 worker_births: Vec::new(),
                 upgrade_cumulative: Vec::new(),
+                creep_index: Vec::new(),
             }
         })
         .collect();

@@ -339,10 +339,18 @@ pub(super) fn process_tracker_events(
             }
 
             ReplayTrackerEvent::UnitInit(e) => {
-                // Cosméticos / placements táticos não são build order.
-                if e.unit_type_name.contains("Tumor") || e.unit_type_name.contains("Spray") {
+                // Sprays continuam fora — são puramente cosméticos.
+                if e.unit_type_name.contains("Spray") {
                     continue;
                 }
+                // Tumors entram no stream com lifecycle completa, mas
+                // marcadas com um `creator_ability` próprio para que o
+                // filtro de `build_order.rs` (que aceita só
+                // UNIT_INIT_MARKER / Train* / MorphTo*) as descarte
+                // naturalmente. O `finalize.rs` consome esses eventos
+                // pra construir `creep_index` (camada de creep do
+                // minimapa).
+                let is_tumor = e.unit_type_name.contains("Tumor");
                 let tag = unit_tag(e.unit_tag_index, e.unit_tag_recycle);
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let category = classify_entity(&e.unit_type_name);
@@ -355,6 +363,19 @@ pub(super) fn process_tracker_events(
                     },
                 );
 
+                let creator_ability = if is_tumor {
+                    // Hardcoded em vez de ler `creator_ability_name` do
+                    // evento — só precisamos de algo que não case com o
+                    // filtro do build_order, e queremos um nome estável
+                    // pra `creep_index` filtrar via match exato.
+                    Some("BuildCreepTumor".to_string())
+                } else {
+                    // Sentinel: marca eventos vindos de UnitInit para
+                    // que o build_order possa distinguir warp-ins/
+                    // construções de spawns iniciais.
+                    Some(UNIT_INIT_MARKER.to_string())
+                };
+
                 push_event(
                     &mut players[idx],
                     EntityEvent {
@@ -366,10 +387,7 @@ pub(super) fn process_tracker_events(
                         tag,
                         pos_x: e.x,
                         pos_y: e.y,
-                        // Sentinel: marca eventos vindos de UnitInit para
-                        // que o build_order possa distinguir warp-ins/
-                        // construções de spawns iniciais.
-                        creator_ability: Some(UNIT_INIT_MARKER.to_string()),
+                        creator_ability,
                         // UnitInit é a "construção via Probe/SCV" (e
                         // warp-ins). Não há produtor pra encadear; o
                         // build_order cai no fallback antigo

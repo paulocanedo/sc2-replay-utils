@@ -186,6 +186,33 @@ pub struct ChatEntry {
     pub message: String,
 }
 
+/// Tipo de fonte de creep capturada em `creep_index`. Townhall agrega
+/// Hatchery/Lair/Hive (mesmo tag durante morphs in-place); Tumor são
+/// as creep tumors plantadas pela Queen (incluindo as filhas).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CreepKind {
+    Townhall,
+    Tumor,
+}
+
+/// Entry derivada de `entity_events` para render rápido da camada de
+/// creep no minimapa. Construída em `finalize.rs`. Identidade é por
+/// `tag` único; morphs Hatchery→Lair→Hive são uma única entry porque
+/// reusam o mesmo tag.
+#[derive(Clone, Copy)]
+pub struct CreepEntry {
+    pub tag: i64,
+    pub x: u8,
+    pub y: u8,
+    pub born_loop: u32,
+    /// `u32::MAX` enquanto a fonte estiver viva. Atualizada quando a
+    /// entidade é destruída (não confundir com o `Died` sintético que
+    /// `apply_type_change` emite no morph in-place — esse caso é
+    /// filtrado em `finalize.rs`).
+    pub died_loop: u32,
+    pub kind: CreepKind,
+}
+
 /// Comando de Inject Larva (SpawnLarva) capturado dos game events.
 /// Cada instância representa uma Queen clicando inject numa Hatchery/
 /// Lair/Hive específica.
@@ -265,6 +292,13 @@ pub struct PlayerTimeline {
     /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
     /// para queries de scrubbing.
     pub upgrade_cumulative: Vec<(u32, u8, u8)>,
+
+    /// Índice derivado de `entity_events` para render eficiente da
+    /// camada de creep no minimapa. Ordenado por `born_loop`. Inclui
+    /// hatcheries/lairs/hives e creep tumors. Vazio para jogadores
+    /// não-Zerg (mas o tipo permanece presente — o filtro acontece na
+    /// população em `finalize.rs`).
+    pub creep_index: Vec<CreepEntry>,
 }
 
 pub struct ReplayTimeline {

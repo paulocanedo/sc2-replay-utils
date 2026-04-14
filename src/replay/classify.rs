@@ -86,11 +86,24 @@ pub(super) fn is_structure_name(name: &str) -> bool {
 pub(super) fn classify_entity(name: &str) -> EntityCategory {
     if is_worker_name(name) {
         EntityCategory::Worker
-    } else if is_structure_name(name) {
+    } else if is_structure_name(name) || is_creep_tumor_name(name) {
+        // Tumors são "estruturas" semânticas: 0 supply, ficam paradas,
+        // têm lifecycle de build/born/die. Classificar como Unit faria
+        // o `supply_block` tratá-las como tropas — inofensivo (cost=0)
+        // mas polui o merge stream sem necessidade.
         EntityCategory::Structure
     } else {
         EntityCategory::Unit
     }
+}
+
+/// Reconhece todas as variantes de creep tumor que o replay emite:
+/// `CreepTumor` (planta inicial), `CreepTumorBurrowed` (após burrow),
+/// `CreepTumorQueen` (planta da queen) e `CreepTumorMissile`
+/// (projétil intermediário). Usado por `classify_entity` e por
+/// `finalize.rs` ao construir `creep_index`.
+pub(super) fn is_creep_tumor_name(name: &str) -> bool {
+    name.starts_with("CreepTumor")
 }
 
 // ── Upgrades ────────────────────────────────────────────────────────

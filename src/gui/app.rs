@@ -54,6 +54,8 @@ pub struct AppState {
     pub charts_show_workers: bool,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
+    pub timeline_show_creep: bool,
+    pub timeline_show_map: bool,
     /// Template de renomeação em lote.
     pub rename_template: String,
     /// Previews gerados a partir do template + biblioteca.
@@ -87,6 +89,8 @@ impl AppState {
             charts_show_workers: false,
             show_about: false,
             timeline_show_heatmap: false,
+            timeline_show_creep: true,
+            timeline_show_map: true,
             rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
             rename_previews: Vec::new(),
             rename_status: None,
@@ -431,6 +435,8 @@ impl eframe::App for AppState {
                             &self.config,
                             &mut self.timeline_tab_loop,
                             &mut self.timeline_show_heatmap,
+                            &mut self.timeline_show_creep,
+                            &mut self.timeline_show_map,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
                         Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_show_army, &mut self.charts_show_workers),

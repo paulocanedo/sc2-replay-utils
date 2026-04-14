@@ -1,9 +1,10 @@
 // Pós-processamento do parser: ordena timelines fora de ordem e
 // constrói o índice cumulativo `alive_count` por tipo de entidade.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use super::types::{EntityEventKind, PlayerTimeline, StatsSnapshot};
+use super::classify::is_creep_tumor_name;
+use super::types::{CreepEntry, CreepKind, EntityEventKind, PlayerTimeline, StatsSnapshot};
 
 /// Valores conhecidos do estado inicial de partida ladder para cada
 /// raça: (supply_used, supply_made, workers, minerals).
@@ -97,5 +98,80 @@ pub(super) fn finalize_indices(players: &mut [PlayerTimeline]) {
                 _ => {}
             }
         }
+
+        build_creep_index(player);
     }
+}
+
+/// Detecta se `entity_type` é uma fonte de creep (townhall ou tumor) e
+/// retorna seu `CreepKind`. Usado por `build_creep_index` para filtrar
+/// `entity_events` em uma única passada.
+fn classify_creep(name: &str) -> Option<CreepKind> {
+    match name {
+        "Hatchery" | "Lair" | "Hive" => Some(CreepKind::Townhall),
+        n if is_creep_tumor_name(n) => Some(CreepKind::Tumor),
+        _ => None,
+    }
+}
+
+/// Materializa `creep_index` a partir de `entity_events` para render
+/// O(log n) na aba Timeline. Identidade é por `tag` único — morphs
+/// in-place (Hatchery→Lair→Hive) reusam o mesmo tag, então geram uma
+/// única entry no índice. Isso impede que a mancha de creep "pisque"
+/// no instante do morph (quando `apply_type_change` emite um `Died`
+/// sintético do tipo antigo no mesmo loop do `Started` do novo).
+fn build_creep_index(player: &mut PlayerTimeline) {
+    // Set de (loop, tag) onde houve algum `ProductionStarted`. Usado
+    // pra distinguir o `Died` sintético de morph (tem Started companheiro
+    // no mesmo loop+tag) de uma morte real (não tem).
+    let mut starts_at_loop: HashSet<(u32, i64)> = HashSet::new();
+    for ev in &player.entity_events {
+        if matches!(ev.kind, EntityEventKind::ProductionStarted)
+            && classify_creep(&ev.entity_type).is_some()
+        {
+            starts_at_loop.insert((ev.game_loop, ev.tag));
+        }
+    }
+
+    let mut by_tag: HashMap<i64, usize> = HashMap::new();
+    for ev in &player.entity_events {
+        let kind = match classify_creep(&ev.entity_type) {
+            Some(k) => k,
+            None => continue,
+        };
+        match ev.kind {
+            EntityEventKind::ProductionFinished => {
+                if by_tag.contains_key(&ev.tag) {
+                    // Morph in-place — entry já existe. Não duplicar.
+                    continue;
+                }
+                let idx = player.creep_index.len();
+                player.creep_index.push(CreepEntry {
+                    tag: ev.tag,
+                    x: ev.pos_x,
+                    y: ev.pos_y,
+                    born_loop: ev.game_loop,
+                    died_loop: u32::MAX,
+                    kind,
+                });
+                by_tag.insert(ev.tag, idx);
+            }
+            EntityEventKind::Died | EntityEventKind::ProductionCancelled => {
+                // Filtra Died sintético de morph (Hatchery→Lair etc.):
+                // se há Started no mesmo loop+tag, é morph. Ignora.
+                if starts_at_loop.contains(&(ev.game_loop, ev.tag)) {
+                    continue;
+                }
+                if let Some(&idx) = by_tag.get(&ev.tag) {
+                    player.creep_index[idx].died_loop = ev.game_loop;
+                }
+            }
+            EntityEventKind::ProductionStarted => {}
+        }
+    }
+
+    // entity_events já é ordenado por game_loop, então as inserções
+    // acima saem ordenadas. Sort defensivo para garantir o invariante
+    // que o consumer (`partition_point` em `draw_creep`) depende.
+    player.creep_index.sort_by_key(|c| c.born_loop);
 }
