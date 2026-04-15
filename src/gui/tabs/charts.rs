@@ -12,6 +12,7 @@ use egui_plot::{GridMark, Legend, Line, Plot, PlotPoints, Polygon};
 
 use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
+use crate::locale::{t, tf, Language};
 use crate::production_efficiency::{EfficiencyTarget, ProductionEfficiencySeries};
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 
@@ -54,30 +55,33 @@ fn army_value_plot(
     show_army: &mut bool,
     show_workers: &mut bool,
 ) {
+    let lang = config.language;
     ui.horizontal(|ui| {
-        ui.heading("Army Value ao longo do tempo");
+        ui.heading(t("charts.army.title", lang));
         ui.add_space(16.0);
         // Impede desmarcar ambos: se um está desmarcado, o outro fica desabilitado
         let only_army = *show_army && !*show_workers;
         let only_workers = !*show_army && *show_workers;
+        let army_label = t("charts.army.show", lang);
+        let workers_label = t("charts.workers.show", lang);
         if only_army {
-            ui.add_enabled(false, egui::Checkbox::new(show_army, "Army"));
+            ui.add_enabled(false, egui::Checkbox::new(show_army, army_label));
         } else {
-            ui.checkbox(show_army, "Army");
+            ui.checkbox(show_army, army_label);
         }
         if only_workers {
-            ui.add_enabled(false, egui::Checkbox::new(show_workers, "Workers"));
+            ui.add_enabled(false, egui::Checkbox::new(show_workers, workers_label));
         } else {
-            ui.checkbox(show_workers, "Workers");
+            ui.checkbox(show_workers, workers_label);
         }
     });
 
     let Some(army) = loaded.army.as_ref() else {
-        ui.label(RichText::new("Dados de army value indisponíveis.").italics());
+        ui.label(RichText::new(t("charts.army.no_data", lang)).italics());
         return;
     };
     if army.players.is_empty() {
-        ui.label(RichText::new("Sem jogadores.").italics());
+        ui.label(RichText::new(t("charts.no_players", lang)).italics());
         return;
     }
 
@@ -122,8 +126,8 @@ fn army_value_plot(
         .legend(Legend::default())
         .height(360.0)
         .allow_boxed_zoom(true)
-        .x_axis_label("tempo")
-        .y_axis_label("army value")
+        .x_axis_label(t("charts.axis.time", lang))
+        .y_axis_label(t("charts.axis.army", lang))
         .x_axis_formatter(|mark: GridMark, _range| {
             let total_secs = mark.value as u32;
             format!("{}:{:02}", total_secs / 60, total_secs % 60)
@@ -158,7 +162,16 @@ fn army_value_plot(
                         let idx = snaps.partition_point(|(s, _, _)| *s <= t);
                         if idx > 0 { Some(&snaps[idx - 1]) } else { snaps.first() }
                     })
-                    .map(|(_, used, made)| format!("\nSupply: {used}/{made}"))
+                    .map(|(_, used, made)| {
+                        format!(
+                            "\n{}",
+                            tf(
+                                "charts.tooltip.supply_line",
+                                lang,
+                                &[("used", &used.to_string()), ("made", &made.to_string())],
+                            ),
+                        )
+                    })
                     .unwrap_or_default()
             } else {
                 String::new()
@@ -169,13 +182,37 @@ fn army_value_plot(
                 .filter(|(_, ivs)| ivs.iter().any(|&(s, e)| t >= s && t <= e))
                 .map(|(n, _)| n.as_str())
                 .collect();
+            let ss_str = format!("{ss:02}");
             let mut text = if !name.is_empty() {
-                format!("{name}\nTempo: {mm}:{ss:02}\nArmy Value: {val_fmt}{supply_str}")
+                let base = tf(
+                    "charts.tooltip.army_named",
+                    lang,
+                    &[
+                        ("name", name),
+                        ("mm", &mm.to_string()),
+                        ("ss", &ss_str),
+                        ("value", &val_fmt),
+                    ],
+                );
+                format!("{base}{supply_str}")
             } else {
-                format!("Tempo: {mm}:{ss:02}\nArmy Value: {val_fmt}")
+                tf(
+                    "charts.tooltip.army_anon",
+                    lang,
+                    &[
+                        ("mm", &mm.to_string()),
+                        ("ss", &ss_str),
+                        ("value", &val_fmt),
+                    ],
+                )
             };
             for who in &blocked {
-                text.push_str(&format!("\n⚠ {who} supply blocked"));
+                text.push('\n');
+                text.push_str(&tf(
+                    "charts.tooltip.supply_blocked",
+                    lang,
+                    &[("who", who)],
+                ));
             }
             text
         })
@@ -247,11 +284,12 @@ fn efficiency_plot(
     config: &AppConfig,
     target: &mut EfficiencyTarget,
 ) {
+    let lang = config.language;
     ui.horizontal(|ui| {
-        ui.heading("Eficiência de Produção");
+        ui.heading(t("charts.efficiency.title", lang));
         ui.add_space(16.0);
-        ui.radio_value(target, EfficiencyTarget::Workers, "Workers");
-        ui.radio_value(target, EfficiencyTarget::Army, "Army");
+        ui.radio_value(target, EfficiencyTarget::Workers, t("charts.workers.show", lang));
+        ui.radio_value(target, EfficiencyTarget::Army, t("charts.army.show", lang));
     });
 
     let series_opt: Option<&ProductionEfficiencySeries> = match *target {
@@ -259,11 +297,11 @@ fn efficiency_plot(
         EfficiencyTarget::Army => loaded.efficiency_army.as_ref(),
     };
     let Some(series) = series_opt else {
-        ui.label(RichText::new("Dados de eficiência indisponíveis.").italics());
+        ui.label(RichText::new(t("charts.efficiency.no_data", lang)).italics());
         return;
     };
     if series.players.is_empty() {
-        ui.label(RichText::new("Sem jogadores.").italics());
+        ui.label(RichText::new(t("charts.no_players", lang)).italics());
         return;
     }
 
@@ -273,7 +311,11 @@ fn efficiency_plot(
     for p in &series.players {
         if p.is_zerg {
             ui.label(
-                RichText::new(format!("{}: Zerg (em breve)", p.name))
+                RichText::new(tf(
+                    "charts.efficiency.zerg_tbd",
+                    lang,
+                    &[("player", &p.name)],
+                ))
                     .italics()
                     .small(),
             );
@@ -286,23 +328,35 @@ fn efficiency_plot(
         .allow_boxed_zoom(true)
         .include_y(0.0)
         .include_y(100.0)
-        .x_axis_label("tempo")
-        .y_axis_label("eficiência (%)")
+        .x_axis_label(t("charts.axis.time", lang))
+        .y_axis_label(t("charts.axis.efficiency", lang))
         .x_axis_formatter(|mark: GridMark, _range| {
             let total_secs = mark.value as u32;
             format!("{}:{:02}", total_secs / 60, total_secs % 60)
         })
         .y_axis_formatter(|mark: GridMark, _range| format!("{}%", mark.value as i32))
-        .label_formatter(|name, point| {
+        .label_formatter(move |name, point| {
             let secs = point.x as u32;
             let mm = secs / 60;
             let ss = secs % 60;
+            let ss_str = format!("{ss:02}");
+            let pct = format!("{:.1}", point.y);
             if name.is_empty() {
-                format!("Tempo: {mm}:{ss:02}\nEficiência: {:.1}%", point.y)
+                tf(
+                    "charts.tooltip.efficiency_anon",
+                    lang,
+                    &[("mm", &mm.to_string()), ("ss", &ss_str), ("pct", &pct)],
+                )
             } else {
-                format!(
-                    "{name}\nTempo: {mm}:{ss:02}\nEficiência: {:.1}%",
-                    point.y
+                tf(
+                    "charts.tooltip.efficiency_named",
+                    lang,
+                    &[
+                        ("name", name),
+                        ("mm", &mm.to_string()),
+                        ("ss", &ss_str),
+                        ("pct", &pct),
+                    ],
                 )
             }
         })
@@ -326,9 +380,10 @@ fn efficiency_plot(
 }
 
 fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
+    let lang = config.language;
     ui.columns(2, |cols| {
         // Card 1: supply blocks
-        card(&mut cols[0], "Supply Blocks", |ui| {
+        card(&mut cols[0], t("charts.card.supply_blocks", lang), |ui| {
             let lps = loaded.timeline.loops_per_second.max(0.0001);
             for (idx, p) in loaded.timeline.players.iter().enumerate() {
                 let blocks = loaded
@@ -344,14 +399,19 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     ui,
                     &p.name,
                     idx,
-                    &format!("{count} ({}s)", total_secs),
+                    &tf(
+                        "charts.supply_block.summary",
+                        lang,
+                        &[("count", &count.to_string()), ("secs", &total_secs.to_string())],
+                    ),
                     config.is_user(&p.name),
+                    lang,
                 );
             }
         });
 
         // Card 2: production gap / efficiency
-        card(&mut cols[1], "Eficiência Produção", |ui| {
+        card(&mut cols[1], t("charts.card.production_efficiency", lang), |ui| {
             if let Some(pg) = loaded.production.as_ref() {
                 for (idx, p) in pg.players.iter().enumerate() {
                     player_line(
@@ -360,10 +420,11 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                         idx,
                         &format!("{:.1}%", p.efficiency_pct),
                         config.is_user(&p.name),
+                        lang,
                     );
                 }
             } else {
-                ui.small("—");
+                ui.small(t("charts.card.empty", lang));
             }
         });
     });
@@ -378,10 +439,10 @@ fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn player_line(ui: &mut Ui, name: &str, index: usize, value: &str, is_user: bool) {
+fn player_line(ui: &mut Ui, name: &str, index: usize, value: &str, is_user: bool, lang: Language) {
     ui.horizontal(|ui| {
         // Nome colorido com a cor do slot (P1 vermelho, P2 azul). Se é
-        // o usuário, adiciona um chip "Você" discreto logo depois —
+        // o usuário, adiciona um chip "You" discreto logo depois —
         // sem sequestrar a cor do nome, que pertence ao slot.
         let name_text = RichText::new(name)
             .small()
@@ -390,7 +451,7 @@ fn player_line(ui: &mut Ui, name: &str, index: usize, value: &str, is_user: bool
         ui.label(name_text);
         if is_user {
             ui.label(
-                RichText::new(" Você ")
+                RichText::new(format!("{} ", t("charts.you_chip", lang)))
                     .small()
                     .color(USER_CHIP_FG)
                     .background_color(USER_CHIP_BG),

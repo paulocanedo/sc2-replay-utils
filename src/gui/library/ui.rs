@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use egui::{Color32, Context, RichText, ScrollArea, Sense, Ui};
 
 use crate::config::AppConfig;
+use crate::locale::{t, tf};
 
 use super::date::{matches_date_range, today_str};
 use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder};
@@ -29,21 +30,34 @@ pub fn show(
     filter: &mut LibraryFilter,
 ) -> LibraryAction {
     let mut action = LibraryAction::None;
+    let lang = config.language;
 
     // ── Header ───────────────────────────────────────────────────────
     ui.horizontal(|ui| {
-        ui.heading("Biblioteca");
+        ui.heading(t("library.title", lang));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("↻").on_hover_text("Recarregar lista").clicked() {
+            if ui
+                .small_button("↻")
+                .on_hover_text(t("library.reload_tooltip", lang))
+                .clicked()
+            {
                 action = LibraryAction::Refresh;
             }
-            if ui.small_button("🔎").on_hover_text("Zoom / configurações").clicked() {}
-            if ui.small_button("✏").on_hover_text("Renomear replays em lote").clicked() {
+            if ui
+                .small_button("🔎")
+                .on_hover_text(t("library.zoom_tooltip", lang))
+                .clicked()
+            {}
+            if ui
+                .small_button("✏")
+                .on_hover_text(t("library.rename_tooltip", lang))
+                .clicked()
+            {
                 action = LibraryAction::OpenRename;
             }
             if ui
                 .small_button("📂")
-                .on_hover_text("Escolher diretório de trabalho")
+                .on_hover_text(t("library.pick_dir_tooltip", lang))
                 .clicked()
             {
                 if let Some(p) = rfd::FileDialog::new().pick_folder() {
@@ -61,7 +75,7 @@ pub fn show(
             );
         }
         None => {
-            ui.small(RichText::new("Diretório não definido").italics());
+            ui.small(RichText::new(t("library.dir_unset", lang)).italics());
         }
     }
 
@@ -72,7 +86,7 @@ pub fn show(
         ui.label("🔎");
         let resp = ui.add(
             egui::TextEdit::singleline(&mut filter.search)
-                .hint_text("Buscar jogador, mapa ou matchup…")
+                .hint_text(t("library.search_placeholder", lang))
                 .desired_width(ui.available_width() - 150.0),
         );
         if !filter.search.is_empty() && resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -81,32 +95,56 @@ pub fn show(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let total = library.entries.len();
-            let sort_label = match filter.sort {
-                SortOrder::Date => "Data",
-                SortOrder::Duration => "Duração",
-                SortOrder::Mmr => "MMR",
-                SortOrder::Map => "Mapa",
-            };
             let arrow = if filter.sort_ascending { "↑" } else { "↓" };
             egui::ComboBox::from_id_salt("library_sort")
-                .selected_text(format!("{total} replays {arrow}"))
+                .selected_text(tf(
+                    "library.sort.total_count",
+                    lang,
+                    &[("total", &total.to_string()), ("arrow", arrow)],
+                ))
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut filter.sort, SortOrder::Date, "Data");
-                    ui.selectable_value(&mut filter.sort, SortOrder::Duration, "Duração");
-                    ui.selectable_value(&mut filter.sort, SortOrder::Mmr, "MMR");
-                    ui.selectable_value(&mut filter.sort, SortOrder::Map, "Mapa");
+                    ui.selectable_value(
+                        &mut filter.sort,
+                        SortOrder::Date,
+                        t("library.sort.date", lang),
+                    );
+                    ui.selectable_value(
+                        &mut filter.sort,
+                        SortOrder::Duration,
+                        t("library.sort.duration", lang),
+                    );
+                    ui.selectable_value(
+                        &mut filter.sort,
+                        SortOrder::Mmr,
+                        t("library.sort.mmr", lang),
+                    );
+                    ui.selectable_value(
+                        &mut filter.sort,
+                        SortOrder::Map,
+                        t("library.sort.map", lang),
+                    );
                     ui.separator();
-                    let asc_label = if filter.sort_ascending { "▸ Crescente" } else { "  Crescente" };
-                    let desc_label = if !filter.sort_ascending { "▸ Decrescente" } else { "  Decrescente" };
+                    let asc_label = if filter.sort_ascending {
+                        t("library.sort.ascending_marked", lang)
+                    } else {
+                        t("library.sort.ascending_unmarked", lang)
+                    };
+                    let desc_label = if !filter.sort_ascending {
+                        t("library.sort.descending_marked", lang)
+                    } else {
+                        t("library.sort.descending_unmarked", lang)
+                    };
                     if ui.selectable_label(filter.sort_ascending, asc_label).clicked() {
                         filter.sort_ascending = true;
                     }
-                    if ui.selectable_label(!filter.sort_ascending, desc_label).clicked() {
+                    if ui
+                        .selectable_label(!filter.sort_ascending, desc_label)
+                        .clicked()
+                    {
                         filter.sort_ascending = false;
                     }
                 });
-            let _ = sort_label; // utilizado no ComboBox acima
         });
     });
 
@@ -120,7 +158,7 @@ pub fn show(
         let todos_active = filter.race.is_none()
             && filter.outcome == OutcomeFilter::All
             && filter.date_range == DateRange::All;
-        if chip(ui, "Todos", todos_active, None).clicked() {
+        if chip(ui, t("library.filter.all", lang), todos_active, None).clicked() {
             filter.race = None;
             filter.outcome = OutcomeFilter::All;
             filter.date_range = DateRange::All;
@@ -129,9 +167,9 @@ pub fn show(
         ui.add_space(4.0);
 
         for (label, letter, color) in [
-            ("Terran", 'T', RACE_COLOR_TERRAN),
-            ("Protoss", 'P', RACE_COLOR_PROTOSS),
-            ("Zerg", 'Z', RACE_COLOR_ZERG),
+            (t("race.terran", lang), 'T', RACE_COLOR_TERRAN),
+            (t("race.protoss", lang), 'P', RACE_COLOR_PROTOSS),
+            (t("race.zerg", lang), 'Z', RACE_COLOR_ZERG),
         ] {
             let selected = filter.race == Some(letter);
             let resp = chip(ui, label, selected, Some(color));
@@ -139,38 +177,48 @@ pub fn show(
                 filter.race = if selected { None } else { Some(letter) };
             }
             if !has_nicknames {
-                resp.on_hover_text("Configure seus nicknames para filtrar por raça");
+                resp.on_hover_text(t("library.filter.nicknames_race_tooltip", lang));
             }
         }
 
         ui.add_space(4.0);
 
         let wins_selected = filter.outcome == OutcomeFilter::Wins;
-        let resp = chip(ui, "Vitórias", wins_selected, Some(Color32::from_rgb(80, 180, 80)));
+        let resp = chip(
+            ui,
+            t("library.filter.wins", lang),
+            wins_selected,
+            Some(Color32::from_rgb(80, 180, 80)),
+        );
         if resp.clicked() && has_nicknames {
             filter.outcome = if wins_selected { OutcomeFilter::All } else { OutcomeFilter::Wins };
         }
         if !has_nicknames {
-            resp.on_hover_text("Configure seus nicknames para filtrar por resultado");
+            resp.on_hover_text(t("library.filter.nicknames_outcome_tooltip", lang));
         }
 
         let losses_selected = filter.outcome == OutcomeFilter::Losses;
-        let resp = chip(ui, "Derrotas", losses_selected, Some(Color32::from_rgb(180, 80, 80)));
+        let resp = chip(
+            ui,
+            t("library.filter.losses", lang),
+            losses_selected,
+            Some(Color32::from_rgb(180, 80, 80)),
+        );
         if resp.clicked() && has_nicknames {
             filter.outcome = if losses_selected { OutcomeFilter::All } else { OutcomeFilter::Losses };
         }
         if !has_nicknames {
-            resp.on_hover_text("Configure seus nicknames para filtrar por resultado");
+            resp.on_hover_text(t("library.filter.nicknames_outcome_tooltip", lang));
         }
 
         ui.add_space(4.0);
 
         let prev_date_range = filter.date_range;
         let date_label = match filter.date_range {
-            DateRange::All => "Sempre",
-            DateRange::Today => "Hoje",
-            DateRange::ThisWeek => "Semana",
-            DateRange::ThisMonth => "Mês",
+            DateRange::All => t("library.date.always", lang),
+            DateRange::Today => t("library.date.today", lang),
+            DateRange::ThisWeek => t("library.date.week", lang),
+            DateRange::ThisMonth => t("library.date.month", lang),
         };
         let date_active = filter.date_range != DateRange::All;
         let date_text_color = if date_active { Color32::WHITE } else { Color32::from_gray(160) };
@@ -178,10 +226,26 @@ pub fn show(
             .selected_text(RichText::new(format!("{date_label} ▾")).color(date_text_color).small())
             .width(80.0)
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut filter.date_range, DateRange::All, "Sempre");
-                ui.selectable_value(&mut filter.date_range, DateRange::Today, "Hoje");
-                ui.selectable_value(&mut filter.date_range, DateRange::ThisWeek, "Esta semana");
-                ui.selectable_value(&mut filter.date_range, DateRange::ThisMonth, "Este mês");
+                ui.selectable_value(
+                    &mut filter.date_range,
+                    DateRange::All,
+                    t("library.date.always_full", lang),
+                );
+                ui.selectable_value(
+                    &mut filter.date_range,
+                    DateRange::Today,
+                    t("library.date.today_full", lang),
+                );
+                ui.selectable_value(
+                    &mut filter.date_range,
+                    DateRange::ThisWeek,
+                    t("library.date.this_week", lang),
+                );
+                ui.selectable_value(
+                    &mut filter.date_range,
+                    DateRange::ThisMonth,
+                    t("library.date.this_month", lang),
+                );
             });
         if filter.date_range != prev_date_range {
             action = LibraryAction::SaveDateRange(filter.date_range);
@@ -193,13 +257,24 @@ pub fn show(
     // ── Status ───────────────────────────────────────────────────────
     if library.scanning {
         ui.small(
-            RichText::new(format!("🔍 varrendo pasta… {} encontrados", library.entries.len()))
-                .italics(),
+            RichText::new(tf(
+                "library.scanning",
+                lang,
+                &[("found", &library.entries.len().to_string())],
+            ))
+            .italics(),
         );
     } else {
         let pending = library.pending_count();
         if pending > 0 {
-            ui.small(format!("🔄 {pending}/{} lendo metadados…", library.entries.len()));
+            ui.small(tf(
+                "library.parsing",
+                lang,
+                &[
+                    ("pending", &pending.to_string()),
+                    ("total", &library.entries.len().to_string()),
+                ],
+            ));
         }
     }
 
@@ -207,12 +282,7 @@ pub fn show(
 
     if library.entries.is_empty() && library.working_dir.is_none() {
         ui.add_space(12.0);
-        ui.label(
-            RichText::new(
-                "Defina um 'Diretório de trabalho' (botão 📂 acima ou em Configurações) para listar seus replays aqui.",
-            )
-            .italics(),
-        );
+        ui.label(RichText::new(t("library.setup_hint", lang)).italics());
         return action;
     }
 
@@ -315,7 +385,7 @@ pub fn show(
     if any_filter_active && shown == 0 {
         ui.add_space(8.0);
         ui.label(
-            RichText::new("Nenhum replay corresponde ao filtro.")
+            RichText::new(t("library.no_match", lang))
                 .italics()
                 .color(Color32::from_gray(160)),
         );
@@ -324,8 +394,15 @@ pub fn show(
 
     if any_filter_active {
         ui.small(
-            RichText::new(format!("🔎 {shown}/{} correspondem ao filtro", library.entries.len()))
-                .color(Color32::from_gray(140)),
+            RichText::new(tf(
+                "library.filter_status",
+                lang,
+                &[
+                    ("shown", &shown.to_string()),
+                    ("total", &library.entries.len().to_string()),
+                ],
+            ))
+            .color(Color32::from_gray(140)),
         );
     }
 
@@ -485,6 +562,7 @@ fn entry_row(
     config: &AppConfig,
     row_h: f32,
 ) -> bool {
+    let lang = config.language;
     let loadable = entry.meta.is_loadable();
     let fill = if is_current {
         Color32::from_rgb(24, 48, 24)
@@ -587,7 +665,8 @@ fn entry_row(
                                 // Botão "abrir"
                                 let btn = ui.add(
                                     egui::Button::new(
-                                        RichText::new("abrir").color(Color32::from_gray(180)),
+                                        RichText::new(t("library.entry.open", lang))
+                                            .color(Color32::from_gray(180)),
                                     )
                                     .fill(Color32::from_gray(45))
                                     .corner_radius(4.0),
@@ -633,7 +712,7 @@ fn entry_row(
                 }
                 MetaState::Pending => {
                     ui.label(RichText::new(&entry.filename).monospace());
-                    ui.small(RichText::new("lendo metadados…").italics());
+                    ui.small(RichText::new(t("library.entry.parsing", lang)).italics());
                 }
                 MetaState::Unsupported(reason) => {
                     ui.label(
@@ -642,15 +721,19 @@ fn entry_row(
                             .color(Color32::from_gray(140)),
                     );
                     ui.small(
-                        RichText::new(format!("⚠ não suportado: {reason}"))
-                            .color(Color32::from_rgb(210, 170, 60))
-                            .italics(),
+                        RichText::new(tf(
+                            "library.entry.unsupported",
+                            lang,
+                            &[("reason", reason)],
+                        ))
+                        .color(Color32::from_rgb(210, 170, 60))
+                        .italics(),
                     );
                 }
                 MetaState::Failed(err) => {
                     ui.label(RichText::new(&entry.filename).monospace());
                     ui.small(
-                        RichText::new(format!("falha: {err}"))
+                        RichText::new(tf("library.entry.failed", lang, &[("err", err)]))
                             .color(Color32::LIGHT_RED)
                             .italics(),
                     );

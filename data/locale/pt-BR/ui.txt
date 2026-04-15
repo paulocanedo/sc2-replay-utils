@@ -1,0 +1,280 @@
+# Strings de UI — Português (Brasil)
+#
+# Formato: chave=valor (uma por linha). Linhas em branco e começando
+# com `#` são ignoradas. Placeholders usam `{nome}`; veja
+# src/gui/locale.rs::tf.
+#
+# Seções seguem a organização dos módulos da GUI.
+
+# ── App shell ───────────────────────────────────────────────────────────────
+app.title = sc2-replay-utils
+app.status.no_replay = (nenhum replay carregado)
+app.status.watching = Observando: {dir}
+
+# ── Menu bar ────────────────────────────────────────────────────────────────
+menu.file = Arquivo
+menu.file.open = Abrir replay…
+menu.file.load_latest = Carregar mais recente
+menu.file.quit = Sair
+menu.view = Exibir
+menu.view.library = Biblioteca
+menu.view.analysis = Análise
+menu.view.rename = Renomear
+menu.view.settings = Configurações…
+menu.help = Ajuda
+menu.help.about = Sobre
+
+# ── Diálogos de arquivo ─────────────────────────────────────────────────────
+dialog.filter.sc2_replay = SC2 Replay
+
+# ── Replay bar (tela de análise) ────────────────────────────────────────────
+replay_bar.back_tooltip = Voltar para a biblioteca de replays
+replay_bar.open = Abrir replay…
+
+# ── Rename bar ──────────────────────────────────────────────────────────────
+rename_bar.title = Renomear Replays em Lote
+
+# ── Diálogo Sobre ───────────────────────────────────────────────────────────
+about.title = Sobre
+about.description = Ferramenta de análise de replays de StarCraft II
+about.author_label = Autor
+about.author_name = Paulo Canedo
+about.tech_label = Tecnologias
+about.tech_value = Rust · egui · s2protocol
+about.version = v{version}
+about.close = Fechar
+
+# ── Toasts / erros ──────────────────────────────────────────────────────────
+toast.no_working_dir = Diretório de trabalho não definido (veja Configurações).
+toast.no_replays_found = Nenhum replay encontrado em {dir}
+toast.new_replay_loaded = Novo replay carregado: {file}
+toast.new_replay_available = Novo replay disponível: {file} — Arquivo → Carregar mais recente
+toast.settings_saved = Configurações salvas.
+toast.save_error = Erro ao salvar: {err}
+toast.save_config_error = Erro ao salvar config: {err}
+error.load_failed = Erro ao carregar {path}: {err}
+
+# ── Estado vazio ────────────────────────────────────────────────────────────
+empty.heading = Nenhum replay carregado
+empty.hint = Use Arquivo → Abrir replay… ou habilite o file watcher em Configurações para auto-carregar replays novos.
+
+# ── Sidebar (painel direito na análise) ─────────────────────────────────────
+sidebar.summary = Resumo
+sidebar.players = Jogadores
+sidebar.details = Detalhes
+sidebar.detail.start = Início
+sidebar.detail.loops = Loops
+sidebar.detail.speed = Veloc.
+sidebar.speed_value = {value} loops/s
+sidebar.you_chip =  VOCÊ
+
+# Nomes completos das raças exibidos abaixo do nome do jogador.
+race.terran = Terran
+race.protoss = Protoss
+race.zerg = Zerg
+
+# ── Seletor de idioma (primeira execução) ───────────────────────────────────
+language_prompt.title = Language / Idioma
+language_prompt.description = Choose your preferred language / Escolha seu idioma preferido
+language_prompt.confirm = Continue / Continuar
+
+# ── Janela de Configurações ─────────────────────────────────────────────────
+settings.title = Configurações
+settings.section.folders = Pastas
+settings.working_dir.label = Diretório de trabalho:
+settings.working_dir.desc = Pasta onde o app procura, lista e observa seus replays. Se vazio, o app usa o diretório do SC2 detectado automaticamente.
+settings.working_dir.auto = (auto: SC2 detectado)
+settings.working_dir.unset = (não definido)
+settings.working_dir.choose = Escolher…
+settings.working_dir.detect = Detectar SC2
+settings.working_dir.detect_ok_tooltip = Usar {dir}
+settings.working_dir.detect_fail_tooltip = Não foi possível detectar o diretório do SC2
+settings.working_dir.clear = Limpar
+settings.section.nicknames = Nicknames do usuário
+settings.nicknames.desc = Replays com estes nicks serão destacados como 'Você' na UI.
+settings.nicknames.empty = (nenhum nickname cadastrado)
+settings.nicknames.remove_tooltip = Remover
+settings.nicknames.add_placeholder = Adicionar nickname…
+settings.nicknames.add = Adicionar
+settings.section.behavior = Comportamento
+settings.max_time.label = max_time padrão (s, 0 = sem limite):
+settings.auto_load_latest = Carregar replay mais recente ao abrir
+settings.watch_replays = Observar pasta do SC2 (file watcher)
+settings.auto_load_new = Carregar automaticamente quando surgir novo replay
+settings.section.language = Idioma
+settings.language.label = Idioma do aplicativo:
+settings.section.appearance = Aparência
+settings.dark_mode = Tema escuro
+settings.font_size.label = Tamanho da fonte (pt):
+settings.font_size.desc = Tamanho em pontos lógicos. HiDPI é tratado automaticamente pelo sistema.
+settings.save = Salvar
+settings.reset_defaults = Restaurar padrões
+settings.file_path = Arquivo: {path}
+
+# ── Biblioteca ──────────────────────────────────────────────────────────────
+library.title = Biblioteca
+library.reload_tooltip = Recarregar lista
+library.zoom_tooltip = Zoom / configurações
+library.rename_tooltip = Renomear replays em lote
+library.pick_dir_tooltip = Escolher diretório de trabalho
+library.dir_unset = Diretório não definido
+library.search_placeholder = Buscar jogador, mapa ou matchup…
+library.sort.date = Data
+library.sort.duration = Duração
+library.sort.mmr = MMR
+library.sort.map = Mapa
+library.sort.total_count = {total} replays {arrow}
+library.sort.ascending_marked = ▸ Crescente
+library.sort.ascending_unmarked =   Crescente
+library.sort.descending_marked = ▸ Decrescente
+library.sort.descending_unmarked =   Decrescente
+library.filter.all = Todos
+library.filter.nicknames_race_tooltip = Configure seus nicknames para filtrar por raça
+library.filter.wins = Vitórias
+library.filter.losses = Derrotas
+library.filter.nicknames_outcome_tooltip = Configure seus nicknames para filtrar por resultado
+library.date.always = Sempre
+library.date.today = Hoje
+library.date.week = Semana
+library.date.month = Mês
+library.date.always_full = Sempre
+library.date.today_full = Hoje
+library.date.this_week = Esta semana
+library.date.this_month = Este mês
+library.scanning = 🔍 varrendo pasta… {found} encontrados
+library.parsing = 🔄 {pending}/{total} lendo metadados…
+library.setup_hint = Defina um 'Diretório de trabalho' (botão 📂 acima ou em Configurações) para listar seus replays aqui.
+library.no_match = Nenhum replay corresponde ao filtro.
+library.filter_status = 🔎 {shown}/{total} correspondem ao filtro
+library.entry.parsing = lendo metadados…
+library.entry.unsupported = ⚠ não suportado: {reason}
+library.entry.failed = falha: {err}
+library.entry.open = abrir
+
+# ── Abas ────────────────────────────────────────────────────────────────────
+tab.timeline = Timeline
+tab.build_order = Build Order
+tab.charts = Gráficos
+tab.chat = Chat
+
+# ── Aba Build Order ─────────────────────────────────────────────────────────
+build_order.search_placeholder = 🔎  buscar ação... (ex: Marine, Stimpack)
+build_order.filter.workers = Workers
+build_order.filter.units = Unidades
+build_order.filter.structures = Estruturas
+build_order.filter.research = Pesquisa
+build_order.filter.upgrades = Upgrades
+build_order.filter.injects = Injects
+build_order.salt.title = SALT Encoding — {player}
+build_order.salt.desc = Copie a string abaixo para importar em ferramentas como Spawning Tool, Embot Advanced ou SC2 Scrapbook.
+build_order.salt.copy = 📋 Copiar para área de transferência
+build_order.legend.chrono = chrono
+build_order.legend.cancelled = cancelado
+build_order.legend.destroyed = destruído
+build_order.copy_tooltip = Copiar build order para a área de transferência
+build_order.salt_button_tooltip = Gerar SALT Encoding
+build_order.empty_entries = (nenhuma entrada)
+build_order.col.start = início
+build_order.col.end = fim
+build_order.col.supply = supply
+build_order.col.action = ação
+build_order.col.type = tipo
+build_order.outcome.cancelled = cancelado pelo jogador
+build_order.outcome.destroyed = destruído durante a construção
+build_order.unavailable = Build Order não disponível para este replay.
+build_order.no_players = Nenhum jogador encontrado.
+build_order.no_match = (nada corresponde aos filtros)
+build_order.clipboard.header = tipo  início  fim     supply  ação
+build_order.clipboard.cancelled_mark =  [cancelado]
+build_order.clipboard.destroyed_mark =  [destruído]
+build_order.chrono_tooltip = Chrono Boost ×{count}
+
+# Nomes completos das categorias de entrada.
+entrykind.worker = Worker
+entrykind.unit = Unidade
+entrykind.structure = Estrutura
+entrykind.research = Pesquisa
+entrykind.upgrade = Upgrade
+entrykind.inject = Inject
+
+# ── Aba Chat ────────────────────────────────────────────────────────────────
+chat.no_events = Sem eventos de chat neste replay.
+chat.no_messages = Nenhuma mensagem de chat neste replay.
+chat.heading = Chat ({count} mensagens)
+chat.subheading = Clique em uma linha para destacar — funcionalidade virá em iterações futuras.
+chat.recipient = (→ {to})
+chat.you_chip =  Você
+
+# ── Aba Gráficos ────────────────────────────────────────────────────────────
+charts.army.title = Army Value ao longo do tempo
+charts.army.show = Army
+charts.workers.show = Workers
+charts.army.no_data = Dados de army value indisponíveis.
+charts.no_players = Sem jogadores.
+charts.axis.time = tempo
+charts.axis.army = army value
+charts.tooltip.supply_blocked = ⚠ {who} supply blocked
+charts.tooltip.time = Tempo: {mm}:{ss}
+charts.tooltip.army_named = {name}\nTempo: {mm}:{ss}\nArmy Value: {value}
+charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
+charts.tooltip.supply_line = Supply: {used}/{made}
+charts.efficiency.title = Eficiência de Produção
+charts.efficiency.no_data = Dados de eficiência indisponíveis.
+charts.efficiency.zerg_tbd = {player}: Zerg (em breve)
+charts.axis.efficiency = eficiência (%)
+charts.tooltip.efficiency_named = {name}\nTempo: {mm}:{ss}\nEficiência: {pct}%
+charts.tooltip.efficiency_anon = Tempo: {mm}:{ss}\nEficiência: {pct}%
+charts.card.supply_blocks = Supply Blocks
+charts.card.production_efficiency = Eficiência Produção
+charts.card.empty = —
+charts.supply_block.summary = {count} ({secs}s)
+charts.you_chip =  Você
+
+# ── Aba Timeline ────────────────────────────────────────────────────────────
+timeline.toggle.heatmap = Heatmap
+timeline.toggle.creep = Creep
+timeline.toggle.map = Map
+timeline.stats.supply = {used}/{cap} supply
+timeline.stats.minerals = {val} min
+timeline.stats.gas = {val} gas
+timeline.stats.workers = {val} wks
+timeline.stats.army = {val} army
+timeline.stats.bldg_focus_none = — bldg focus
+timeline.stats.bldg_focus = {pct}% bldg focus
+
+# ── Tela Renomear ───────────────────────────────────────────────────────────
+rename.heading = Renomear Replays em Lote
+rename.template_label = Template de nome:
+rename.vars_header = Variáveis disponíveis
+rename.var.datetime = Data/hora compacta (YYYYMMDDHHMM)
+rename.var.map = Nome do mapa (sanitizado)
+rename.var.p1 = Nome do jogador 1 (sanitizado)
+rename.var.p2 = Nome do jogador 2 (sanitizado)
+rename.var.r1 = Raça do jogador 1 (T, P, Z ou R)
+rename.var.r2 = Raça do jogador 2 (T, P, Z ou R)
+rename.var.loops = Total de game loops
+rename.var.duration = Duração da partida (MMmSSs)
+rename.note_special = Caracteres especiais em nomes de jogadores e mapas são substituídos por '_'.
+rename.note_ext = A extensão .SC2Replay é adicionada automaticamente.
+rename.total = {count} replays serão renomeados
+rename.skipped = ({count} ignorados — pendentes ou não-1v1)
+rename.execute = Renomear Tudo…
+rename.execute_tooltip = Escolha a pasta de destino para copiar os replays renomeados
+rename.status.ok = {count} replays copiados para {dir}
+rename.status.mkdir_err = Erro ao criar diretório: {err}
+rename.status.partial = {ok} copiados, {errors} erros:
+rename.status.error_marker = erros
+
+# Abreviações de mês usadas no formato curto da sidebar.
+month.01 = jan
+month.02 = fev
+month.03 = mar
+month.04 = abr
+month.05 = mai
+month.06 = jun
+month.07 = jul
+month.08 = ago
+month.09 = set
+month.10 = out
+month.11 = nov
+month.12 = dez

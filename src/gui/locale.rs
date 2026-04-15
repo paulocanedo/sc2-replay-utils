@@ -1,25 +1,29 @@
-// Localização de nomes de unidades, estruturas e pesquisas do SC2.
+// Localization for both unit/structure names (from SC2 MPQ keys) and UI
+// strings (menus, buttons, labels, tooltips, toasts).
 //
-// Carrega arquivos de texto puro `data/locale/<lang>.txt` embutidos em
-// compile-time via `include_str!`. Cada arquivo contém linhas no formato:
+// Two flat `key=value` tables per language are embedded at compile time:
 //
-//   ChaveMpq=Nome Exibido
+//   data/locale/<lang>/units.txt  — MPQ key → unit/structure/research name
+//   data/locale/<lang>/ui.txt     — dotted UI key → display text
 //
-// Linhas vazias e linhas começando com `#` são ignoradas.
+// Lines starting with `#` and blank lines are ignored. UI values may
+// contain `{name}` placeholders, substituted at runtime by `tf()`.
 //
-// Fallback: idioma atual → inglês → chave MPQ crua (passthrough).
+// Fallback chain for both tables: current language → English → raw key.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-// ── Arquivos de locale embutidos ────────────────────────────────────
-const EN_RAW: &str = include_str!("../../data/locale/en.txt");
-const PT_BR_RAW: &str = include_str!("../../data/locale/pt-BR.txt");
+// ── Embedded locale files ───────────────────────────────────────────
+const EN_UNITS_RAW: &str = include_str!("../../data/locale/en/units.txt");
+const PT_BR_UNITS_RAW: &str = include_str!("../../data/locale/pt-BR/units.txt");
+const EN_UI_RAW: &str = include_str!("../../data/locale/en/ui.txt");
+const PT_BR_UI_RAW: &str = include_str!("../../data/locale/pt-BR/ui.txt");
 
-/// Idiomas suportados. O valor de cada variante deve bater com o nome
-/// do arquivo (sem extensão) em `data/locale/`.
+/// Supported languages. The enum name maps to the directory under
+/// `data/locale/` via `Language::dir()`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Language {
     #[default]
@@ -28,7 +32,8 @@ pub enum Language {
 }
 
 impl Language {
-    /// Label exibido no combo-box de seleção de idioma.
+    /// Label shown in the language combobox (stays in its native form
+    /// so users can recognize their own language).
     pub fn label(self) -> &'static str {
         match self {
             Language::English => "English",
@@ -36,62 +41,123 @@ impl Language {
         }
     }
 
-    /// Todas as variantes, na ordem do combo-box.
+    /// All supported languages, in display order.
     pub fn all() -> &'static [Language] {
         &[Language::English, Language::PortugueseBR]
     }
 }
 
-// ── Tabelas parseadas (lazy, uma única vez) ─────────────────────────
+// ── Parsed tables (lazy, once) ──────────────────────────────────────
 type Table = HashMap<&'static str, &'static str>;
 
-fn en_table() -> &'static Table {
+fn en_units() -> &'static Table {
     static T: OnceLock<Table> = OnceLock::new();
-    T.get_or_init(|| parse(EN_RAW))
+    T.get_or_init(|| parse(EN_UNITS_RAW))
 }
 
-fn pt_br_table() -> &'static Table {
+fn pt_br_units() -> &'static Table {
     static T: OnceLock<Table> = OnceLock::new();
-    T.get_or_init(|| parse(PT_BR_RAW))
+    T.get_or_init(|| parse(PT_BR_UNITS_RAW))
 }
 
-fn table_for(lang: Language) -> &'static Table {
+fn en_ui() -> &'static Table {
+    static T: OnceLock<Table> = OnceLock::new();
+    T.get_or_init(|| parse(EN_UI_RAW))
+}
+
+fn pt_br_ui() -> &'static Table {
+    static T: OnceLock<Table> = OnceLock::new();
+    T.get_or_init(|| parse(PT_BR_UI_RAW))
+}
+
+fn units_for(lang: Language) -> &'static Table {
     match lang {
-        Language::English => en_table(),
-        Language::PortugueseBR => pt_br_table(),
+        Language::English => en_units(),
+        Language::PortugueseBR => pt_br_units(),
     }
 }
 
-// ── API pública ─────────────────────────────────────────────────────
+fn ui_for(lang: Language) -> &'static Table {
+    match lang {
+        Language::English => en_ui(),
+        Language::PortugueseBR => pt_br_ui(),
+    }
+}
 
-/// Retorna o nome localizado para a chave MPQ fornecida.
+// ── Public API ──────────────────────────────────────────────────────
+
+/// Localized unit/structure/research name for a raw SC2 MPQ key.
 ///
-/// Cadeia de fallback: `lang` → English → chave crua.
+/// Fallback chain: `lang` → English → raw key.
 pub fn localize<'a>(key: &'a str, lang: Language) -> &'a str {
-    if let Some(v) = table_for(lang).get(key) {
-        // SAFETY: &'static str pode ser retornado como &'a str
+    if let Some(v) = units_for(lang).get(key) {
         return v;
     }
-    // Fallback para inglês
     if lang != Language::English {
-        if let Some(v) = en_table().get(key) {
+        if let Some(v) = en_units().get(key) {
             return v;
         }
     }
-    // Último recurso: chave MPQ crua
     key
+}
+
+/// Localized UI string for a dotted key (e.g. `menu.file.open`).
+///
+/// Fallback chain: `lang` → English → raw key. For keys containing
+/// `{name}` placeholders, use [`tf`] instead.
+pub fn t(key: &str, lang: Language) -> &'static str {
+    if let Some(v) = ui_for(lang).get(key) {
+        return v;
+    }
+    if lang != Language::English {
+        if let Some(v) = en_ui().get(key) {
+            return v;
+        }
+    }
+    // Last resort: leak the key through as a static — the caller may
+    // have typoed. We still need a &'static str, and unknown keys are
+    // rare, so we allocate and leak (string table is tiny).
+    Box::leak(key.to_string().into_boxed_str())
+}
+
+/// Localized UI string with `{name}` placeholder substitution.
+///
+/// Example: `tf("toast.save_error", lang, &[("err", &msg)])`.
+///
+/// Also translates the literal two-character sequence `\n` into a real
+/// newline so multi-line tooltip strings can live on a single line of
+/// the `.txt` file.
+pub fn tf(key: &str, lang: Language, args: &[(&str, &str)]) -> String {
+    let mut s = t(key, lang).to_string();
+    for (name, value) in args {
+        s = s.replace(&format!("{{{name}}}"), value);
+    }
+    if s.contains("\\n") {
+        s = s.replace("\\n", "\n");
+    }
+    s
 }
 
 // ── Parser ──────────────────────────────────────────────────────────
 fn parse(raw: &'static str) -> Table {
     let mut map = Table::new();
     for line in raw.lines() {
-        let trimmed = line.trim();
+        let trimmed = line.trim_start();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if let Some((k, v)) = trimmed.split_once('=') {
-            map.insert(k.trim(), v.trim());
+        // Use the original (non-stripped) line so trailing whitespace
+        // inside values (e.g. " YOU ") is preserved; only trim the key.
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim();
+            if key.is_empty() {
+                continue;
+            }
+            // Trim only the leading space after `=` (one space), and
+            // the trailing newline — but preserve intentional padding.
+            let value = v.strip_prefix(' ').unwrap_or(v);
+            let value = value.trim_end_matches(['\r', '\n']);
+            map.insert(key, value);
         }
     }
     map
@@ -102,23 +168,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn en_basics() {
+    fn units_en_basics() {
         assert_eq!(localize("Marine", Language::English), "Marine");
         assert_eq!(localize("WidowMine", Language::English), "Widow Mine");
         assert_eq!(localize("GhostAlternate", Language::English), "Ghost");
     }
 
     #[test]
-    fn pt_br_basics() {
+    fn units_pt_br_basics() {
         assert_eq!(localize("Marine", Language::PortugueseBR), "Soldado");
         assert_eq!(localize("WidowMine", Language::PortugueseBR), "Mina Viúva");
         assert_eq!(localize("Probe", Language::PortugueseBR), "Sonda");
     }
 
     #[test]
-    fn fallback_to_key() {
-        // Chave inexistente → retorna a própria chave
+    fn units_fallback_to_key() {
         assert_eq!(localize("UnknownUnit123", Language::English), "UnknownUnit123");
         assert_eq!(localize("UnknownUnit123", Language::PortugueseBR), "UnknownUnit123");
+    }
+
+    #[test]
+    fn ui_en_basics() {
+        assert_eq!(t("menu.file", Language::English), "File");
+        assert_eq!(t("menu.file.open", Language::English), "Open replay…");
+        assert_eq!(t("tab.timeline", Language::English), "Timeline");
+    }
+
+    #[test]
+    fn ui_pt_br_basics() {
+        assert_eq!(t("menu.file", Language::PortugueseBR), "Arquivo");
+        assert_eq!(t("menu.file.open", Language::PortugueseBR), "Abrir replay…");
+        assert_eq!(t("tab.charts", Language::PortugueseBR), "Gráficos");
+    }
+
+    #[test]
+    fn ui_placeholder_substitution() {
+        let s = tf(
+            "toast.save_error",
+            Language::English,
+            &[("err", "disk full")],
+        );
+        assert_eq!(s, "Save error: disk full");
+        let s = tf(
+            "toast.new_replay_loaded",
+            Language::PortugueseBR,
+            &[("file", "foo.SC2Replay")],
+        );
+        assert_eq!(s, "Novo replay carregado: foo.SC2Replay");
+    }
+
+    #[test]
+    fn ui_newline_escape_decoded() {
+        let s = tf(
+            "charts.tooltip.army_anon",
+            Language::English,
+            &[("mm", "5"), ("ss", "30"), ("value", "1.234")],
+        );
+        assert!(s.contains('\n'), "expected real newline, got: {s:?}");
+        assert!(s.starts_with("Time: 5:30"));
     }
 }

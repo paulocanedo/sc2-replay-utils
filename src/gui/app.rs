@@ -7,6 +7,11 @@
 //
 // Em ambas as telas há uma status bar inferior persistente exibindo o
 // replay atualmente carregado, o estado do watcher e os toasts.
+//
+// On first launch (or whenever `config.language_selected` is false),
+// a blocking modal prompts the user to pick a language before any
+// other UI is reachable. Persisting the choice sets
+// `language_selected = true`.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -16,6 +21,7 @@ use egui::{Color32, Context, Panel, RichText, ScrollArea};
 use crate::colors::{player_slot_color, user_fill, CARD_FILL, LABEL_DIM, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::library::{self, LibraryAction, ReplayLibrary};
+use crate::locale::{t, tf, Language};
 use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tabs::{self, Tab};
@@ -67,6 +73,10 @@ pub struct AppState {
     pub rename_status: Option<String>,
     /// Carregamento do replay mais recente adiado até o scanner terminar.
     pub pending_load_latest: bool,
+    /// Transient draft of the language picker (first-run modal). We keep
+    /// the draft separate from `config.language` so cancelling the
+    /// modal leaves the real config alone.
+    pub language_draft: Language,
 }
 
 impl AppState {
@@ -75,6 +85,7 @@ impl AppState {
         apply_style(&cc.egui_ctx, &config);
 
         let library_filter = library::LibraryFilter::from_config(&config);
+        let language_draft = config.language;
         let mut me = Self {
             config,
             loaded: None,
@@ -99,6 +110,7 @@ impl AppState {
             rename_previews: Vec::new(),
             rename_status: None,
             pending_load_latest: false,
+            language_draft,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -122,18 +134,24 @@ impl AppState {
             self.load_path(p);
             return;
         }
+        let lang = self.config.language;
         let Some(dir) = self.config.effective_working_dir() else {
-            self.set_toast("Diretório de trabalho não definido (veja Configurações).");
+            self.set_toast(t("toast.no_working_dir", lang).to_string());
             return;
         };
         match crate::utils::find_latest_replay(&dir) {
             Some(p) => self.load_path(p),
-            None => self.set_toast(format!("Nenhum replay encontrado em {}", dir.display())),
+            None => self.set_toast(tf(
+                "toast.no_replays_found",
+                lang,
+                &[("dir", &dir.display().to_string())],
+            )),
         }
     }
 
     fn load_path(&mut self, p: PathBuf) {
         let max_time = self.config.default_max_time;
+        let lang = self.config.language;
         match LoadedReplay::load(&p, max_time) {
             Ok(r) => {
                 self.loaded = Some(r);
@@ -146,7 +164,11 @@ impl AppState {
                 self.screen = Screen::Analysis;
             }
             Err(e) => {
-                self.load_error = Some(format!("Erro ao carregar {}: {}", p.display(), e));
+                self.load_error = Some(tf(
+                    "error.load_failed",
+                    lang,
+                    &[("path", &p.display().to_string()), ("err", &e.to_string())],
+                ));
             }
         }
     }
@@ -172,13 +194,19 @@ impl AppState {
     fn poll_watcher(&mut self, ctx: &Context) {
         let Some(w) = self.watcher.as_ref() else { return };
         if let Some(path) = w.poll_latest() {
+            let lang = self.config.language;
             if self.config.auto_load_on_new_replay {
                 self.load_path(path.clone());
-                self.set_toast(format!("Novo replay carregado: {}", file_name(&path)));
+                self.set_toast(tf(
+                    "toast.new_replay_loaded",
+                    lang,
+                    &[("file", &file_name(&path))],
+                ));
             } else {
-                self.set_toast(format!(
-                    "Novo replay disponível: {} — Arquivo → Carregar mais recente",
-                    file_name(&path)
+                self.set_toast(tf(
+                    "toast.new_replay_available",
+                    lang,
+                    &[("file", &file_name(&path))],
                 ));
             }
             ctx.request_repaint();
@@ -198,6 +226,20 @@ impl AppState {
 impl eframe::App for AppState {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+
+        // -------- First-run language prompt (modal) --------
+        // Renders before anything else and blocks interaction elsewhere
+        // by simply not painting the rest of the UI when open.
+        if !self.config.language_selected {
+            language_prompt(&ctx, &mut self.language_draft, &mut self.config);
+            // While the modal is open we still want a repaint so that
+            // the language preview updates immediately.
+            ctx.request_repaint();
+            return;
+        }
+
+        let lang = self.config.language;
+
         // Polling do watcher ANTES de qualquer painel.
         self.poll_watcher(&ctx);
         // Drena resultados do worker da biblioteca.
@@ -221,47 +263,53 @@ impl eframe::App for AppState {
         // -------- Menu bar (sempre) --------
         Panel::top("menubar").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("Arquivo", |ui| {
-                    if ui.button("Abrir replay…").clicked() {
+                ui.menu_button(t("menu.file", lang), |ui| {
+                    if ui.button(t("menu.file.open", lang)).clicked() {
                         ui.close();
                         if let Some(p) = rfd::FileDialog::new()
-                            .add_filter("SC2 Replay", &["SC2Replay"])
+                            .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
                             .pick_file()
                         {
                             self.load_path(p);
                         }
                     }
-                    if ui.button("Carregar mais recente").clicked() {
+                    if ui.button(t("menu.file.load_latest", lang)).clicked() {
                         ui.close();
                         self.try_load_latest();
                     }
                     ui.separator();
-                    if ui.button("Sair").clicked() {
+                    if ui.button(t("menu.file.quit", lang)).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("Exibir", |ui| {
-                    if ui.button("Biblioteca").clicked() {
+                ui.menu_button(t("menu.view", lang), |ui| {
+                    if ui.button(t("menu.view.library", lang)).clicked() {
                         self.screen = Screen::Library;
                         ui.close();
                     }
-                    if ui.add_enabled(self.loaded.is_some(), egui::Button::new("Análise")).clicked() {
+                    if ui
+                        .add_enabled(
+                            self.loaded.is_some(),
+                            egui::Button::new(t("menu.view.analysis", lang)),
+                        )
+                        .clicked()
+                    {
                         self.screen = Screen::Analysis;
                         ui.close();
                     }
-                    if ui.button("Renomear").clicked() {
+                    if ui.button(t("menu.view.rename", lang)).clicked() {
                         self.rename_previews = crate::rename::generate_previews(&self.library, &self.rename_template);
                         self.screen = Screen::Rename;
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("Configurações…").clicked() {
+                    if ui.button(t("menu.view.settings", lang)).clicked() {
                         self.show_settings = true;
                         ui.close();
                     }
                 });
-                ui.menu_button("Ajuda", |ui| {
-                    if ui.button("Sobre").clicked() {
+                ui.menu_button(t("menu.help", lang), |ui| {
+                    if ui.button(t("menu.help.about", lang)).clicked() {
                         ui.close();
                         self.show_about = true;
                     }
@@ -275,14 +323,14 @@ impl eframe::App for AppState {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
-                        .button("📚 Biblioteca")
-                        .on_hover_text("Voltar para a biblioteca de replays")
+                        .button(format!("📚 {}", t("menu.view.library", lang)))
+                        .on_hover_text(t("replay_bar.back_tooltip", lang))
                         .clicked()
                     {
                         self.screen = Screen::Library;
                     }
                     ui.separator();
-                    ui.label(RichText::new("Renomear Replays em Lote").strong());
+                    ui.label(RichText::new(t("rename_bar.title", lang)).strong());
                 });
                 ui.add_space(4.0);
             });
@@ -294,8 +342,8 @@ impl eframe::App for AppState {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui
-                        .button("📚 Biblioteca")
-                        .on_hover_text("Voltar para a biblioteca de replays")
+                        .button(format!("📚 {}", t("menu.view.library", lang)))
+                        .on_hover_text(t("replay_bar.back_tooltip", lang))
                         .clicked()
                     {
                         self.screen = Screen::Library;
@@ -306,9 +354,9 @@ impl eframe::App for AppState {
                         ui.monospace(loaded.file_name());
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Abrir replay…").clicked() {
+                        if ui.button(t("replay_bar.open", lang)).clicked() {
                             if let Some(p) = rfd::FileDialog::new()
-                                .add_filter("SC2 Replay", &["SC2Replay"])
+                                .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
                                 .pick_file()
                             {
                                 self.load_path(p);
@@ -323,7 +371,7 @@ impl eframe::App for AppState {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for tab in Tab::ALL {
-                        ui.selectable_value(&mut self.active_tab, tab, tab.label());
+                        ui.selectable_value(&mut self.active_tab, tab, tab.label(lang));
                     }
                 });
                 ui.add_space(2.0);
@@ -363,7 +411,7 @@ impl eframe::App for AppState {
                     }
                     None => {
                         ui.label(
-                            RichText::new("(nenhum replay carregado)")
+                            RichText::new(t("app.status.no_replay", lang))
                                 .italics()
                                 .small(),
                         );
@@ -371,8 +419,11 @@ impl eframe::App for AppState {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(dir) = &watcher_dir {
-                        ui.label("👁")
-                            .on_hover_text(format!("Observando: {}", dir.display()));
+                        ui.label("👁").on_hover_text(tf(
+                            "app.status.watching",
+                            lang,
+                            &[("dir", &dir.display().to_string())],
+                        ));
                     }
                     if let Some(msg) = toast_msg {
                         egui::Frame::new()
@@ -431,7 +482,7 @@ impl eframe::App for AppState {
                     );
                 }
                 Screen::Analysis => match self.loaded.as_ref() {
-                    None => empty_state(ui),
+                    None => empty_state(ui, lang),
                     Some(loaded) => match self.active_tab {
                         Tab::Timeline => tabs::timeline::show(
                             ui,
@@ -451,6 +502,7 @@ impl eframe::App for AppState {
                     crate::rename::show(
                         ui,
                         &self.library,
+                        &self.config,
                         &mut self.rename_template,
                         &mut self.rename_previews,
                         &mut self.rename_status,
@@ -468,14 +520,14 @@ impl eframe::App for AppState {
             LibraryAction::PickWorkingDir(p) => {
                 self.config.working_dir = Some(p);
                 if let Err(e) = self.config.save() {
-                    self.set_toast(format!("Erro ao salvar: {e}"));
+                    self.set_toast(tf("toast.save_error", lang, &[("err", &e)]));
                 }
                 self.refresh_library();
             }
             LibraryAction::SaveDateRange(range) => {
                 self.config.library_date_range = range;
                 if let Err(e) = self.config.save() {
-                    self.set_toast(format!("Erro ao salvar config: {e}"));
+                    self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
                 }
             }
             LibraryAction::OpenRename => {
@@ -498,8 +550,8 @@ impl eframe::App for AppState {
         );
         if outcome.saved {
             match self.config.save() {
-                Ok(()) => self.set_toast("Configurações salvas."),
-                Err(e) => self.set_toast(format!("Erro ao salvar: {e}")),
+                Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
+                Err(e) => self.set_toast(tf("toast.save_error", lang, &[("err", &e)])),
             }
             apply_style(&ctx, &self.config);
             self.restart_watcher();
@@ -515,25 +567,29 @@ impl eframe::App for AppState {
 
         // -------- About window --------
         if self.show_about {
-            egui::Window::new("Sobre")
+            egui::Window::new(t("about.title", lang))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(&ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(8.0);
-                        ui.heading("sc2-replay-utils");
-                        ui.label(format!("v{}", env!("CARGO_PKG_VERSION")));
+                        ui.heading(t("app.title", lang));
+                        ui.label(tf(
+                            "about.version",
+                            lang,
+                            &[("version", env!("CARGO_PKG_VERSION"))],
+                        ));
                         ui.add_space(12.0);
-                        ui.label("Ferramenta de análise de replays de StarCraft II");
+                        ui.label(t("about.description", lang));
                         ui.add_space(12.0);
-                        ui.label(RichText::new("Autor").strong());
-                        ui.label("Paulo Canedo");
+                        ui.label(RichText::new(t("about.author_label", lang)).strong());
+                        ui.label(t("about.author_name", lang));
                         ui.add_space(12.0);
-                        ui.label(RichText::new("Tecnologias").strong());
-                        ui.label("Rust · egui · s2protocol");
+                        ui.label(RichText::new(t("about.tech_label", lang)).strong());
+                        ui.label(t("about.tech_value", lang));
                         ui.add_space(16.0);
-                        if ui.button("Fechar").clicked() {
+                        if ui.button(t("about.close", lang)).clicked() {
                             self.show_about = false;
                         }
                         ui.add_space(4.0);
@@ -553,18 +609,55 @@ impl eframe::App for AppState {
     }
 }
 
+/// First-run modal that forces the user to pick a UI language. Uses a
+/// bilingual title/description so it's intelligible regardless of the
+/// default. Once confirmed, `config.language_selected` is set and the
+/// rest of the app becomes reachable.
+fn language_prompt(ctx: &Context, draft: &mut Language, config: &mut AppConfig) {
+    egui::Window::new(t("language_prompt.title", *draft))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(8.0);
+                ui.label(t("language_prompt.description", *draft));
+                ui.add_space(12.0);
+                for &lang in Language::all() {
+                    ui.radio_value(draft, lang, lang.label());
+                }
+                ui.add_space(16.0);
+                if ui
+                    .add_sized(
+                        [160.0, 32.0],
+                        egui::Button::new(
+                            RichText::new(t("language_prompt.confirm", *draft)).strong(),
+                        ),
+                    )
+                    .clicked()
+                {
+                    config.language = *draft;
+                    config.language_selected = true;
+                    let _ = config.save();
+                }
+                ui.add_space(4.0);
+            });
+        });
+}
+
 fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig) {
+    let lang = config.language;
     ui.add_space(8.0);
 
     ScrollArea::vertical().id_salt("sidebar_scroll").show(ui, |ui| {
         // ── Resumo ──────────────────────────────────────────────
-        ui.heading("Resumo");
+        ui.heading(t("sidebar.summary", lang));
         ui.separator();
         ui.add_space(4.0);
 
         let matchup = build_matchup(&loaded.timeline.players);
         let duration = fmt_time(loaded.timeline.game_loops, loaded.timeline.loops_per_second);
-        let date_display = format_date_short(&loaded.timeline.datetime);
+        let date_display = format_date_short(&loaded.timeline.datetime, lang);
 
         egui::Frame::new()
             .fill(CARD_FILL)
@@ -593,14 +686,14 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
         ui.add_space(12.0);
 
         // ── Jogadores ───────────────────────────────────────────
-        ui.heading("Jogadores");
+        ui.heading(t("sidebar.players", lang));
         ui.separator();
         ui.add_space(4.0);
 
         let last = loaded.timeline.players.len().saturating_sub(1);
         for (i, p) in loaded.timeline.players.iter().enumerate() {
             let is_user = config.is_user(&p.name);
-            player_card(ui, p, i, is_user);
+            player_card(ui, p, i, is_user, lang);
             if i != last {
                 ui.add_space(6.0);
             }
@@ -609,20 +702,24 @@ fn sidebar_content(ui: &mut egui::Ui, loaded: &LoadedReplay, config: &AppConfig)
         ui.add_space(12.0);
 
         // ── Detalhes ────────────────────────────────────────────
-        ui.heading("Detalhes");
+        ui.heading(t("sidebar.details", lang));
         ui.separator();
         ui.add_space(4.0);
 
-        detail_row(ui, "Início", &loaded.timeline.datetime);
+        detail_row(ui, t("sidebar.detail.start", lang), &loaded.timeline.datetime);
         detail_row(
             ui,
-            "Loops",
+            t("sidebar.detail.loops", lang),
             &loaded.timeline.game_loops.to_string(),
         );
         detail_row(
             ui,
-            "Veloc.",
-            &format!("{:.1} loops/s", loaded.timeline.loops_per_second),
+            t("sidebar.detail.speed", lang),
+            &tf(
+                "sidebar.speed_value",
+                lang,
+                &[("value", &format!("{:.1}", loaded.timeline.loops_per_second))],
+            ),
         );
     });
 }
@@ -633,6 +730,7 @@ fn player_card(
     player: &crate::replay::PlayerTimeline,
     index: usize,
     is_user: bool,
+    lang: Language,
 ) {
     let slot_color = player_slot_color(index);
     let fill = if is_user {
@@ -657,6 +755,24 @@ fn player_card(
                         .strong()
                         .color(Color32::WHITE),
                 );
+                if let Some(toon) = player.toon.as_ref() {
+                    let handle = toon.handle().unwrap_or_default();
+                    if let Some(url) = toon.battlenet_url() {
+                        let resp = ui
+                            .small_button("🔗")
+                            .on_hover_text(format!("{handle}\n{url}"));
+                        if resp.clicked() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                        }
+                    } else if !handle.is_empty() {
+                        // Região desconhecida: mostra só o handle.
+                        ui.label(
+                            RichText::new(handle)
+                                .small()
+                                .color(Color32::from_gray(130)),
+                        );
+                    }
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // MMR primeiro (fica mais à direita).
                     match player.mmr {
@@ -678,7 +794,7 @@ fn player_card(
                     }
                     if is_user {
                         ui.label(
-                            RichText::new(" VOCÊ ")
+                            RichText::new(t("sidebar.you_chip", lang))
                                 .small()
                                 .strong()
                                 .color(USER_CHIP_FG)
@@ -693,7 +809,7 @@ fn player_card(
                 RichText::new(format!(
                     "{} {}",
                     race_icon(&player.race),
-                    race_full_name(&player.race),
+                    race_full_name(&player.race, lang),
                 ))
                 .color(Color32::from_gray(170)),
             );
@@ -742,12 +858,12 @@ fn race_letter(race: &str) -> char {
     crate::utils::race_letter(race)
 }
 
-/// Normaliza o nome da raça para exibição.
-fn race_full_name(race: &str) -> &str {
+/// Display name for the race, honoring the UI language.
+fn race_full_name<'a>(race: &'a str, lang: Language) -> &'a str {
     match race.to_ascii_lowercase().as_str() {
-        "terr" | "terran" => "Terran",
-        "prot" | "protoss" => "Protoss",
-        "zerg" => "Zerg",
+        "terr" | "terran" => t("race.terran", lang),
+        "prot" | "protoss" => t("race.protoss", lang),
+        "zerg" => t("race.zerg", lang),
         _ => race,
     }
 }
@@ -761,26 +877,14 @@ fn build_matchup(players: &[crate::replay::PlayerTimeline]) -> String {
     }
 }
 
-/// Formata "2026-04-10T17:46:40" → "10 abr 2026".
-fn format_date_short(datetime: &str) -> String {
+/// Formats "2026-04-10T17:46:40" → e.g. "10 apr 2026" / "10 abr 2026"
+/// depending on language.
+fn format_date_short(datetime: &str, lang: Language) -> String {
     let date_part = datetime.split('T').next().unwrap_or(datetime);
     let parts: Vec<&str> = date_part.split('-').collect();
     if parts.len() == 3 {
-        let month = match parts[1] {
-            "01" => "jan",
-            "02" => "fev",
-            "03" => "mar",
-            "04" => "abr",
-            "05" => "mai",
-            "06" => "jun",
-            "07" => "jul",
-            "08" => "ago",
-            "09" => "set",
-            "10" => "out",
-            "11" => "nov",
-            "12" => "dez",
-            _ => parts[1],
-        };
+        let key = format!("month.{}", parts[1]);
+        let month = t(&key, lang);
         let day = parts[2].trim_start_matches('0');
         format!("{day} {month} {}", parts[0])
     } else {
@@ -810,22 +914,14 @@ fn detail_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.separator();
 }
 
-fn empty_state(ui: &mut egui::Ui) {
+fn empty_state(ui: &mut egui::Ui, lang: Language) {
     ui.add_space(60.0);
     ui.vertical_centered(|ui| {
         ui.label(RichText::new("🎮").size(56.0));
         ui.add_space(8.0);
-        ui.label(
-            RichText::new("Nenhum replay carregado")
-                .heading(),
-        );
+        ui.label(RichText::new(t("empty.heading", lang)).heading());
         ui.add_space(4.0);
-        ui.label(
-            RichText::new(
-                "Use Arquivo → Abrir replay… ou habilite o file watcher em Configurações para auto-carregar replays novos.",
-            )
-            .italics(),
-        );
+        ui.label(RichText::new(t("empty.hint", lang)).italics());
     });
 }
 

@@ -33,6 +33,7 @@ mod transport;
 use egui::{Color32, TextStyle, Ui};
 
 use crate::config::AppConfig;
+use crate::locale::t;
 use crate::replay_state::{fmt_time, LoadedReplay};
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
@@ -67,12 +68,13 @@ fn side_panel_width(ui: &Ui) -> f32 {
 pub fn show(
     ui: &mut Ui,
     loaded: &LoadedReplay,
-    _config: &AppConfig,
+    config: &AppConfig,
     current_loop: &mut u32,
     show_heatmap: &mut bool,
     show_creep: &mut bool,
     show_map: &mut bool,
 ) {
+    let lang = config.language;
     let tl = &loaded.timeline;
     let max_loop = tl.game_loops.max(1);
     if *current_loop > max_loop {
@@ -98,9 +100,9 @@ pub fn show(
                     fmt_time(tl.game_loops, tl.loops_per_second),
                 ));
                 ui.add_space(12.0);
-                ui.toggle_value(show_heatmap, "Heatmap");
-                ui.toggle_value(show_creep, "Creep");
-                ui.toggle_value(show_map, "Map");
+                ui.toggle_value(show_heatmap, t("timeline.toggle.heatmap", lang));
+                ui.toggle_value(show_creep, t("timeline.toggle.creep", lang));
+                ui.toggle_value(show_map, t("timeline.toggle.map", lang));
             });
             ui.add_space(2.0);
         });
@@ -118,7 +120,7 @@ pub fn show(
         .exact_size(side_w)
         .show_inside(ui, |ui| {
             if let Some(p) = loaded.timeline.players.get(0) {
-                side_panel::player_side_panel(ui, p, 0, game_loop);
+                side_panel::player_side_panel(ui, p, 0, game_loop, lang);
             }
         });
 
@@ -127,7 +129,7 @@ pub fn show(
         .exact_size(side_w)
         .show_inside(ui, |ui| {
             if let Some(p) = loaded.timeline.players.get(1) {
-                side_panel::player_side_panel(ui, p, 1, game_loop);
+                side_panel::player_side_panel(ui, p, 1, game_loop, lang);
             }
         });
 

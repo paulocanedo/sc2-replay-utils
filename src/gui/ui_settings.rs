@@ -4,11 +4,15 @@
 // indicando se o usuário clicou em "Salvar" ou "Restaurar padrões".
 // O parent (AppState) usa isso para persistir, reiniciar o watcher e
 // reaplicar o estilo.
+//
+// Changing the language in this window also sets
+// `language_selected = true`, so the first-run language picker is not
+// triggered again once the user has confirmed a choice here.
 
 use egui::{Context, RichText, ScrollArea, Slider, Window};
 
 use crate::config::AppConfig;
-use crate::locale::Language;
+use crate::locale::{t, tf, Language};
 
 #[derive(Default)]
 pub struct SettingsOutcome {
@@ -26,22 +30,21 @@ pub fn show(
     if !*open {
         return outcome;
     }
+    let lang = config.language;
 
-    Window::new("Configurações")
+    Window::new(t("settings.title", lang))
         .open(open)
         .resizable(true)
         .default_width(520.0)
         .show(ctx, |ui| {
-            ui.heading("Pastas");
+            ui.heading(t("settings.section.folders", lang));
             working_dir_row(ui, config);
-            ui.small(
-                "Pasta onde o app procura, lista e observa seus replays. Se vazio, o app usa o diretório do SC2 detectado automaticamente.",
-            );
+            ui.small(t("settings.working_dir.desc", lang));
             ui.add_space(4.0);
 
             ui.separator();
-            ui.heading("Nicknames do usuário");
-            ui.small("Replays com estes nicks serão destacados como 'Você' na UI.");
+            ui.heading(t("settings.section.nicknames", lang));
+            ui.small(t("settings.nicknames.desc", lang));
 
             // Lista atual de nicks
             let mut to_remove: Option<usize> = None;
@@ -49,11 +52,17 @@ pub fn show(
                 .max_height(120.0)
                 .show(ui, |ui| {
                     if config.user_nicknames.is_empty() {
-                        ui.label(RichText::new("(nenhum nickname cadastrado)").italics());
+                        ui.label(
+                            RichText::new(t("settings.nicknames.empty", lang)).italics(),
+                        );
                     }
                     for (i, nick) in config.user_nicknames.iter().enumerate() {
                         ui.horizontal(|ui| {
-                            if ui.small_button("×").on_hover_text("Remover").clicked() {
+                            if ui
+                                .small_button("×")
+                                .on_hover_text(t("settings.nicknames.remove_tooltip", lang))
+                                .clicked()
+                            {
                                 to_remove = Some(i);
                             }
                             ui.monospace(nick);
@@ -67,12 +76,12 @@ pub fn show(
             ui.horizontal(|ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(nickname_buf)
-                        .hint_text("Adicionar nickname…")
+                        .hint_text(t("settings.nicknames.add_placeholder", lang))
                         .desired_width(200.0),
                 );
                 let enter =
                     resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button("Adicionar").clicked() || enter {
+                if ui.button(t("settings.nicknames.add", lang)).clicked() || enter {
                     let trimmed = nickname_buf.trim().to_string();
                     if !trimmed.is_empty()
                         && !config
@@ -87,63 +96,81 @@ pub fn show(
             });
 
             ui.separator();
-            ui.heading("Comportamento");
+            ui.heading(t("settings.section.behavior", lang));
 
             ui.horizontal(|ui| {
-                ui.label("max_time padrão (s, 0 = sem limite):");
+                ui.label(t("settings.max_time.label", lang));
                 ui.add(egui::DragValue::new(&mut config.default_max_time).speed(1.0));
             });
 
-            ui.checkbox(&mut config.auto_load_latest, "Carregar replay mais recente ao abrir");
+            ui.checkbox(
+                &mut config.auto_load_latest,
+                t("settings.auto_load_latest", lang),
+            );
 
-            ui.checkbox(&mut config.watch_replays, "Observar pasta do SC2 (file watcher)");
+            ui.checkbox(&mut config.watch_replays, t("settings.watch_replays", lang));
             ui.add_enabled_ui(config.watch_replays, |ui| {
                 ui.indent("auto_load_new", |ui| {
                     ui.checkbox(
                         &mut config.auto_load_on_new_replay,
-                        "Carregar automaticamente quando surgir novo replay",
+                        t("settings.auto_load_new", lang),
                     );
                 });
             });
 
             ui.separator();
-            ui.heading("Idioma");
+            ui.heading(t("settings.section.language", lang));
             ui.horizontal(|ui| {
-                ui.label("Nomes de unidades/pesquisas:");
+                ui.label(t("settings.language.label", lang));
                 egui::ComboBox::from_id_salt("lang_combo")
                     .selected_text(config.language.label())
                     .show_ui(ui, |ui| {
-                        for &lang in Language::all() {
-                            ui.selectable_value(&mut config.language, lang, lang.label());
+                        for &lang_opt in Language::all() {
+                            if ui
+                                .selectable_value(&mut config.language, lang_opt, lang_opt.label())
+                                .clicked()
+                            {
+                                // Changing the language here counts as
+                                // an explicit selection — suppress the
+                                // first-run modal forever after.
+                                config.language_selected = true;
+                            }
                         }
                     });
             });
 
             ui.separator();
-            ui.heading("Aparência");
-            ui.checkbox(&mut config.dark_mode, "Tema escuro");
+            ui.heading(t("settings.section.appearance", lang));
+            ui.checkbox(&mut config.dark_mode, t("settings.dark_mode", lang));
 
             ui.horizontal(|ui| {
-                ui.label("Tamanho da fonte (pt):");
+                ui.label(t("settings.font_size.label", lang));
                 ui.add(Slider::new(&mut config.font_size, 8.0..=28.0).fixed_decimals(0));
             });
-            ui.small("Tamanho em pontos lógicos. HiDPI é tratado automaticamente pelo sistema.");
+            ui.small(t("settings.font_size.desc", lang));
 
             ui.separator();
             ui.horizontal(|ui| {
                 if ui
-                    .add_sized([100.0, 28.0], egui::Button::new("Salvar"))
+                    .add_sized([100.0, 28.0], egui::Button::new(t("settings.save", lang)))
                     .clicked()
                 {
                     outcome.saved = true;
                 }
-                if ui.button("Restaurar padrões").clicked() {
+                if ui.button(t("settings.reset_defaults", lang)).clicked() {
                     *config = AppConfig::default();
+                    // Reset keeps the language_selected flag true so we
+                    // don't show the first-run modal again.
+                    config.language_selected = true;
                     outcome.reset_defaults = true;
                 }
                 if let Some(path) = AppConfig::config_path() {
                     ui.separator();
-                    ui.small(format!("Arquivo: {}", path.display()));
+                    ui.small(tf(
+                        "settings.file_path",
+                        lang,
+                        &[("path", &path.display().to_string())],
+                    ));
                 }
             });
         });
@@ -156,9 +183,10 @@ pub fn show(
 /// que preenche `working_dir` com o diretório padrão do SC2, para que
 /// o usuário possa persistir esse valor clicando em "Salvar".
 fn working_dir_row(ui: &mut egui::Ui, config: &mut crate::config::AppConfig) {
+    let lang = config.language;
     let detected = crate::utils::sc2_default_dir();
     ui.horizontal(|ui| {
-        ui.label("Diretório de trabalho:");
+        ui.label(t("settings.working_dir.label", lang));
         match config.working_dir.as_ref() {
             Some(p) => {
                 ui.monospace(p.display().to_string());
@@ -167,38 +195,44 @@ fn working_dir_row(ui: &mut egui::Ui, config: &mut crate::config::AppConfig) {
                 Some(p) => {
                     ui.monospace(p.display().to_string());
                     ui.small(
-                        RichText::new("(auto: SC2 detectado)")
+                        RichText::new(t("settings.working_dir.auto", lang))
                             .italics()
                             .color(egui::Color32::from_gray(160)),
                     );
                 }
                 None => {
-                    ui.monospace("(não definido)");
+                    ui.monospace(t("settings.working_dir.unset", lang));
                 }
             },
         }
     });
     ui.horizontal(|ui| {
         ui.add_space(16.0);
-        if ui.button("Escolher…").clicked() {
+        if ui.button(t("settings.working_dir.choose", lang)).clicked() {
             if let Some(p) = rfd::FileDialog::new().pick_folder() {
                 config.working_dir = Some(p);
             }
         }
         let detect_enabled = detected.is_some();
         if ui
-            .add_enabled(detect_enabled, egui::Button::new("Detectar SC2"))
+            .add_enabled(
+                detect_enabled,
+                egui::Button::new(t("settings.working_dir.detect", lang)),
+            )
             .on_hover_text(match detected.as_ref() {
-                Some(p) => format!("Usar {}", p.display()),
-                None => "Não foi possível detectar o diretório do SC2".to_string(),
+                Some(p) => tf(
+                    "settings.working_dir.detect_ok_tooltip",
+                    lang,
+                    &[("dir", &p.display().to_string())],
+                ),
+                None => t("settings.working_dir.detect_fail_tooltip", lang).to_string(),
             })
             .clicked()
         {
             config.working_dir = detected.clone();
         }
-        if ui.button("Limpar").clicked() {
+        if ui.button(t("settings.working_dir.clear", lang)).clicked() {
             config.working_dir = None;
         }
     });
 }
-

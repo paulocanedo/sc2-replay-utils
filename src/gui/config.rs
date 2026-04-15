@@ -35,8 +35,16 @@ pub struct AppConfig {
     pub auto_load_on_new_replay: bool,
     /// Tamanho base da fonte em pontos lógicos (HiDPI é tratado pelo egui).
     pub font_size: f32,
-    /// Idioma da UI para nomes de unidades/pesquisas.
+    /// UI language. Applies to menus, labels, tooltips, toasts and
+    /// unit/structure names. Default English; the first-run language
+    /// prompt persists the user's pick here.
     pub language: Language,
+    /// `true` once the user has explicitly chosen a language. While
+    /// `false`, the app shows a modal prompt on startup. Setting this
+    /// retroactively lets us replace the old build-order-only locale
+    /// selector without re-prompting users who already had a language
+    /// configured.
+    pub language_selected: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
     pub library_date_range: DateRange,
 }
@@ -53,6 +61,7 @@ impl Default for AppConfig {
             auto_load_on_new_replay: true,
             font_size: 14.0,
             language: Language::default(),
+            language_selected: false,
             library_date_range: DateRange::default(),
         }
     }

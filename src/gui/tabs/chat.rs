@@ -11,16 +11,18 @@ use egui::{Color32, RichText, ScrollArea, Ui};
 
 use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
+use crate::locale::{t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
+    let lang = config.language;
     let Some(chat) = loaded.chat.as_ref() else {
-        placeholder(ui, "Sem eventos de chat neste replay.");
+        placeholder(ui, t("chat.no_events", lang));
         return;
     };
 
     if chat.entries.is_empty() {
-        placeholder(ui, "Nenhuma mensagem de chat neste replay.");
+        placeholder(ui, t("chat.no_messages", lang));
         return;
     }
 
@@ -35,8 +37,12 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         .map(|(i, p)| (p.name.to_ascii_lowercase(), i))
         .collect();
 
-    ui.heading(format!("Chat ({} mensagens)", chat.entries.len()));
-    ui.small("Clique em uma linha para destacar — funcionalidade virá em iterações futuras.");
+    ui.heading(tf(
+        "chat.heading",
+        lang,
+        &[("count", &chat.entries.len().to_string())],
+    ));
+    ui.small(t("chat.subheading", lang));
     ui.add_space(4.0);
 
     ScrollArea::vertical()
@@ -65,13 +71,17 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     ui.label(RichText::new(&entry.message));
 
                     if entry.recipient != "All" && !entry.recipient.is_empty() {
-                        ui.small(format!("(→ {})", entry.recipient));
+                        ui.small(tf(
+                            "chat.recipient",
+                            lang,
+                            &[("to", &entry.recipient)],
+                        ));
                     }
 
-                    // Chip "Você" discreto só na linha do usuário.
+                    // Chip "You" discreto só na linha do usuário.
                     if is_user {
                         ui.label(
-                            RichText::new(" Você ")
+                            RichText::new(format!("{} ", t("chat.you_chip", lang)))
                                 .small()
                                 .color(USER_CHIP_FG)
                                 .background_color(USER_CHIP_BG),

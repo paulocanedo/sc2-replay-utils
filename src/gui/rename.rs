@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use egui::{RichText, ScrollArea, Ui};
 
+use crate::config::AppConfig;
 use crate::library::{MetaState, ParsedMeta, ReplayLibrary};
+use crate::locale::{t, tf, Language};
 use crate::utils::{race_letter, sanitize};
 
 /// Template padrão — mesmo formato usado pelo antigo CLI.
@@ -67,10 +69,19 @@ pub fn generate_previews(library: &ReplayLibrary, template: &str) -> Vec<(PathBu
 
 /// Copia os arquivos renomeados para o diretório de destino.
 /// Retorna o número de cópias bem-sucedidas ou um erro.
-fn execute_rename(previews: &[(PathBuf, String)], dest_dir: &Path) -> Result<usize, String> {
+fn execute_rename(
+    previews: &[(PathBuf, String)],
+    dest_dir: &Path,
+    lang: Language,
+) -> Result<usize, String> {
     if !dest_dir.exists() {
-        fs::create_dir_all(dest_dir)
-            .map_err(|e| format!("Erro ao criar diretório: {e}"))?;
+        fs::create_dir_all(dest_dir).map_err(|e| {
+            tf(
+                "rename.status.mkdir_err",
+                lang,
+                &[("err", &e.to_string())],
+            )
+        })?;
     }
 
     let mut ok = 0usize;
@@ -87,11 +98,15 @@ fn execute_rename(previews: &[(PathBuf, String)], dest_dir: &Path) -> Result<usi
     if errors.is_empty() {
         Ok(ok)
     } else {
-        Err(format!(
-            "{ok} copiados, {} erros:\n{}",
-            errors.len(),
-            errors.join("\n")
-        ))
+        let header = tf(
+            "rename.status.partial",
+            lang,
+            &[
+                ("ok", &ok.to_string()),
+                ("errors", &errors.len().to_string()),
+            ],
+        );
+        Err(format!("{header}\n{}", errors.join("\n")))
     }
 }
 
@@ -100,16 +115,18 @@ fn execute_rename(previews: &[(PathBuf, String)], dest_dir: &Path) -> Result<usi
 pub fn show(
     ui: &mut Ui,
     library: &ReplayLibrary,
+    config: &AppConfig,
     template: &mut String,
     previews: &mut Vec<(PathBuf, String)>,
     status: &mut Option<String>,
 ) {
+    let lang = config.language;
     ui.add_space(8.0);
-    ui.heading("Renomear Replays em Lote");
+    ui.heading(t("rename.heading", lang));
     ui.add_space(4.0);
 
     // ── Template editor ─────────────────────────────────────────────────
-    ui.label(RichText::new("Template de nome:").strong());
+    ui.label(RichText::new(t("rename.template_label", lang)).strong());
     let resp = ui.add(
         egui::TextEdit::singleline(template)
             .desired_width(f32::INFINITY)
@@ -122,22 +139,22 @@ pub fn show(
     ui.add_space(6.0);
 
     // ── Explicação das variáveis ────────────────────────────────────────
-    egui::CollapsingHeader::new(RichText::new("Variáveis disponíveis").italics())
+    egui::CollapsingHeader::new(RichText::new(t("rename.vars_header", lang)).italics())
         .default_open(true)
         .show(ui, |ui| {
             egui::Grid::new("template_vars")
                 .num_columns(2)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
-                    let vars = [
-                        ("{datetime}", "Data/hora compacta (YYYYMMDDHHMM)"),
-                        ("{map}", "Nome do mapa (sanitizado)"),
-                        ("{p1}", "Nome do jogador 1 (sanitizado)"),
-                        ("{p2}", "Nome do jogador 2 (sanitizado)"),
-                        ("{r1}", "Raça do jogador 1 (T, P, Z ou R)"),
-                        ("{r2}", "Raça do jogador 2 (T, P, Z ou R)"),
-                        ("{loops}", "Total de game loops"),
-                        ("{duration}", "Duração da partida (MMmSSs)"),
+                    let vars: [(&str, &str); 8] = [
+                        ("{datetime}", t("rename.var.datetime", lang)),
+                        ("{map}", t("rename.var.map", lang)),
+                        ("{p1}", t("rename.var.p1", lang)),
+                        ("{p2}", t("rename.var.p2", lang)),
+                        ("{r1}", t("rename.var.r1", lang)),
+                        ("{r2}", t("rename.var.r2", lang)),
+                        ("{loops}", t("rename.var.loops", lang)),
+                        ("{duration}", t("rename.var.duration", lang)),
                     ];
                     for (var, desc) in vars {
                         ui.monospace(var);
@@ -146,8 +163,8 @@ pub fn show(
                     }
                 });
             ui.add_space(2.0);
-            ui.small("Caracteres especiais em nomes de jogadores e mapas são substituídos por '_'.");
-            ui.small("A extensão .SC2Replay é adicionada automaticamente.");
+            ui.small(t("rename.note_special", lang));
+            ui.small(t("rename.note_ext", lang));
         });
 
     ui.add_space(8.0);
@@ -160,14 +177,22 @@ pub fn show(
 
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new(format!("{total_previews} replays serão renomeados"))
-                .strong(),
+            RichText::new(tf(
+                "rename.total",
+                lang,
+                &[("count", &total_previews.to_string())],
+            ))
+            .strong(),
         );
         if skipped > 0 {
             ui.label(
-                RichText::new(format!("({skipped} ignorados — pendentes ou não-1v1)"))
-                    .small()
-                    .color(egui::Color32::from_gray(140)),
+                RichText::new(tf(
+                    "rename.skipped",
+                    lang,
+                    &[("count", &skipped.to_string())],
+                ))
+                .small()
+                .color(egui::Color32::from_gray(140)),
             );
         }
     });
@@ -202,18 +227,23 @@ pub fn show(
     ui.horizontal(|ui| {
         let enabled = !previews.is_empty();
         if ui
-            .add_enabled(enabled, egui::Button::new(
-                RichText::new("Renomear Tudo…").strong(),
-            ))
-            .on_hover_text("Escolha a pasta de destino para copiar os replays renomeados")
+            .add_enabled(
+                enabled,
+                egui::Button::new(RichText::new(t("rename.execute", lang)).strong()),
+            )
+            .on_hover_text(t("rename.execute_tooltip", lang))
             .clicked()
         {
             if let Some(dest) = rfd::FileDialog::new().pick_folder() {
-                match execute_rename(previews, &dest) {
+                match execute_rename(previews, &dest, lang) {
                     Ok(n) => {
-                        *status = Some(format!(
-                            "{n} replays copiados para {}",
-                            dest.display()
+                        *status = Some(tf(
+                            "rename.status.ok",
+                            lang,
+                            &[
+                                ("count", &n.to_string()),
+                                ("dir", &dest.display().to_string()),
+                            ],
                         ));
                     }
                     Err(e) => {
@@ -225,13 +255,15 @@ pub fn show(
 
         if let Some(msg) = status.as_ref() {
             ui.separator();
-            ui.label(RichText::new(msg).small().color(
-                if msg.contains("erros") {
-                    egui::Color32::LIGHT_RED
-                } else {
-                    egui::Color32::LIGHT_GREEN
-                },
-            ));
+            // Error messages contain the localized "errors" marker
+            // (e.g. "erros" in pt-BR). Use it to pick the color.
+            let error_marker = t("rename.status.error_marker", lang);
+            let is_error = !error_marker.is_empty() && msg.contains(error_marker);
+            ui.label(RichText::new(msg).small().color(if is_error {
+                egui::Color32::LIGHT_RED
+            } else {
+                egui::Color32::LIGHT_GREEN
+            }));
         }
     });
 }

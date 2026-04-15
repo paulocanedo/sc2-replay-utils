@@ -8,7 +8,7 @@ use egui::{Color32, Grid, Id, RichText, ScrollArea, TextEdit, Ui};
 use crate::build_order::{classify_entry, EntryKind, EntryOutcome, PlayerBuildOrder};
 use crate::colors::{player_slot_color, user_fill, CARD_FILL, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
-use crate::locale;
+use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
 
@@ -71,10 +71,11 @@ impl BuildOrderFilter {
 }
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
+    let lang = config.language;
     let Some(bo) = loaded.build_order.as_ref() else {
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new("Build Order não disponível para este replay.").italics());
+            ui.label(RichText::new(t("build_order.unavailable", lang)).italics());
         });
         return;
     };
@@ -83,7 +84,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let players = &bo.players;
 
     if players.is_empty() {
-        ui.label("Nenhum jogador encontrado.");
+        ui.label(t("build_order.no_players", lang));
         return;
     }
 
@@ -104,7 +105,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let resp = ui.add_sized(
         [ui.available_width(), 28.0],
         TextEdit::singleline(&mut search)
-            .hint_text("🔎  buscar ação... (ex: Marine, Stimpack)")
+            .hint_text(t("build_order.search_placeholder", lang))
             .font(egui::TextStyle::Body),
     );
     if resp.changed() {
@@ -130,12 +131,21 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let mut filter_changed = false;
     ui.horizontal_wrapped(|ui| {
         let prev = filter;
-        ui.checkbox(&mut filter.show_workers, "Workers");
-        ui.checkbox(&mut filter.show_units, "Unidades");
-        ui.checkbox(&mut filter.show_structures, "Estruturas");
-        ui.checkbox(&mut filter.show_research, "Pesquisa");
-        ui.checkbox(&mut filter.show_upgrades, "Upgrades");
-        ui.checkbox(&mut filter.show_injects, "Injects");
+        ui.checkbox(&mut filter.show_workers, t("build_order.filter.workers", lang));
+        ui.checkbox(&mut filter.show_units, t("build_order.filter.units", lang));
+        ui.checkbox(
+            &mut filter.show_structures,
+            t("build_order.filter.structures", lang),
+        );
+        ui.checkbox(
+            &mut filter.show_research,
+            t("build_order.filter.research", lang),
+        );
+        ui.checkbox(
+            &mut filter.show_upgrades,
+            t("build_order.filter.upgrades", lang),
+        );
+        ui.checkbox(&mut filter.show_injects, t("build_order.filter.injects", lang));
 
         if filter.active_count() == 0 {
             filter = prev;
@@ -171,7 +181,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             for (i, player) in players.iter().take(n).enumerate() {
                 let ui = &mut cols[i];
                 let is_user = config.is_user(&player.name);
-                player_column(ui, player, i, lps, is_user, &query_lower, &filter, config.language);
+                player_column(ui, player, i, lps, is_user, &query_lower, &filter, lang);
             }
         });
     });
@@ -185,13 +195,17 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             let encoded: String = ui
                 .ctx()
                 .data(|d| d.get_temp::<String>(data_id).unwrap_or_default());
-            egui::Window::new(format!("SALT Encoding — {}", player.name))
+            egui::Window::new(tf(
+                "build_order.salt.title",
+                lang,
+                &[("player", &player.name)],
+            ))
                 .open(&mut is_open)
                 .resizable(true)
                 .default_width(500.0)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| {
-                    ui.label(RichText::new("Copie a string abaixo para importar em ferramentas como Spawning Tool, Embot Advanced ou SC2 Scrapbook.").small());
+                    ui.label(RichText::new(t("build_order.salt.desc", lang)).small());
                     ui.add_space(6.0);
                     let mut text = encoded.clone();
                     ui.add(
@@ -201,7 +215,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                             .font(egui::TextStyle::Monospace),
                     );
                     ui.add_space(4.0);
-                    if ui.button("📋 Copiar para área de transferência").clicked() {
+                    if ui.button(t("build_order.salt.copy", lang)).clicked() {
                         ui.ctx().copy_text(encoded);
                     }
                 });
@@ -214,20 +228,48 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for kind in ALL_KINDS {
-            legend_chip(ui, kind);
+            legend_chip(ui, kind, lang);
         }
         // separador visual entre categorias e status
         ui.add_space(4.0);
         ui.label(RichText::new("|").weak());
         ui.add_space(4.0);
-        legend_icon(ui, "⚡", Color32::from_rgb(180, 200, 255), "chrono");
-        legend_icon(ui, "⊘", Color32::from_rgb(220, 180, 80), "cancelado");
-        legend_icon(ui, "□", Color32::from_rgb(230, 90, 90), "destruído");
+        legend_icon(
+            ui,
+            "⚡",
+            Color32::from_rgb(180, 200, 255),
+            t("build_order.legend.chrono", lang),
+        );
+        legend_icon(
+            ui,
+            "⊘",
+            Color32::from_rgb(220, 180, 80),
+            t("build_order.legend.cancelled", lang),
+        );
+        legend_icon(
+            ui,
+            "□",
+            Color32::from_rgb(230, 90, 90),
+            t("build_order.legend.destroyed", lang),
+        );
     });
 }
 
+/// Localized display name for an EntryKind.
+fn entry_kind_full_name(kind: EntryKind, lang: locale::Language) -> &'static str {
+    let key = match kind {
+        EntryKind::Worker => "entrykind.worker",
+        EntryKind::Unit => "entrykind.unit",
+        EntryKind::Structure => "entrykind.structure",
+        EntryKind::Research => "entrykind.research",
+        EntryKind::Upgrade => "entrykind.upgrade",
+        EntryKind::Inject => "entrykind.inject",
+    };
+    t(key, lang)
+}
+
 /// Chip compacto: [letra] nome
-fn legend_chip(ui: &mut Ui, kind: EntryKind) {
+fn legend_chip(ui: &mut Ui, kind: EntryKind, lang: locale::Language) {
     let color = kind_color(kind);
     ui.label(
         RichText::new(format!(" {} ", kind.short_letter()))
@@ -237,7 +279,7 @@ fn legend_chip(ui: &mut Ui, kind: EntryKind) {
             .color(Color32::BLACK)
             .background_color(color),
     );
-    ui.label(RichText::new(kind.full_name()).small().weak());
+    ui.label(RichText::new(entry_kind_full_name(kind, lang)).small().weak());
 }
 
 /// Ícone de status: símbolo colorido + label
@@ -286,12 +328,20 @@ fn player_column(
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("📋").on_hover_text("Copiar build order para a área de transferência").clicked() {
+                    if ui
+                        .small_button("📋")
+                        .on_hover_text(t("build_order.copy_tooltip", lang))
+                        .clicked()
+                    {
                         let text = format_clipboard_single(player, lps, lang);
                         ui.ctx().copy_text(text);
                     }
                     let salt_modal_id = Id::new(format!("salt_modal_{}", index));
-                    if ui.small_button("SALT").on_hover_text("Gerar SALT Encoding").clicked() {
+                    if ui
+                        .small_button("SALT")
+                        .on_hover_text(t("build_order.salt_button_tooltip", lang))
+                        .clicked()
+                    {
                         let encoded = salt::encode(player, lps);
                         ui.ctx().data_mut(|d| d.insert_temp::<String>(salt_modal_id, encoded));
                         ui.ctx().data_mut(|d| d.insert_temp::<bool>(Id::new(format!("salt_open_{}", index)), true));
@@ -316,7 +366,7 @@ fn player_column(
 
     // ── Tabela scrollable ───────────────────────────────────────
     if player.entries.is_empty() {
-        ui.label(RichText::new("(nenhuma entrada)").italics());
+        ui.label(RichText::new(t("build_order.empty_entries", lang)).italics());
         return;
     }
 
@@ -329,11 +379,11 @@ fn player_column(
                 .spacing([12.0, 2.0])
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label(RichText::new("início").small().strong());
-                    ui.label(RichText::new("fim").small().strong());
-                    ui.label(RichText::new("supply").small().strong());
-                    ui.label(RichText::new("ação").small().strong());
-                    ui.label(RichText::new("tipo").small().strong());
+                    ui.label(RichText::new(t("build_order.col.start", lang)).small().strong());
+                    ui.label(RichText::new(t("build_order.col.end", lang)).small().strong());
+                    ui.label(RichText::new(t("build_order.col.supply", lang)).small().strong());
+                    ui.label(RichText::new(t("build_order.col.action", lang)).small().strong());
+                    ui.label(RichText::new(t("build_order.col.type", lang)).small().strong());
                     ui.end_row();
 
                     let mut rendered = 0usize;
@@ -361,12 +411,12 @@ fn player_column(
                             EntryOutcome::Cancelled => (
                                 Some(Color32::from_rgb(220, 180, 80)),
                                 Some("⊘"),
-                                Some("cancelado pelo jogador"),
+                                Some(t("build_order.outcome.cancelled", lang)),
                             ),
                             EntryOutcome::DestroyedInProgress => (
                                 Some(Color32::from_rgb(230, 90, 90)),
                                 Some("✕"),
-                                Some("destruído durante a construção"),
+                                Some(t("build_order.outcome.destroyed", lang)),
                             ),
                         };
                         let strike = outcome != EntryOutcome::Completed;
@@ -418,9 +468,10 @@ fn player_column(
                                     RichText::new(chrono_text)
                                         .strong(),
                                 )
-                                .on_hover_text(format!(
-                                    "Chrono Boost ×{}",
-                                    entry.chrono_boosts,
+                                .on_hover_text(tf(
+                                    "build_order.chrono_tooltip",
+                                    lang,
+                                    &[("count", &entry.chrono_boosts.to_string())],
                                 ));
                             }
                         });
@@ -433,7 +484,7 @@ fn player_column(
                                 .strong()
                                 .color(color),
                         )
-                        .on_hover_text(kind.full_name());
+                        .on_hover_text(entry_kind_full_name(kind, lang));
 
                         ui.end_row();
                         rendered += 1;
@@ -441,7 +492,7 @@ fn player_column(
 
                     if rendered == 0 {
                         ui.label(
-                            RichText::new("(nada corresponde aos filtros)")
+                            RichText::new(t("build_order.no_match", lang))
                                 .italics()
                                 .color(Color32::from_gray(140)),
                         );
@@ -504,7 +555,8 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::La
         race_initial(&player.race),
         player.name,
     ));
-    out.push_str("tipo  início  fim     supply  ação\n");
+    out.push_str(t("build_order.clipboard.header", lang));
+    out.push('\n');
     for entry in &player.entries {
         let kind = classify_entry(entry);
         let display = format_display_name(&entry.action, lang);
@@ -515,8 +567,8 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::La
         };
         let outcome_mark = match entry.outcome {
             EntryOutcome::Completed => "",
-            EntryOutcome::Cancelled => " [cancelado]",
-            EntryOutcome::DestroyedInProgress => " [destruído]",
+            EntryOutcome::Cancelled => t("build_order.clipboard.cancelled_mark", lang),
+            EntryOutcome::DestroyedInProgress => t("build_order.clipboard.destroyed_mark", lang),
         };
         out.push_str(&format!(
             "{}     {:>5}  {:>5}  {:>3}/{:<3}  {}{}\n",

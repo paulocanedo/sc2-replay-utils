@@ -5,6 +5,8 @@ pub mod chat;
 pub mod charts;
 pub mod timeline;
 
+use crate::locale::{t, Language};
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Tab {
     Timeline,
@@ -14,13 +16,15 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub fn label(self) -> &'static str {
-        match self {
-            Tab::Timeline => "Timeline",
-            Tab::BuildOrder => "Build Order",
-            Tab::Charts => "Gráficos",
-            Tab::Chat => "Chat",
-        }
+    /// Localized label for the tab header.
+    pub fn label(self, lang: Language) -> &'static str {
+        let key = match self {
+            Tab::Timeline => "tab.timeline",
+            Tab::BuildOrder => "tab.build_order",
+            Tab::Charts => "tab.charts",
+            Tab::Chat => "tab.chat",
+        };
+        t(key, lang)
     }
 
     pub const ALL: [Tab; 4] = [Tab::Timeline, Tab::BuildOrder, Tab::Charts, Tab::Chat];
