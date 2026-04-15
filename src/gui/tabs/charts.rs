@@ -410,24 +410,71 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             }
         });
 
-        // Card 2: production gap / efficiency
+        // Card 2: production efficiency — separado em duas sub-colunas
+        // lado a lado (Workers | Army). Workers continua vindo de
+        // `production_gap.rs` (escalar canônico com MIN_IDLE_LOOPS/
+        // backoff próprios). Army é a média das amostras do novo
+        // time-series `efficiency_army`. Zerg aparece com traço curto.
         card(&mut cols[1], t("charts.card.production_efficiency", lang), |ui| {
-            if let Some(pg) = loaded.production.as_ref() {
-                for (idx, p) in pg.players.iter().enumerate() {
-                    player_line(
-                        ui,
-                        &p.name,
-                        idx,
-                        &format!("{:.1}%", p.efficiency_pct),
-                        config.is_user(&p.name),
-                        lang,
-                    );
-                }
-            } else {
+            let has_any = loaded.production.is_some() || loaded.efficiency_army.is_some();
+            if !has_any {
                 ui.small(t("charts.card.empty", lang));
+                return;
             }
+
+            ui.columns(2, |sub| {
+                // Coluna Workers.
+                sub[0].label(
+                    RichText::new(t("charts.card.efficiency.workers", lang))
+                        .small()
+                        .strong(),
+                );
+                if let Some(pg) = loaded.production.as_ref() {
+                    for (idx, p) in pg.players.iter().enumerate() {
+                        let value = if p.is_zerg {
+                            "—".to_string()
+                        } else {
+                            format!("{:.1}%", p.efficiency_pct)
+                        };
+                        player_line(&mut sub[0], &p.name, idx, &value, config.is_user(&p.name), lang);
+                    }
+                } else {
+                    sub[0].small(t("charts.card.empty", lang));
+                }
+
+                // Coluna Army.
+                sub[1].label(
+                    RichText::new(t("charts.card.efficiency.army", lang))
+                        .small()
+                        .strong(),
+                );
+                if let Some(series) = loaded.efficiency_army.as_ref() {
+                    for (idx, p) in series.players.iter().enumerate() {
+                        let value = if p.is_zerg || p.samples.is_empty() {
+                            "—".to_string()
+                        } else {
+                            format!("{:.1}%", average_efficiency(&p.samples))
+                        };
+                        player_line(&mut sub[1], &p.name, idx, &value, config.is_user(&p.name), lang);
+                    }
+                } else {
+                    sub[1].small(t("charts.card.empty", lang));
+                }
+            });
         });
     });
+}
+
+/// Média simples das `efficiency_pct` das amostras. As amostras vêm
+/// de buckets de tamanho fixo (só o último pode ser parcial), então
+/// a média aritmética é uma boa aproximação da média ponderada pelo
+/// tempo — suficiente para um número de resumo no card.
+fn average_efficiency(samples: &[crate::production_efficiency::EfficiencySample]) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 = samples.iter().map(|s| s.efficiency_pct).sum();
+    sum / samples.len() as f64
 }
 
 fn card(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {

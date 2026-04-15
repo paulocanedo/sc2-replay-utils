@@ -39,6 +39,44 @@ const CHART_BUCKET_SECONDS: f64 = 10.0;
 /// importantes (early/mid-game, onde cada segundo de idle importa).
 const ARMY_SUPPLY_MAXED_THRESHOLD: i32 = 185;
 
+/// Duração total (em game loops) do ciclo de warp de uma WarpGate,
+/// contado a partir do instante em que o jogador emite o comando
+/// de warp: ~5s de animação de warp-in + ~20s de cooldown até a
+/// estrutura ficar disponível para warpar novamente (~25s no total
+/// em Faster, que corresponde a 560 loops @ 22.4 lps).
+///
+/// Racional da modelagem: após a pesquisa de Warp Gate, a semântica
+/// de "ociosa" muda — a estrutura só é ociosa quando está pronta e
+/// o jogador não está warpando. Durante warp-in + cooldown, o
+/// jogador *não pode* warpar, então não faz sentido penalizar como
+/// idle. Aproximação por constante única (sem discriminar por tipo
+/// de unidade) é deliberada — suficiente para o gráfico, refinação
+/// por unidade fica pendente.
+const WARP_GATE_CYCLE_LOOPS: u32 = 560;
+
+/// Nome do upgrade que habilita o modo WarpGate. Após essa pesquisa
+/// completar, gateways morpham automaticamente para warpgates e as
+/// produções de unidades do roster abaixo passam a ser warp-ins em
+/// vez de trains convencionais.
+const WARP_GATE_RESEARCH: &str = "WarpGateResearch";
+
+/// Unidades que podem ser warpadas por uma WarpGate. Usado para
+/// identificar, dado um `ProductionStarted` posterior ao término de
+/// `WarpGateResearch`, se ele corresponde a um warp-in (recebendo
+/// tratamento de ciclo estendido) ou não.
+const WARP_GATE_UNITS: &[&str] = &[
+    "Zealot",
+    "Stalker",
+    "Sentry",
+    "Adept",
+    "HighTemplar",
+    "DarkTemplar",
+];
+
+fn is_warp_gate_unit(name: &str) -> bool {
+    WARP_GATE_UNITS.iter().any(|u| *u == name)
+}
+
 // ── Tipos públicos ───────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -199,6 +237,17 @@ fn compute_series_army(
         evs.push((gl, if delta > 0 { EvKind::CapacityUp } else { EvKind::CapacityDown }));
     }
 
+    // Loop em que `WarpGateResearch` ficou pronto para esse jogador
+    // (ou None se nunca pesquisou / jogador não é Protoss). A partir
+    // desse ponto, warps de unidades do `WARP_GATE_UNITS` passam a
+    // ser tratados com janela estendida (warp-in + cooldown) em vez
+    // da janela curta só do warp-in.
+    let warp_research_loop: Option<u32> = player
+        .upgrades
+        .iter()
+        .find(|u| u.name == WARP_GATE_RESEARCH)
+        .map(|u| u.game_loop);
+
     // Pareia ProductionStarted com ProductionFinished/Cancelled por tag,
     // filtrando `category == Unit`. Guardamos (start_loop, entity_type)
     // para back-datar o start quando o tracker emitiu ambos os eventos
@@ -232,8 +281,27 @@ fn compute_series_army(
                     } else {
                         start_loop
                     };
+                    // Detecção de warp-in: pesquisa de WarpGate já
+                    // completou E a unidade está no roster de warpáveis
+                    // E o start (após eventual back-date) é posterior à
+                    // pesquisa. Nesse caso o "fim da produção" não é o
+                    // `ProductionFinished` do replay (que sinaliza só o
+                    // término da animação de warp-in, ~5s), mas sim o
+                    // final do cooldown da WarpGate — modelado como um
+                    // ciclo fixo de `WARP_GATE_CYCLE_LOOPS` a partir do
+                    // start. Enquanto esse slot estiver "ativo", a
+                    // estrutura não pode warpar outra unidade, então é
+                    // tratada como ocupada (não idle).
+                    let is_warp_in = warp_research_loop
+                        .map(|r| start_loop >= r && is_warp_gate_unit(&entity_type))
+                        .unwrap_or(false);
+                    let end_loop = if is_warp_in {
+                        (start_loop + WARP_GATE_CYCLE_LOOPS).min(game_end)
+                    } else {
+                        ev.game_loop
+                    };
                     evs.push((start_loop, EvKind::ProdStart));
-                    evs.push((ev.game_loop, EvKind::ProdEnd));
+                    evs.push((end_loop, EvKind::ProdEnd));
                 }
             }
             EntityEventKind::Died => {}
@@ -376,7 +444,7 @@ fn sweep(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay::{EntityEvent, ReplayTimeline};
+    use crate::replay::{EntityEvent, ReplayTimeline, UpgradeEntry};
 
     fn mk_timeline(players: Vec<PlayerTimeline>, game_loops: u32) -> ReplayTimeline {
         ReplayTimeline {
@@ -732,5 +800,155 @@ mod tests {
         for sample in s {
             assert_eq!(sample.efficiency_pct, 0.0);
         }
+    }
+
+    fn mk_upgrade(game_loop: u32, name: &str) -> UpgradeEntry {
+        UpgradeEntry { game_loop, seq: 0, name: name.to_string() }
+    }
+
+    #[test]
+    fn warpgate_extends_busy_window_with_cooldown() {
+        // Cenário: Protoss com 1 WarpGate (registrado em army_capacity
+        // desde t=0), WarpGateResearch completando em t=100, e um
+        // warp-in de Zealot começando em t=500. O replay emite
+        // ProductionFinished em t=612 (~5s de warp-in), mas a janela
+        // real de ocupação do slot vai até t=500+560=1060 (~25s,
+        // incluindo cooldown).
+        let mut p = mk_player("Prot");
+        p.army_capacity.push((0, 1));
+        p.upgrades.push(mk_upgrade(100, WARP_GATE_RESEARCH));
+        p.entity_events.push(EntityEvent {
+            game_loop: 500,
+            seq: 0,
+            kind: EntityEventKind::ProductionStarted,
+            entity_type: "Zealot".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: Some("Zealot".to_string()),
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        p.entity_events.push(EntityEvent {
+            game_loop: 612,
+            seq: 1,
+            kind: EntityEventKind::ProductionFinished,
+            entity_type: "Zealot".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: None,
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        let tl = mk_timeline(vec![p], 1500);
+
+        let s = &extract_efficiency_series(&tl, EfficiencyTarget::Army).unwrap().players[0].samples;
+
+        // [448, 672): active=1 em [500, 672) = 172 loops (cap_int=224).
+        //   pct = 172/224 ≈ 76.8%.
+        let b = bucket_ending_at(s, 672);
+        assert!((b.efficiency_pct - (172.0 / 224.0 * 100.0)).abs() < EPS);
+        // [672, 896) e [896, 1120): dentro da janela estendida (vai
+        // até 1060). O bucket 1120 inclui active=1 em [896, 1060) =
+        //   164 loops. [1120, 1344): idle, 0%.
+        assert!((bucket_ending_at(s, 896).efficiency_pct - 100.0).abs() < EPS);
+        let partial = bucket_ending_at(s, 1120);
+        assert!(
+            (partial.efficiency_pct - (164.0 / 224.0 * 100.0)).abs() < EPS,
+            "bucket 1120 esperava {}, veio {}",
+            164.0 / 224.0 * 100.0,
+            partial.efficiency_pct
+        );
+        // Após o cooldown: slot ocioso.
+        assert_eq!(bucket_ending_at(s, 1344).efficiency_pct, 0.0);
+    }
+
+    #[test]
+    fn warpgate_cycle_not_applied_before_research() {
+        // Mesmo cenário do teste acima, mas o warp-in acontece antes
+        // da pesquisa completar. Deve usar a janela curta (normal
+        // gateway train) em vez da janela estendida.
+        let mut p = mk_player("Prot");
+        p.army_capacity.push((0, 1));
+        p.upgrades.push(mk_upgrade(800, WARP_GATE_RESEARCH));
+        p.entity_events.push(EntityEvent {
+            game_loop: 200,
+            seq: 0,
+            kind: EntityEventKind::ProductionStarted,
+            entity_type: "Zealot".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: Some("Zealot".to_string()),
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        p.entity_events.push(EntityEvent {
+            game_loop: 500,
+            seq: 1,
+            kind: EntityEventKind::ProductionFinished,
+            entity_type: "Zealot".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: None,
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        let tl = mk_timeline(vec![p], 1500);
+
+        let s = &extract_efficiency_series(&tl, EfficiencyTarget::Army).unwrap().players[0].samples;
+        // [448, 672): active=1 apenas em [448, 500) = 52 loops. Sem
+        // a extensão de WarpGate, retorna a 0 após 500. pct = 52/224.
+        let b = bucket_ending_at(s, 672);
+        assert!((b.efficiency_pct - (52.0 / 224.0 * 100.0)).abs() < EPS);
+        // Bucket seguinte: idle.
+        assert_eq!(bucket_ending_at(s, 896).efficiency_pct, 0.0);
+    }
+
+    #[test]
+    fn warpgate_only_extends_for_warp_gate_units() {
+        // Cenário: Robotics Facility produzindo Immortal depois de
+        // WarpGateResearch. Immortal não está no roster de warpáveis,
+        // então mantém a janela normal (não leva a extensão).
+        let mut p = mk_player("Prot");
+        p.army_capacity.push((0, 1));
+        p.upgrades.push(mk_upgrade(100, WARP_GATE_RESEARCH));
+        p.entity_events.push(EntityEvent {
+            game_loop: 300,
+            seq: 0,
+            kind: EntityEventKind::ProductionStarted,
+            entity_type: "Immortal".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: Some("Immortal".to_string()),
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        p.entity_events.push(EntityEvent {
+            game_loop: 500,
+            seq: 1,
+            kind: EntityEventKind::ProductionFinished,
+            entity_type: "Immortal".to_string(),
+            category: EntityCategory::Unit,
+            tag: 1,
+            pos_x: 0,
+            pos_y: 0,
+            creator_ability: None,
+            creator_tag: None,
+            killer_player_id: None,
+        });
+        let tl = mk_timeline(vec![p], 1200);
+
+        let s = &extract_efficiency_series(&tl, EfficiencyTarget::Army).unwrap().players[0].samples;
+        // Após 500 deve voltar a idle (sem extensão por cooldown).
+        assert_eq!(bucket_ending_at(s, 896).efficiency_pct, 0.0);
     }
 }
