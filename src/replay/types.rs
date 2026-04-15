@@ -229,6 +229,55 @@ pub struct InjectCmd {
     pub target_y: u8,
 }
 
+/// Identificador canônico da conta Battle.net do jogador. Extraído
+/// de `details.player_list[i].toon`. Não vai pro cache da biblioteca
+/// (apenas `PlayerMeta` é cacheado).
+#[derive(Clone, Debug)]
+pub struct Toon {
+    /// Região Battle.net: 1=US, 2=EU, 3=KR, 5=CN.
+    pub region: u8,
+    /// Bytes ASCII do program_id (normalmente "S2\0\0").
+    pub program_id: u32,
+    pub realm: u32,
+    pub id: u64,
+}
+
+impl Toon {
+    /// Slug da região usado na URL do perfil público. `None` para
+    /// regiões desconhecidas (evita montar URL quebrada).
+    fn region_slug(&self) -> Option<&'static str> {
+        match self.region {
+            1 => Some("us"),
+            2 => Some("eu"),
+            3 => Some("kr"),
+            5 => Some("cn"),
+            _ => None,
+        }
+    }
+
+    /// Handle textual no formato `{region}-S2-{realm}-{id}` (padrão
+    /// Blizzard). `None` se `id == 0` (AI/computer).
+    pub fn handle(&self) -> Option<String> {
+        if self.id == 0 {
+            return None;
+        }
+        Some(format!("{}-S2-{}-{}", self.region, self.realm, self.id))
+    }
+
+    /// URL pública do perfil em starcraft2.blizzard.com. `None` para
+    /// `id == 0` ou região fora da tabela conhecida.
+    pub fn battlenet_url(&self) -> Option<String> {
+        if self.id == 0 {
+            return None;
+        }
+        let slug = self.region_slug()?;
+        Some(format!(
+            "https://starcraft2.blizzard.com/en-us/profile/{}/{}/{}",
+            slug, self.realm, self.id
+        ))
+    }
+}
+
 pub struct PlayerTimeline {
     pub name: String,
     pub clan: String,
@@ -242,6 +291,9 @@ pub struct PlayerTimeline {
     /// o campo killer diferencia.
     pub player_id: u8,
     pub result: Option<String>,
+    /// Identificador canônico da conta Battle.net. `None` para
+    /// AI/computer (quando `toon.id == 0` no replay).
+    pub toon: Option<Toon>,
 
     pub stats: Vec<StatsSnapshot>,
     pub upgrades: Vec<UpgradeEntry>,

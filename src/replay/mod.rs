@@ -45,5 +45,5 @@ pub use types::{
 #[allow(unused_imports)]
 pub use types::{
     CameraPosition, CreepEntry, CreepKind, EntityEvent, InjectCmd, ProductionCmd, ResourceKind,
-    ResourceNode, StatsSnapshot, UnitPositionSample, UpgradeEntry,
+    ResourceNode, StatsSnapshot, Toon, UnitPositionSample, UpgradeEntry,
 };

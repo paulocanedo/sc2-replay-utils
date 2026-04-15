@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
-use super::types::{PlayerTimeline, ReplayTimeline};
+use super::types::{PlayerTimeline, ReplayTimeline, Toon};
 use super::{finalize, game, message, tracker};
 
 /// Faz o parsing single-pass do replay e devolve um `ReplayTimeline`.
@@ -64,6 +64,17 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
             let mmr = init_data
                 .as_ref()
                 .and_then(|id| find_mmr_for_slot(id, p.working_set_slot_id));
+            // `toon.id == 0` indica AI/computer (sem conta Battle.net).
+            let toon = if p.toon.id == 0 {
+                None
+            } else {
+                Some(Toon {
+                    region: p.toon.region,
+                    program_id: p.toon.program_id,
+                    realm: p.toon.realm,
+                    id: p.toon.id,
+                })
+            };
             PlayerTimeline {
                 name,
                 clan,
@@ -73,6 +84,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 // e com o `killer_player_id` dos tracker events.
                 player_id: (in_idx + 1) as u8,
                 result: Some(p.result.clone()),
+                toon,
                 stats: Vec::new(),
                 upgrades: Vec::new(),
                 entity_events: Vec::new(),

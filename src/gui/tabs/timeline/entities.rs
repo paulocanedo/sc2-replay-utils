@@ -257,6 +257,7 @@ mod tests {
             mmr: None,
             player_id: 1,
             result: None,
+            toon: None,
             stats: Vec::new(),
             upgrades: Vec::new(),
             entity_events: Vec::new(),
