@@ -756,15 +756,20 @@ fn player_card(
                         .color(Color32::WHITE),
                 );
                 if let Some(toon) = player.toon.as_ref() {
-                    let handle = toon.handle().unwrap_or_default();
+                    let handle = toon.handle();
                     if let Some(url) = toon.battlenet_url() {
-                        let resp = ui
-                            .small_button("🔗")
-                            .on_hover_text(format!("{handle}\n{url}"));
+                        // `on_hover_ui` adia a composição do tooltip —
+                        // o handle/URL só vira WidgetText quando o
+                        // usuário paira sobre o botão, evitando alocação
+                        // por frame no hot path.
+                        let resp = ui.small_button("🔗").on_hover_ui(|ui| {
+                            ui.label(handle);
+                            ui.label(url);
+                        });
                         if resp.clicked() {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
                         }
-                    } else if !handle.is_empty() {
+                    } else {
                         // Região desconhecida: mostra só o handle.
                         ui.label(
                             RichText::new(handle)

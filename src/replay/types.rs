@@ -232,6 +232,10 @@ pub struct InjectCmd {
 /// Identificador canônico da conta Battle.net do jogador. Extraído
 /// de `details.player_list[i].toon`. Não vai pro cache da biblioteca
 /// (apenas `PlayerMeta` é cacheado).
+///
+/// Os strings textuais (`handle` e `url`) são pré-computados no
+/// construtor e expostos como `&str` — `player_card` é chamado a
+/// cada frame da GUI e não pode pagar alocação por chamada.
 #[derive(Clone, Debug)]
 pub struct Toon {
     /// Região Battle.net: 1=US, 2=EU, 3=KR, 5=CN.
@@ -240,41 +244,53 @@ pub struct Toon {
     pub program_id: u32,
     pub realm: u32,
     pub id: u64,
+    /// Handle textual `{region}-S2-{realm}-{id}` (padrão Blizzard).
+    handle: String,
+    /// URL pública do perfil em starcraft2.blizzard.com. `None` para
+    /// regiões fora da tabela conhecida.
+    url: Option<String>,
+}
+
+/// Slug da região usado na URL do perfil público. `None` para
+/// regiões desconhecidas (evita montar URL quebrada).
+fn region_slug(region: u8) -> Option<&'static str> {
+    match region {
+        1 => Some("us"),
+        2 => Some("eu"),
+        3 => Some("kr"),
+        5 => Some("cn"),
+        _ => None,
+    }
 }
 
 impl Toon {
-    /// Slug da região usado na URL do perfil público. `None` para
-    /// regiões desconhecidas (evita montar URL quebrada).
-    fn region_slug(&self) -> Option<&'static str> {
-        match self.region {
-            1 => Some("us"),
-            2 => Some("eu"),
-            3 => Some("kr"),
-            5 => Some("cn"),
-            _ => None,
-        }
-    }
-
-    /// Handle textual no formato `{region}-S2-{realm}-{id}` (padrão
-    /// Blizzard). `None` se `id == 0` (AI/computer).
-    pub fn handle(&self) -> Option<String> {
-        if self.id == 0 {
+    /// Constrói a partir dos campos brutos do s2protocol. Retorna
+    /// `None` para `id == 0` (AI/computer) — o resto do app não
+    /// precisa distinguir esse caso do caso "sem conta".
+    pub fn new(region: u8, program_id: u32, realm: u32, id: u64) -> Option<Self> {
+        if id == 0 {
             return None;
         }
-        Some(format!("{}-S2-{}-{}", self.region, self.realm, self.id))
+        let handle = format!("{region}-S2-{realm}-{id}");
+        let url = region_slug(region).map(|slug| {
+            format!("https://starcraft2.blizzard.com/en-us/profile/{slug}/{realm}/{id}")
+        });
+        Some(Self {
+            region,
+            program_id,
+            realm,
+            id,
+            handle,
+            url,
+        })
     }
 
-    /// URL pública do perfil em starcraft2.blizzard.com. `None` para
-    /// `id == 0` ou região fora da tabela conhecida.
-    pub fn battlenet_url(&self) -> Option<String> {
-        if self.id == 0 {
-            return None;
-        }
-        let slug = self.region_slug()?;
-        Some(format!(
-            "https://starcraft2.blizzard.com/en-us/profile/{}/{}/{}",
-            slug, self.realm, self.id
-        ))
+    pub fn handle(&self) -> &str {
+        &self.handle
+    }
+
+    pub fn battlenet_url(&self) -> Option<&str> {
+        self.url.as_deref()
     }
 }
 

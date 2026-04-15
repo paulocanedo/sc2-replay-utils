@@ -64,17 +64,13 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
             let mmr = init_data
                 .as_ref()
                 .and_then(|id| find_mmr_for_slot(id, p.working_set_slot_id));
-            // `toon.id == 0` indica AI/computer (sem conta Battle.net).
-            let toon = if p.toon.id == 0 {
-                None
-            } else {
-                Some(Toon {
-                    region: p.toon.region,
-                    program_id: p.toon.program_id,
-                    realm: p.toon.realm,
-                    id: p.toon.id,
-                })
-            };
+            // `Toon::new` devolve `None` para `id == 0` (AI/computer).
+            let toon = Toon::new(
+                p.toon.region,
+                p.toon.program_id,
+                p.toon.realm,
+                p.toon.id,
+            );
             PlayerTimeline {
                 name,
                 clan,
