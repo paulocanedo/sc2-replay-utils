@@ -1,10 +1,38 @@
 // Pós-processamento do parser: ordena timelines fora de ordem e
-// constrói o índice cumulativo `alive_count` por tipo de entidade.
+// deriva todos os índices (`alive_count`, `creep_index`,
+// `worker_capacity`, `army_capacity`, `worker_births`,
+// `upgrade_cumulative`) a partir dos streams canônicos
+// (`entity_events`, `upgrades`). Todas as derivações vivem aqui — o
+// tracker não preenche índices em paralelo.
 
 use std::collections::{HashMap, HashSet};
 
-use super::classify::is_creep_tumor_name;
+use super::classify::{
+    is_armor_upgrade, is_army_producer, is_attack_upgrade, is_creep_tumor_name, is_worker_producer,
+    upgrade_level,
+};
 use super::types::{CreepEntry, CreepKind, EntityEventKind, PlayerTimeline, StatsSnapshot};
+
+// ── Constantes de morph ─────────────────────────────────────────────
+//
+// Tempos em game loops (speed Faster) usados para backfillar a saída
+// do produtor de workers durante morphs in-place (CC → Orbital/PF).
+// Vivem aqui porque a derivação de capacidades acontece em `finalize`;
+// o tracker emite apenas os `EntityEvent`s crus.
+
+/// Tempo de morph CC → Orbital Command em game loops (~25s em Faster).
+const ORBITAL_MORPH_TIME: u32 = 560;
+
+/// Tempo de morph CC → Planetary Fortress em game loops (~36s em Faster).
+const PF_MORPH_TIME: u32 = 806;
+
+fn morph_build_time(unit_type: &str) -> u32 {
+    match unit_type {
+        "OrbitalCommand" => ORBITAL_MORPH_TIME,
+        "PlanetaryFortress" => PF_MORPH_TIME,
+        _ => 0,
+    }
+}
 
 /// Valores conhecidos do estado inicial de partida ladder para cada
 /// raça: (supply_used, supply_made, workers, minerals).
@@ -64,9 +92,6 @@ pub(super) fn finalize_indices(players: &mut [PlayerTimeline]) {
         // ordenação é estável, então a ordem relativa entre eventos
         // do mesmo loop é preservada.
         player.entity_events.sort_by_key(|e| e.game_loop);
-        player.worker_capacity.sort_by_key(|(l, _)| *l);
-        player.worker_births.sort_unstable();
-        player.army_capacity.sort_by_key(|(l, _)| *l);
         // `unit_positions` chega na ordem natural do tracker, então
         // já está ordenado — mas um sort estável defensivo garante
         // o invariante esperado pelos consumers (`last_known_positions`).
@@ -100,6 +125,8 @@ pub(super) fn finalize_indices(players: &mut [PlayerTimeline]) {
             }
         }
 
+        derive_capacity_indices(player);
+        derive_upgrade_cumulative(player);
         build_creep_index(player);
     }
 }
@@ -171,8 +198,196 @@ fn build_creep_index(player: &mut PlayerTimeline) {
         }
     }
 
-    // entity_events já é ordenado por game_loop, então as inserções
-    // acima saem ordenadas. Sort defensivo para garantir o invariante
-    // que o consumer (`partition_point` em `draw_creep`) depende.
-    player.creep_index.sort_by_key(|c| c.born_loop);
+    // Inserções acima saem em ordem de `game_loop` (entity_events já
+    // está ordenado pelo sort em `finalize_indices`), então nenhum
+    // sort extra é necessário aqui.
+}
+
+/// Deriva `worker_capacity`, `army_capacity` e `worker_births` a partir
+/// de `entity_events` (stream canônico). Esta função é a única fonte
+/// dessas listas — o tracker não as popula em paralelo.
+///
+/// Regras:
+/// - `ProductionFinished` de producer de worker (CC/Orbital/PF/Nexus) →
+///   `worker_capacity += 1`.
+/// - `Died` de producer de worker → `worker_capacity -= 1`.
+/// - Idem para army producers (Barracks/Factory/Starport/Gateway/
+///   WarpGate/RoboticsFacility/Stargate) em `army_capacity`.
+/// - `ProductionFinished` de SCV/Probe cujo `ProductionStarted`
+///   companheiro (mesmo loop, mesmo tag) tenha `creator_ability` com
+///   "Train" → `worker_births.push(loop)`.
+///
+/// Morphs in-place (CC → Orbital/PF, Hatchery → Lair, etc.) aparecem em
+/// `entity_events` como uma tripla consecutiva
+/// `Died(A) → Started(B) → Finished(B)` no mesmo `game_loop` e mesmo
+/// `tag`. Quando ambos os tipos são producers, o `Died` do antigo e o
+/// `Finished` do novo se cancelam no net (−1 + +1 = 0). Porém, para
+/// CC→Orbital e CC→PF queremos backfillar a saída do CC pelo tempo do
+/// morph (o produtor fica offline durante a transformação): emitimos
+/// `(morph_start, -1)` onde `morph_start = finish_loop - morph_build_time`
+/// e `(finish_loop, +1)`.
+fn derive_capacity_indices(player: &mut PlayerTimeline) {
+    let events = &player.entity_events;
+    // Pares (game_loop, tag) onde há `ProductionStarted` — usado para
+    // identificar morphs in-place e descartar o `Died` companheiro
+    // (já contabilizado via Started + Finished).
+    let mut morph_started: HashSet<(u32, i64)> = HashSet::new();
+    for ev in events {
+        if matches!(ev.kind, EntityEventKind::ProductionStarted) {
+            morph_started.insert((ev.game_loop, ev.tag));
+        }
+    }
+
+    // `creator_ability` do Started companheiro (mesmo loop+tag) — usado
+    // para decidir se um `ProductionFinished` de worker conta como
+    // "nascido via Train" (entra em `worker_births`).
+    let mut started_abilities: HashMap<(u32, i64), Option<String>> = HashMap::new();
+    for ev in events {
+        if matches!(ev.kind, EntityEventKind::ProductionStarted) {
+            started_abilities.insert((ev.game_loop, ev.tag), ev.creator_ability.clone());
+        }
+    }
+
+    for (i, ev) in events.iter().enumerate() {
+        match ev.kind {
+            EntityEventKind::Died => {
+                // Morph: `Died` seguido de `Started` no mesmo loop+tag.
+                // A capacidade do tipo antigo sai via backfill abaixo
+                // (no ramo `ProductionStarted`), nunca aqui.
+                if morph_started.contains(&(ev.game_loop, ev.tag)) {
+                    continue;
+                }
+                if is_worker_producer(&ev.entity_type) {
+                    player.worker_capacity.push((ev.game_loop, -1));
+                }
+                if is_army_producer(&ev.entity_type) {
+                    player.army_capacity.push((ev.game_loop, -1));
+                }
+            }
+            EntityEventKind::ProductionStarted => {
+                // Detecta morph in-place: Died do mesmo tag/loop está
+                // imediatamente antes (sort estável preserva a ordem
+                // Died → Started → Finished do `apply_type_change`).
+                let old_type = if i > 0 {
+                    let prev = &events[i - 1];
+                    if matches!(prev.kind, EntityEventKind::Died)
+                        && prev.tag == ev.tag
+                        && prev.game_loop == ev.game_loop
+                    {
+                        Some(prev.entity_type.as_str())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let Some(old_type) = old_type else { continue };
+
+                let new_type = ev.entity_type.as_str();
+                let old_w = is_worker_producer(old_type);
+                let new_w = is_worker_producer(new_type);
+                match (old_w, new_w) {
+                    (true, true) => {
+                        let mt = morph_build_time(new_type);
+                        if mt > 0 {
+                            let morph_start = ev.game_loop.saturating_sub(mt);
+                            player.worker_capacity.push((morph_start, -1));
+                            player.worker_capacity.push((ev.game_loop, 1));
+                        }
+                    }
+                    (true, false) => {
+                        player.worker_capacity.push((ev.game_loop, -1));
+                    }
+                    (false, true) => {
+                        player.worker_capacity.push((ev.game_loop, 1));
+                    }
+                    (false, false) => {}
+                }
+
+                let old_a = is_army_producer(old_type);
+                let new_a = is_army_producer(new_type);
+                match (old_a, new_a) {
+                    (true, true) => {
+                        let mt = morph_build_time(new_type);
+                        if mt > 0 {
+                            let morph_start = ev.game_loop.saturating_sub(mt);
+                            player.army_capacity.push((morph_start, -1));
+                            player.army_capacity.push((ev.game_loop, 1));
+                        }
+                    }
+                    (true, false) => {
+                        player.army_capacity.push((ev.game_loop, -1));
+                    }
+                    (false, true) => {
+                        player.army_capacity.push((ev.game_loop, 1));
+                    }
+                    (false, false) => {}
+                }
+            }
+            EntityEventKind::ProductionFinished => {
+                // Morph completion: o par `(Died antigo, Started novo)`
+                // no mesmo loop+tag já emitiu a capacidade via ramo
+                // `Started` acima. Evita contagem dupla.
+                let is_morph_finish = i > 0
+                    && matches!(events[i - 1].kind, EntityEventKind::ProductionStarted)
+                    && events[i - 1].tag == ev.tag
+                    && events[i - 1].game_loop == ev.game_loop
+                    && i >= 2
+                    && matches!(events[i - 2].kind, EntityEventKind::Died)
+                    && events[i - 2].tag == ev.tag
+                    && events[i - 2].game_loop == ev.game_loop;
+                if !is_morph_finish {
+                    if is_worker_producer(&ev.entity_type) {
+                        player.worker_capacity.push((ev.game_loop, 1));
+                    }
+                    if is_army_producer(&ev.entity_type) {
+                        player.army_capacity.push((ev.game_loop, 1));
+                    }
+                }
+
+                // worker_births: SCV/Probe nascidos via Train*. O
+                // `creator_ability` fica no Started companheiro (mesmo
+                // loop+tag), não no Finished.
+                if matches!(ev.entity_type.as_str(), "SCV" | "Probe") {
+                    if let Some(Some(ability)) = started_abilities.get(&(ev.game_loop, ev.tag)) {
+                        if ability.contains("Train") {
+                            player.worker_births.push(ev.game_loop);
+                        }
+                    }
+                }
+            }
+            EntityEventKind::ProductionCancelled => {}
+        }
+    }
+
+    // As listas são construídas em ordem crescente de `game_loop`
+    // porque `entity_events` já está ordenado. Exceção: o backfill de
+    // morph empurra `(morph_start, -1)` antes de `(finish_loop, +1)`,
+    // mas `morph_start < finish_loop` também respeita a ordem — exceto
+    // quando outro evento entre `morph_start` e `finish_loop` já foi
+    // emitido. Um sort estável defensivo garante o invariante.
+    player.worker_capacity.sort_by_key(|(l, _)| *l);
+    player.army_capacity.sort_by_key(|(l, _)| *l);
+    // `worker_births` sai estritamente crescente (só vem de Finished
+    // em ordem de loop) — nenhum sort necessário.
+}
+
+/// Deriva `upgrade_cumulative` a partir do stream canônico `upgrades`.
+/// Cada entrada é `(game_loop, attack_level_apos, armor_level_apos)`
+/// com os níveis cumulativos monotônicos (nunca diminuem).
+fn derive_upgrade_cumulative(player: &mut PlayerTimeline) {
+    let mut cur_attack: u8 = 0;
+    let mut cur_armor: u8 = 0;
+    for up in &player.upgrades {
+        let level = upgrade_level(&up.name);
+        if is_attack_upgrade(&up.name) && level > 0 {
+            cur_attack = cur_attack.max(level);
+        }
+        if is_armor_upgrade(&up.name) && level > 0 {
+            cur_armor = cur_armor.max(level);
+        }
+        player
+            .upgrade_cumulative
+            .push((up.game_loop, cur_attack, cur_armor));
+    }
 }

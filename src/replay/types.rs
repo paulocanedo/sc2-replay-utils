@@ -334,22 +334,27 @@ pub struct PlayerTimeline {
     pub alive_count: HashMap<String, Vec<(u32, i32)>>,
 
     /// Capacidade de produção de workers (CC/Orbital/PF/Nexus). Cada
-    /// par é `(game_loop, delta)`, ordenado.
+    /// par é `(game_loop, delta)`, ordenado. Derivado em `finalize.rs`
+    /// a partir de `entity_events` (`ProductionFinished` / `Died` de
+    /// producers + backfill de morph CC→Orbital/PF).
     pub worker_capacity: Vec<(u32, i32)>,
 
     /// game_loops em que workers (SCV/Probe) nasceram, ordenado.
     /// Usado por `production_gap` para detectar slots ociosos.
+    /// Derivado em `finalize.rs` a partir de `entity_events` (`ProductionFinished`
+    /// de SCV/Probe cujo `ProductionStarted` companheiro tenha
+    /// `creator_ability` com "Train").
     pub worker_births: Vec<u32>,
 
     /// Capacidade de produção de army (Barracks/Factory/Starport/
     /// Gateway/WarpGate/RoboticsFacility/Stargate). Cada par é
-    /// `(game_loop, delta)`, ordenado. Cache derivado de
-    /// `entity_events`, populado pelo tracker — análogo a
-    /// `worker_capacity`.
+    /// `(game_loop, delta)`, ordenado. Derivado em `finalize.rs` a
+    /// partir de `entity_events` — análogo a `worker_capacity`.
     pub army_capacity: Vec<(u32, i32)>,
 
     /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
-    /// para queries de scrubbing.
+    /// para queries de scrubbing. Derivado em `finalize.rs` a partir
+    /// de `upgrades` (stream canônica paralela a `entity_events`).
     pub upgrade_cumulative: Vec<(u32, u8, u8)>,
 
     /// Índice derivado de `entity_events` para render eficiente da

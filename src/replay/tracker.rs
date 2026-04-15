@@ -8,30 +8,13 @@ use std::collections::HashMap;
 
 use s2protocol::tracker_events::{unit_tag, ReplayTrackerEvent};
 
-use super::classify::{
-    classify_entity, is_armor_upgrade, is_army_producer, is_attack_upgrade, is_worker_producer,
-    resource_kind, upgrade_level,
-};
+use super::classify::{classify_entity, resource_kind};
 use super::types::{
-    EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, ResourceNode, StatsSnapshot,
+    EntityEvent, EntityEventKind, PlayerTimeline, ResourceNode, StatsSnapshot,
     UnitPositionSample, UpgradeEntry, UNIT_INIT_MARKER,
 };
 
-// ── Constantes de morph ─────────────────────────────────────────────
-
-/// Tempo de morph CC → Orbital Command em game loops (~25s em Faster).
-const ORBITAL_MORPH_TIME: u32 = 560;
-
-/// Tempo de morph CC → Planetary Fortress em game loops (~36s em Faster).
-const PF_MORPH_TIME: u32 = 806;
-
-fn morph_build_time(unit_type: &str) -> u32 {
-    match unit_type {
-        "OrbitalCommand" => ORBITAL_MORPH_TIME,
-        "PlanetaryFortress" => PF_MORPH_TIME,
-        _ => 0,
-    }
-}
+// ── Morph synthetic abilities ───────────────────────────────────────
 
 /// Tipos que, ao receberem `UnitTypeChange` (sem `UnitBorn` correspondente,
 /// caso típico dos morphs Terran de CC e do `WarpGate`), devem ser tratados
@@ -105,8 +88,6 @@ pub(super) fn process_tracker_events(
         .map_err(|e| format!("{:?}", e))?;
 
     let mut tag_map: HashMap<i64, TagState> = HashMap::new();
-    let mut cur_attack: Vec<u8> = vec![0; players.len()];
-    let mut cur_armor: Vec<u8> = vec![0; players.len()];
 
     let mut game_loop: u32 = 0;
     // Sequência monotônica usada como tiebreaker entre eventos do
@@ -148,21 +129,13 @@ pub(super) fn process_tracker_events(
                 if e.upgrade_type_name.contains("Spray") {
                     continue;
                 }
-                let level = upgrade_level(&e.upgrade_type_name);
-                if is_attack_upgrade(&e.upgrade_type_name) && level > 0 {
-                    cur_attack[idx] = cur_attack[idx].max(level);
-                }
-                if is_armor_upgrade(&e.upgrade_type_name) && level > 0 {
-                    cur_armor[idx] = cur_armor[idx].max(level);
-                }
                 players[idx].upgrades.push(UpgradeEntry {
                     game_loop,
                     seq,
                     name: e.upgrade_type_name,
                 });
-                players[idx]
-                    .upgrade_cumulative
-                    .push((game_loop, cur_attack[idx], cur_armor[idx]));
+                // `upgrade_cumulative` é derivado em `finalize.rs` a partir
+                // de `upgrades` — tracker só popula a stream canônica.
             }
 
             ReplayTrackerEvent::UnitBorn(e) => {
@@ -253,21 +226,10 @@ pub(super) fn process_tracker_events(
                             },
                         );
 
-                        // Worker nascido via Train (SCV/Probe).
-                        if matches!(category, EntityCategory::Worker)
-                            && creator_ability.as_deref().unwrap_or("").contains("Train")
-                            && matches!(e.unit_type_name.as_str(), "SCV" | "Probe")
-                        {
-                            players[idx].worker_births.push(game_loop);
-                        }
-
-                        // Estrutura produtora aparecendo (ex: CC inicial).
-                        if is_worker_producer(&e.unit_type_name) {
-                            players[idx].worker_capacity.push((game_loop, 1));
-                        }
-                        if is_army_producer(&e.unit_type_name) {
-                            players[idx].army_capacity.push((game_loop, 1));
-                        }
+                        // `worker_births`, `worker_capacity` e
+                        // `army_capacity` são derivados em `finalize.rs`
+                        // a partir dos eventos semânticos acima — o
+                        // tracker não popula índices em paralelo.
 
                         tag_map.insert(
                             tag,
@@ -328,12 +290,8 @@ pub(super) fn process_tracker_events(
                                 killer_player_id: None,
                             },
                         );
-                        if is_worker_producer(&e.unit_type_name) {
-                            players[idx].worker_capacity.push((game_loop, 1));
-                        }
-                        if is_army_producer(&e.unit_type_name) {
-                            players[idx].army_capacity.push((game_loop, 1));
-                        }
+                        // Capacidades derivadas em `finalize.rs` a partir
+                        // do `ProductionFinished` emitido acima.
                         if let Some(state) = tag_map.get_mut(&tag) {
                             state.lifecycle = Lifecycle::Finished;
                         }
@@ -440,12 +398,7 @@ pub(super) fn process_tracker_events(
                         killer_player_id: None,
                     },
                 );
-                if is_worker_producer(&entity_type) {
-                    players[idx].worker_capacity.push((game_loop, 1));
-                }
-                if is_army_producer(&entity_type) {
-                    players[idx].army_capacity.push((game_loop, 1));
-                }
+                // Capacidades derivadas em `finalize.rs`.
                 if let Some(state) = tag_map.get_mut(&tag) {
                     state.lifecycle = Lifecycle::Finished;
                 }
@@ -465,12 +418,8 @@ pub(super) fn process_tracker_events(
                 let kind = if state.lifecycle == Lifecycle::InProgress {
                     EntityEventKind::ProductionCancelled
                 } else {
-                    if is_worker_producer(&state.entity_type) {
-                        players[idx].worker_capacity.push((game_loop, -1));
-                    }
-                    if is_army_producer(&state.entity_type) {
-                        players[idx].army_capacity.push((game_loop, -1));
-                    }
+                    // Capacidades derivadas em `finalize.rs` a partir do
+                    // `Died` emitido abaixo.
                     EntityEventKind::Died
                 };
 
@@ -573,8 +522,10 @@ fn push_event(player: &mut PlayerTimeline, ev: EntityEvent) {
 /// Emite `Died` para o tipo antigo e `ProductionStarted`+`ProductionFinished`
 /// para o novo tipo, ambos no `game_loop` atual (a back-data do `Started`
 /// é evitada porque o build_order da GUI já faz o ajuste de start-time
-/// via `build_time_seconds`). A lógica de capacidade de workers, que
-/// precisa do morph downtime real, ainda usa o instante back-dated.
+/// via `build_time_seconds`). `finalize.rs` detecta o padrão
+/// `Died@loop@tag → Started@loop@tag → Finished@loop@tag` como morph e
+/// aplica o backfill de capacidade (CC→Orbital/PF) baseado em
+/// `morph_build_time`.
 fn apply_type_change(
     player: &mut PlayerTimeline,
     game_loop: u32,
@@ -648,49 +599,7 @@ fn apply_type_change(
         },
     );
 
-    // Worker capacity: replica a lógica de production_gap.rs, com o
-    // backfill de morph downtime para CC→Orbital/PF.
-    let old_is_prod = is_worker_producer(old_type);
-    let new_is_prod = is_worker_producer(new_type);
-    match (old_is_prod, new_is_prod) {
-        (true, true) => {
-            let mt = morph_build_time(new_type);
-            if mt > 0 {
-                let morph_start = game_loop.saturating_sub(mt);
-                player.worker_capacity.push((morph_start, -1));
-                player.worker_capacity.push((game_loop, 1));
-            }
-        }
-        (true, false) => {
-            player.worker_capacity.push((game_loop, -1));
-        }
-        (false, true) => {
-            player.worker_capacity.push((game_loop, 1));
-        }
-        (false, false) => {}
-    }
-
-    // Army capacity: mesma lógica, cobrindo morphs tipo Gateway→WarpGate
-    // (hoje net-zero pois `morph_build_time` não inclui WarpGate, mas o
-    // match deixa o lugar certo caso no futuro incluamos morphs com
-    // downtime real para army).
-    let old_is_army = is_army_producer(old_type);
-    let new_is_army = is_army_producer(new_type);
-    match (old_is_army, new_is_army) {
-        (true, true) => {
-            let mt = morph_build_time(new_type);
-            if mt > 0 {
-                let morph_start = game_loop.saturating_sub(mt);
-                player.army_capacity.push((morph_start, -1));
-                player.army_capacity.push((game_loop, 1));
-            }
-        }
-        (true, false) => {
-            player.army_capacity.push((game_loop, -1));
-        }
-        (false, true) => {
-            player.army_capacity.push((game_loop, 1));
-        }
-        (false, false) => {}
-    }
+    // `worker_capacity`/`army_capacity` são derivados em `finalize.rs`
+    // a partir da tripla `Died(old) → Started(new) → Finished(new)`
+    // emitida acima, incluindo o backfill de morph CC→Orbital/PF.
 }

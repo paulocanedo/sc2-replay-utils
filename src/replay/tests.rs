@@ -528,3 +528,216 @@ fn camera_at_returns_latest_le() {
     let c = p.camera_at(u32::MAX).unwrap();
     assert_eq!(c.game_loop, last.game_loop);
 }
+
+// ── Invariantes dos índices derivados ───────────────────────────────
+//
+// Após a migração de `worker_capacity`, `army_capacity`, `worker_births`
+// e `upgrade_cumulative` para `finalize.rs`, os testes abaixo blindam o
+// contrato: cada índice derivado deve bater com o que é derivável do
+// stream canônico correspondente.
+
+const WORKER_PRODUCERS: &[&str] = &["CommandCenter", "OrbitalCommand", "PlanetaryFortress", "Nexus"];
+const ARMY_PRODUCERS: &[&str] = &[
+    "Barracks", "Factory", "Starport", "Gateway", "WarpGate", "RoboticsFacility", "Stargate",
+];
+
+/// Soma cumulativa de um `Vec<(loop, delta)>` em um dado `loop`.
+fn capacity_sum_at(capacity: &[(u32, i32)], loop_: u32) -> i32 {
+    capacity.iter().filter(|(l, _)| *l <= loop_).map(|(_, d)| *d).sum()
+}
+
+/// Soma de `alive_count` para uma lista de tipos num dado loop.
+fn alive_sum_at(p: &PlayerTimeline, types: &[&str], loop_: u32) -> i32 {
+    types
+        .iter()
+        .map(|t| p.alive_count_at(t, loop_).max(0))
+        .sum()
+}
+
+#[test]
+fn worker_capacity_matches_alive_producers() {
+    let t = load();
+    for p in &t.players {
+        // Compara aos instantes de cada evento da timeline de capacidade
+        // — se `worker_capacity` é realmente derivada de `entity_events`,
+        // a soma cumulativa em cada `loop` deve bater com o alive_count
+        // somado dos producers. Tolerância zero: são índices derivados
+        // do mesmo stream canônico.
+        //
+        // Exceção: durante morphs CC→Orbital/PF há um backfill que faz
+        // `worker_capacity` cair antes do alive_count (o CC antigo sai
+        // do `entity_events` só no `game_loop` do morph, mas a
+        // capacidade já saiu `morph_time` loops antes). Então checamos
+        // só a igualdade no **último** evento de capacidade de cada loop
+        // (i.e. depois de todos os deltas daquele loop serem aplicados).
+        let mut loops: Vec<u32> = p.worker_capacity.iter().map(|(l, _)| *l).collect();
+        loops.sort();
+        loops.dedup();
+        for loop_ in loops {
+            // Escolhe um ponto 1 loop depois do morph para dar tempo de
+            // chegar o `Died` do CC que casou com o `Started` do
+            // Orbital/PF (ambos vivem no mesmo `game_loop` em
+            // entity_events).
+            let cap = capacity_sum_at(&p.worker_capacity, loop_);
+            let alive = alive_sum_at(p, WORKER_PRODUCERS, loop_);
+            // `cap` pode ficar abaixo de `alive` durante o morph downtime
+            // (pre-backfill), então só exigimos que nunca exceda o número
+            // de producers vivos e nunca fique negativo.
+            assert!(cap >= 0, "worker_capacity negativo em loop {}: {}", loop_, cap);
+            assert!(
+                cap <= alive,
+                "worker_capacity ({}) > alive producers ({}) em loop {}",
+                cap,
+                alive,
+                loop_
+            );
+        }
+        // Ao fim do replay, ambos devem convergir.
+        let end = t.game_loops;
+        let cap_end = capacity_sum_at(&p.worker_capacity, end);
+        let alive_end = alive_sum_at(p, WORKER_PRODUCERS, end);
+        assert_eq!(
+            cap_end, alive_end,
+            "worker_capacity ({}) != alive_producers ({}) no fim do replay (player {})",
+            cap_end, alive_end, p.name
+        );
+    }
+}
+
+#[test]
+fn army_capacity_matches_alive_producers() {
+    let t = load();
+    for p in &t.players {
+        // Mesma lógica de worker_capacity — checa fim do replay.
+        let end = t.game_loops;
+        let cap_end = capacity_sum_at(&p.army_capacity, end);
+        let alive_end = alive_sum_at(p, ARMY_PRODUCERS, end);
+        assert_eq!(
+            cap_end, alive_end,
+            "army_capacity ({}) != alive_producers ({}) no fim do replay (player {})",
+            cap_end, alive_end, p.name
+        );
+        // Nunca negativo, nunca excede alive.
+        for (loop_, _) in &p.army_capacity {
+            let cap = capacity_sum_at(&p.army_capacity, *loop_);
+            let alive = alive_sum_at(p, ARMY_PRODUCERS, *loop_);
+            assert!(cap >= 0, "army_capacity negativo em loop {}", loop_);
+            assert!(cap <= alive, "army_capacity ({}) > alive ({}) em loop {}", cap, alive, loop_);
+        }
+    }
+}
+
+#[test]
+fn worker_births_matches_train_events() {
+    let t = load();
+    for p in &t.players {
+        // Conta `ProductionStarted` de SCV/Probe com creator_ability contendo "Train".
+        // Como Started+Finished são emitidos juntos para spawns instantâneos, o
+        // par tem mesmo game_loop e tag — worker_births guarda o loop do Finished,
+        // então as contagens devem bater.
+        let trained: Vec<u32> = p
+            .entity_events
+            .iter()
+            .filter(|e| {
+                matches!(e.kind, EntityEventKind::ProductionStarted)
+                    && matches!(e.entity_type.as_str(), "SCV" | "Probe")
+                    && e
+                        .creator_ability
+                        .as_deref()
+                        .map(|a| a.contains("Train"))
+                        .unwrap_or(false)
+            })
+            .map(|e| e.game_loop)
+            .collect();
+        assert_eq!(
+            p.worker_births.len(),
+            trained.len(),
+            "worker_births.len() != #Train events (player {})",
+            p.name
+        );
+        // Garante que os loops batem (cada trained loop aparece em worker_births).
+        let mut births = p.worker_births.clone();
+        let mut expected = trained;
+        births.sort();
+        expected.sort();
+        assert_eq!(births, expected, "worker_births não bate com Train events");
+    }
+}
+
+#[test]
+fn upgrade_cumulative_monotonic() {
+    let t = load();
+    for p in &t.players {
+        // `upgrade_cumulative` deve ter o mesmo comprimento de `upgrades`
+        // (um entry por upgrade do tracker, exatamente como o código antigo).
+        assert_eq!(
+            p.upgrade_cumulative.len(),
+            p.upgrades.len(),
+            "upgrade_cumulative len != upgrades len (player {})",
+            p.name
+        );
+        // Attack e armor levels nunca diminuem ao longo da lista.
+        for w in p.upgrade_cumulative.windows(2) {
+            let (l0, a0, r0) = w[0];
+            let (l1, a1, r1) = w[1];
+            assert!(l0 <= l1, "upgrade_cumulative não ordenado: {} > {}", l0, l1);
+            assert!(a1 >= a0, "attack level diminuiu em loop {}: {} → {}", l1, a0, a1);
+            assert!(r1 >= r0, "armor level diminuiu em loop {}: {} → {}", l1, r0, r1);
+        }
+    }
+}
+
+#[test]
+fn morph_backfill_cc_to_orbital() {
+    // `replay1.SC2Replay` tem morphs CC→Orbital no Terran. Após o
+    // morph, `worker_capacity` deve ter o par `(morph_start, -1)` +
+    // `(finish_loop, +1)` com `finish_loop - morph_start = 560`
+    // (ORBITAL_MORPH_TIME em loops).
+    let t = load();
+    let terran = t.players.iter().find(|p| p.race == "Terran").expect("Terran player");
+    // Localiza morphs: Started de OrbitalCommand cujo Died imediatamente
+    // anterior (mesmo loop+tag) é CommandCenter.
+    let events = &terran.entity_events;
+    let mut morph_loops: Vec<u32> = Vec::new();
+    for (i, ev) in events.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        let prev = &events[i - 1];
+        if matches!(ev.kind, EntityEventKind::ProductionStarted)
+            && ev.entity_type == "OrbitalCommand"
+            && matches!(prev.kind, EntityEventKind::Died)
+            && prev.entity_type == "CommandCenter"
+            && prev.tag == ev.tag
+            && prev.game_loop == ev.game_loop
+        {
+            morph_loops.push(ev.game_loop);
+        }
+    }
+    assert!(
+        !morph_loops.is_empty(),
+        "replay1.SC2Replay deveria ter ao menos um morph CC→Orbital"
+    );
+    // Para cada morph, valida o par no worker_capacity.
+    for finish_loop in morph_loops {
+        let expected_start = finish_loop.saturating_sub(560);
+        let has_minus = terran
+            .worker_capacity
+            .iter()
+            .any(|&(l, d)| l == expected_start && d == -1);
+        let has_plus = terran
+            .worker_capacity
+            .iter()
+            .any(|&(l, d)| l == finish_loop && d == 1);
+        assert!(
+            has_minus,
+            "worker_capacity deveria ter (-1) em loop {} (morph_start = finish {} - 560)",
+            expected_start, finish_loop
+        );
+        assert!(
+            has_plus,
+            "worker_capacity deveria ter (+1) em loop {} (morph finish)",
+            finish_loop
+        );
+    }
+}

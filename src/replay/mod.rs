@@ -12,6 +12,23 @@
 // | ProductionCancelled | Died, … }`. Os consumers nunca tocam no
 // formato bruto.
 //
+// Streams canônicos e índices derivados:
+// - `entity_events` é o stream canônico para unidades e estruturas
+//   (traduzido das 5 variantes brutas acima).
+// - `upgrades` é um stream canônico **paralelo** a `entity_events` —
+//   tecnologias têm fluxo próprio (`ReplayTrackerEvent::Upgrade`) e
+//   não são traduzidas para `EntityEvent`. Isso é deliberado: upgrades
+//   não têm tag, position nem lifecycle de Born/Died.
+// - `stats`, `unit_positions` (tracker), `camera_positions`,
+//   `production_cmds`, `inject_cmds` (game events), `chat` (message
+//   events), `resource_nodes` (tracker loop=0) são streams canônicos
+//   próprios — cada um tem uma fonte bruta distinta no MPQ.
+// - `alive_count`, `worker_capacity`, `army_capacity`, `worker_births`,
+//   `creep_index`, `upgrade_cumulative` são **índices derivados**,
+//   construídos em `finalize.rs` a partir dos streams canônicos. O
+//   tracker nunca os popula em paralelo — reconstruir `finalize` sobre
+//   `entity_events`/`upgrades` produz os mesmos valores.
+//
 // Layout do módulo:
 // - `types`     — structs/enums expostos publicamente
 // - `query`     — API de scrubbing (`stats_at`, `alive_count_at`, …)
