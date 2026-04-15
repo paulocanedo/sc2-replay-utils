@@ -175,20 +175,21 @@ impl PlayerTimeline {
         }
     }
 
-    /// Capacidade de produção de workers em `game_loop`.
-    /// As entradas em `worker_capacity` são deltas (+1/-1); aqui acumulamos
-    /// até o ponto pedido. O custo é O(n) sobre uma lista pequena (poucas
-    /// dezenas de eventos por jogador), aceitável dado que esta API serve
-    /// scrubbing pontual da GUI, não loops quentes.
+    /// Capacidade de produção de workers em `game_loop`. Binary search
+    /// sobre `worker_capacity_cumulative` → O(log n). O `.max(0)` cobre
+    /// casos transitórios onde o delta pós-evento fica negativo (ex.:
+    /// morph CC→Orbital backfilla `-1` em `morph_start` antes de o
+    /// `+1` correspondente em `finish_loop` aparecer na soma, e uma
+    /// query caindo no meio vê o delta provisório).
     #[allow(dead_code)]
     pub fn worker_capacity_at(&self, game_loop: u32) -> i32 {
         let i = self
-            .worker_capacity
+            .worker_capacity_cumulative
             .partition_point(|(l, _)| *l <= game_loop);
-        self.worker_capacity[..i]
-            .iter()
-            .map(|(_, d)| *d)
-            .sum::<i32>()
-            .max(0)
+        if i == 0 {
+            0
+        } else {
+            self.worker_capacity_cumulative[i - 1].1.max(0)
+        }
     }
 }

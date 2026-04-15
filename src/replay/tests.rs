@@ -605,6 +605,44 @@ fn worker_capacity_matches_alive_producers() {
 }
 
 #[test]
+fn capacity_cumulative_matches_delta_sum() {
+    // `worker_capacity_cumulative` / `army_capacity_cumulative` são
+    // caches derivados da soma dos deltas. O invariante: cada entrada
+    // `(loop, sum)` deve ter `sum` igual à soma de todos os deltas em
+    // ou antes daquela posição. Se o build_cumulative em `finalize.rs`
+    // sair de sincronia com os deltas, `worker_capacity_at` passa a
+    // mentir em O(log n).
+    let t = load();
+    for p in &t.players {
+        assert_eq!(
+            p.worker_capacity.len(),
+            p.worker_capacity_cumulative.len(),
+            "worker cumulative len != deltas len (player {})", p.name,
+        );
+        let mut sum = 0i32;
+        for (i, &(loop_, delta)) in p.worker_capacity.iter().enumerate() {
+            sum += delta;
+            let (cum_loop, cum_sum) = p.worker_capacity_cumulative[i];
+            assert_eq!(cum_loop, loop_, "worker cumulative loop mismatch at {}", i);
+            assert_eq!(cum_sum, sum, "worker cumulative sum mismatch at {}", i);
+        }
+
+        assert_eq!(
+            p.army_capacity.len(),
+            p.army_capacity_cumulative.len(),
+            "army cumulative len != deltas len (player {})", p.name,
+        );
+        let mut sum = 0i32;
+        for (i, &(loop_, delta)) in p.army_capacity.iter().enumerate() {
+            sum += delta;
+            let (cum_loop, cum_sum) = p.army_capacity_cumulative[i];
+            assert_eq!(cum_loop, loop_, "army cumulative loop mismatch at {}", i);
+            assert_eq!(cum_sum, sum, "army cumulative sum mismatch at {}", i);
+        }
+    }
+}
+
+#[test]
 fn army_capacity_matches_alive_producers() {
     let t = load();
     for p in &t.players {

@@ -368,6 +368,18 @@ pub struct PlayerTimeline {
     /// partir de `entity_events` — análogo a `worker_capacity`.
     pub army_capacity: Vec<(u32, i32)>,
 
+    /// Soma cumulativa de `worker_capacity` pós-evento — mesma estrutura
+    /// de `alive_count`. Derivado em `finalize.rs` a partir de
+    /// `worker_capacity` (que por sua vez é derivado de `entity_events`).
+    /// Existe para responder `worker_capacity_at` em O(log n) no hot
+    /// path de scrubbing da GUI — a soma linear sobre os deltas fica
+    /// cara em replays longos.
+    pub worker_capacity_cumulative: Vec<(u32, i32)>,
+
+    /// Soma cumulativa de `army_capacity` — análogo a
+    /// `worker_capacity_cumulative`.
+    pub army_capacity_cumulative: Vec<(u32, i32)>,
+
     /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
     /// para queries de scrubbing. Derivado em `finalize.rs` a partir
     /// de `upgrades` (stream canônica paralela a `entity_events`).

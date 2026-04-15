@@ -6,35 +6,17 @@ itens abaixo são otimizações **não aplicadas** nesta sessão — ficam
 aqui para avaliação e implementação futura, priorizáveis pelo impacto
 em replays longos (100k+ eventos) e pela frequência de uso na GUI.
 
-Ordem sugerida: (1) tem impacto direto em scrubbing da GUI e mudança
-localizada; (2) e (5) reduzem alocações no hot path do parser; (3) é
-refatoração maior que colhe o ganho dos anteriores.
+Ordem sugerida: (2) e (5) reduzem alocações no hot path do parser;
+(3) é refatoração maior que colhe o ganho dos anteriores.
 
-## 1. `worker_capacity_at()` faz O(n) sum por chamada
+## 1. `worker_capacity_at()` faz O(n) sum por chamada — ✓ implementado
 
-**Local**: [src/replay/query.rs:184-193](../src/replay/query.rs)
-
-Hoje, cada chamada refaz uma soma cumulativa sobre todas as entries
-até o `game_loop` pedido:
-
-```rust
-pub fn worker_capacity_at(&self, game_loop: u32) -> i32 {
-    let i = self.worker_capacity.partition_point(|(l, _)| *l <= game_loop);
-    self.worker_capacity[..i].iter().map(|(_, d)| *d).sum::<i32>().max(0)
-}
-```
-
-`partition_point` é O(log n), mas o `iter().sum()` sobre o prefixo é
-O(n). A GUI chama isso por frame durante scrubbing, então o custo é
-amplificado.
-
-**Fix**: durante `derive_capacity_indices` em `finalize.rs`, construir
-em paralelo um vetor `worker_capacity_cumulative: Vec<(u32, i32)>`
-com o valor cumulativo pós-evento (mesma estrutura de `alive_count`).
-`worker_capacity_at()` vira lookup O(log n).
-
-**Impacto estimado**: ~10-50× mais rápido em scrubbing de replays
-longos. Aplica-se igualmente a `army_capacity`.
+`finalize.rs::derive_capacity_indices` agora popula
+`worker_capacity_cumulative` e `army_capacity_cumulative` via
+`build_cumulative` (prefix-sum sobre os deltas já ordenados), e
+`worker_capacity_at` faz binary search sobre o cumulativo — O(log n).
+Regressão protegida por `capacity_cumulative_matches_delta_sum` em
+`src/replay/tests.rs`.
 
 ## 2. Clones de `String` em hot path do tracker
 

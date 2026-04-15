@@ -370,6 +370,25 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
     player.army_capacity.sort_by_key(|(l, _)| *l);
     // `worker_births` sai estritamente crescente (só vem de Finished
     // em ordem de loop) — nenhum sort necessário.
+
+    // Índices cumulativos pós-evento: são o que `worker_capacity_at`
+    // consome para responder em O(log n). Tem que rodar depois do
+    // sort acima — a ordem dos deltas determina a soma pós-evento.
+    player.worker_capacity_cumulative = build_cumulative(&player.worker_capacity);
+    player.army_capacity_cumulative = build_cumulative(&player.army_capacity);
+}
+
+/// Prefix-sum sobre uma lista de deltas `(game_loop, delta)` ordenada
+/// por `game_loop`. Cada entrada de saída guarda `(game_loop, soma
+/// acumulada após este delta)` — idêntico em forma à `alive_count`.
+fn build_cumulative(deltas: &[(u32, i32)]) -> Vec<(u32, i32)> {
+    let mut out = Vec::with_capacity(deltas.len());
+    let mut sum: i32 = 0;
+    for &(loop_, delta) in deltas {
+        sum += delta;
+        out.push((loop_, sum));
+    }
+    out
 }
 
 /// Deriva `upgrade_cumulative` a partir do stream canônico `upgrades`.
