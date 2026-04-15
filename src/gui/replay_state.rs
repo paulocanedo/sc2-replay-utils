@@ -11,6 +11,7 @@ use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
 use crate::map_image::{self, MapImage};
+use crate::production_efficiency::{self, EfficiencyTarget, ProductionEfficiencySeries};
 use crate::production_gap::{self, ProductionGapResult};
 use crate::replay::{self, EntityEventKind, ReplayTimeline};
 use crate::supply_block::{self, SupplyBlockEntry};
@@ -39,6 +40,12 @@ pub struct LoadedReplay {
     pub chat: Option<ChatResult>,
     pub army: Option<ArmyValueResult>,
     pub production: Option<ProductionGapResult>,
+    /// Série temporal de eficiência de produção de workers. Computada
+    /// upfront junto com os demais extractors.
+    pub efficiency_workers: Option<ProductionEfficiencySeries>,
+    /// Série temporal de eficiência de produção de army (unidades
+    /// T/P). Zerg fica como série vazia por jogador.
+    pub efficiency_army: Option<ProductionEfficiencySeries>,
     /// Supply blocks por jogador, mesmo índice que `timeline.players`.
     pub supply_blocks_per_player: Vec<Vec<SupplyBlockEntry>>,
     /// Imagem rasterizada do mapa do replay (Minimap.tga embutido no
@@ -93,6 +100,26 @@ impl LoadedReplay {
                 None
             }
         };
+        let efficiency_workers = match production_efficiency::extract_efficiency_series(
+            &timeline,
+            EfficiencyTarget::Workers,
+        ) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("production_efficiency (workers): {e}");
+                None
+            }
+        };
+        let efficiency_army = match production_efficiency::extract_efficiency_series(
+            &timeline,
+            EfficiencyTarget::Army,
+        ) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("production_efficiency (army): {e}");
+                None
+            }
+        };
         let supply_blocks_per_player = timeline
             .players
             .iter()
@@ -117,6 +144,8 @@ impl LoadedReplay {
             chat,
             army,
             production,
+            efficiency_workers,
+            efficiency_army,
             supply_blocks_per_player,
             map_image,
             playable_bounds,

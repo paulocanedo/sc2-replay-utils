@@ -16,6 +16,7 @@ use egui::{Color32, Context, Panel, RichText, ScrollArea};
 use crate::colors::{player_slot_color, user_fill, CARD_FILL, LABEL_DIM, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::library::{self, LibraryAction, ReplayLibrary};
+use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tabs::{self, Tab};
 use crate::ui_settings;
@@ -52,6 +53,8 @@ pub struct AppState {
     /// Flags de exibição do gráfico de army value.
     pub charts_show_army: bool,
     pub charts_show_workers: bool,
+    /// Alvo do novo gráfico de eficiência de produção (workers x army).
+    pub charts_efficiency_target: EfficiencyTarget,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
@@ -87,6 +90,7 @@ impl AppState {
             timeline_tab_loop: 0,
             charts_show_army: true,
             charts_show_workers: false,
+            charts_efficiency_target: EfficiencyTarget::Workers,
             show_about: false,
             timeline_show_heatmap: false,
             timeline_show_creep: true,
@@ -439,7 +443,7 @@ impl eframe::App for AppState {
                             &mut self.timeline_show_map,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
-                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_show_army, &mut self.charts_show_workers),
+                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_show_army, &mut self.charts_show_workers, &mut self.charts_efficiency_target),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                     },
                 },

@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use s2protocol::tracker_events::{unit_tag, ReplayTrackerEvent};
 
 use super::classify::{
-    classify_entity, is_attack_upgrade, is_armor_upgrade, is_worker_producer, resource_kind,
-    upgrade_level,
+    classify_entity, is_armor_upgrade, is_army_producer, is_attack_upgrade, is_worker_producer,
+    resource_kind, upgrade_level,
 };
 use super::types::{
     EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, ResourceNode, StatsSnapshot,
@@ -265,6 +265,9 @@ pub(super) fn process_tracker_events(
                         if is_worker_producer(&e.unit_type_name) {
                             players[idx].worker_capacity.push((game_loop, 1));
                         }
+                        if is_army_producer(&e.unit_type_name) {
+                            players[idx].army_capacity.push((game_loop, 1));
+                        }
 
                         tag_map.insert(
                             tag,
@@ -327,6 +330,9 @@ pub(super) fn process_tracker_events(
                         );
                         if is_worker_producer(&e.unit_type_name) {
                             players[idx].worker_capacity.push((game_loop, 1));
+                        }
+                        if is_army_producer(&e.unit_type_name) {
+                            players[idx].army_capacity.push((game_loop, 1));
                         }
                         if let Some(state) = tag_map.get_mut(&tag) {
                             state.lifecycle = Lifecycle::Finished;
@@ -437,6 +443,9 @@ pub(super) fn process_tracker_events(
                 if is_worker_producer(&entity_type) {
                     players[idx].worker_capacity.push((game_loop, 1));
                 }
+                if is_army_producer(&entity_type) {
+                    players[idx].army_capacity.push((game_loop, 1));
+                }
                 if let Some(state) = tag_map.get_mut(&tag) {
                     state.lifecycle = Lifecycle::Finished;
                 }
@@ -458,6 +467,9 @@ pub(super) fn process_tracker_events(
                 } else {
                     if is_worker_producer(&state.entity_type) {
                         players[idx].worker_capacity.push((game_loop, -1));
+                    }
+                    if is_army_producer(&state.entity_type) {
+                        players[idx].army_capacity.push((game_loop, -1));
                     }
                     EntityEventKind::Died
                 };
@@ -654,6 +666,30 @@ fn apply_type_change(
         }
         (false, true) => {
             player.worker_capacity.push((game_loop, 1));
+        }
+        (false, false) => {}
+    }
+
+    // Army capacity: mesma lógica, cobrindo morphs tipo Gateway→WarpGate
+    // (hoje net-zero pois `morph_build_time` não inclui WarpGate, mas o
+    // match deixa o lugar certo caso no futuro incluamos morphs com
+    // downtime real para army).
+    let old_is_army = is_army_producer(old_type);
+    let new_is_army = is_army_producer(new_type);
+    match (old_is_army, new_is_army) {
+        (true, true) => {
+            let mt = morph_build_time(new_type);
+            if mt > 0 {
+                let morph_start = game_loop.saturating_sub(mt);
+                player.army_capacity.push((morph_start, -1));
+                player.army_capacity.push((game_loop, 1));
+            }
+        }
+        (true, false) => {
+            player.army_capacity.push((game_loop, -1));
+        }
+        (false, true) => {
+            player.army_capacity.push((game_loop, 1));
         }
         (false, false) => {}
     }

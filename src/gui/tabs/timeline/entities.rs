@@ -267,6 +267,7 @@ mod tests {
             alive_count: HashMap::new(),
             worker_capacity: Vec::new(),
             worker_births: Vec::new(),
+            army_capacity: Vec::new(),
             upgrade_cumulative: Vec::new(),
             creep_index: Vec::new(),
         }

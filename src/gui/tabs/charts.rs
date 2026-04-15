@@ -1,6 +1,6 @@
-// Aba Gráficos — plot de army value ao longo do tempo (egui_plot) +
-// cards de resumo numérico (pico de army value, supply blocks,
-// production gap, upgrades).
+// Aba Gráficos — plot de army value + gráfico de eficiência de
+// produção (workers ou army, seletor por radio) + cards de resumo
+// numérico (supply blocks e eficiência média).
 //
 // A identidade visual de cada jogador segue a convenção in-game do
 // SC2: player1 = vermelho, player2 = azul. Isso se aplica às linhas
@@ -12,6 +12,7 @@ use egui_plot::{GridMark, Legend, Line, Plot, PlotPoints, Polygon};
 
 use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
+use crate::production_efficiency::{EfficiencyTarget, ProductionEfficiencySeries};
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 
 pub fn show(
@@ -20,12 +21,17 @@ pub fn show(
     config: &AppConfig,
     show_army: &mut bool,
     show_workers: &mut bool,
+    efficiency_target: &mut EfficiencyTarget,
 ) {
     army_value_plot(ui, loaded, config, show_army, show_workers);
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
-    summary_cards(ui, loaded, config, *show_army, *show_workers);
+    efficiency_plot(ui, loaded, config, efficiency_target);
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(8.0);
+    summary_cards(ui, loaded, config);
 }
 
 /// Custo em minerals de um worker (SCV / Probe / Drone).
@@ -235,25 +241,94 @@ fn army_value_plot(
         });
 }
 
-fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, show_army: bool, show_workers: bool) {
-    ui.columns(4, |cols| {
-        // Card 1: pico de army value
-        card(&mut cols[0], "Pico de Army Value", |ui| {
-            if let Some(army) = loaded.army.as_ref() {
-                for (idx, p) in army.players.iter().enumerate() {
-                    let peak = p.snapshots.iter()
-                        .map(|s| army_value_for_snapshot(s, show_army, show_workers) as i64)
-                        .max()
-                        .unwrap_or(0);
-                    player_line(ui, &p.name, idx, &format!("{peak}"), config.is_user(&p.name));
-                }
+fn efficiency_plot(
+    ui: &mut Ui,
+    loaded: &LoadedReplay,
+    config: &AppConfig,
+    target: &mut EfficiencyTarget,
+) {
+    ui.horizontal(|ui| {
+        ui.heading("Eficiência de Produção");
+        ui.add_space(16.0);
+        ui.radio_value(target, EfficiencyTarget::Workers, "Workers");
+        ui.radio_value(target, EfficiencyTarget::Army, "Army");
+    });
+
+    let series_opt: Option<&ProductionEfficiencySeries> = match *target {
+        EfficiencyTarget::Workers => loaded.efficiency_workers.as_ref(),
+        EfficiencyTarget::Army => loaded.efficiency_army.as_ref(),
+    };
+    let Some(series) = series_opt else {
+        ui.label(RichText::new("Dados de eficiência indisponíveis.").italics());
+        return;
+    };
+    if series.players.is_empty() {
+        ui.label(RichText::new("Sem jogadores.").italics());
+        return;
+    }
+
+    let lps = series.loops_per_second;
+
+    // Nota para jogadores Zerg — sem linha plotada (suporte em breve).
+    for p in &series.players {
+        if p.is_zerg {
+            ui.label(
+                RichText::new(format!("{}: Zerg (em breve)", p.name))
+                    .italics()
+                    .small(),
+            );
+        }
+    }
+
+    Plot::new("efficiency_plot")
+        .legend(Legend::default())
+        .height(280.0)
+        .allow_boxed_zoom(true)
+        .include_y(0.0)
+        .include_y(100.0)
+        .x_axis_label("tempo")
+        .y_axis_label("eficiência (%)")
+        .x_axis_formatter(|mark: GridMark, _range| {
+            let total_secs = mark.value as u32;
+            format!("{}:{:02}", total_secs / 60, total_secs % 60)
+        })
+        .y_axis_formatter(|mark: GridMark, _range| format!("{}%", mark.value as i32))
+        .label_formatter(|name, point| {
+            let secs = point.x as u32;
+            let mm = secs / 60;
+            let ss = secs % 60;
+            if name.is_empty() {
+                format!("Tempo: {mm}:{ss:02}\nEficiência: {:.1}%", point.y)
             } else {
-                ui.small("—");
+                format!(
+                    "{name}\nTempo: {mm}:{ss:02}\nEficiência: {:.1}%",
+                    point.y
+                )
+            }
+        })
+        .show(ui, |plot_ui| {
+            for (idx, p) in series.players.iter().enumerate() {
+                if p.is_zerg || p.samples.is_empty() {
+                    continue;
+                }
+                let is_user = config.is_user(&p.name);
+                let points: PlotPoints = p
+                    .samples
+                    .iter()
+                    .map(|s| [loop_to_secs(s.game_loop, lps), s.efficiency_pct])
+                    .collect();
+                let line = Line::new(p.name.clone(), points)
+                    .color(player_slot_color_bright(idx))
+                    .width(if is_user { 2.5 } else { 1.8 });
+                plot_ui.line(line);
             }
         });
+}
 
-        // Card 2: supply blocks
-        card(&mut cols[1], "Supply Blocks", |ui| {
+fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
+    ui.columns(2, |cols| {
+        // Card 1: supply blocks
+        card(&mut cols[0], "Supply Blocks", |ui| {
             let lps = loaded.timeline.loops_per_second.max(0.0001);
             for (idx, p) in loaded.timeline.players.iter().enumerate() {
                 let blocks = loaded
@@ -275,8 +350,8 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, show_ar
             }
         });
 
-        // Card 3: production gap / efficiency
-        card(&mut cols[2], "Eficiência Produção", |ui| {
+        // Card 2: production gap / efficiency
+        card(&mut cols[1], "Eficiência Produção", |ui| {
             if let Some(pg) = loaded.production.as_ref() {
                 for (idx, p) in pg.players.iter().enumerate() {
                     player_line(
@@ -289,19 +364,6 @@ fn summary_cards(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, show_ar
                 }
             } else {
                 ui.small("—");
-            }
-        });
-
-        // Card 4: upgrades
-        card(&mut cols[3], "Upgrades", |ui| {
-            for (idx, p) in loaded.timeline.players.iter().enumerate() {
-                player_line(
-                    ui,
-                    &p.name,
-                    idx,
-                    &format!("{}", p.upgrades.len()),
-                    config.is_user(&p.name),
-                );
             }
         });
     });

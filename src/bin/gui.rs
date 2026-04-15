@@ -19,6 +19,8 @@ mod chat;
 mod army_value;
 #[path = "../production_gap.rs"]
 mod production_gap;
+#[path = "../production_efficiency.rs"]
+mod production_efficiency;
 #[path = "../supply_block.rs"]
 mod supply_block;
 #[path = "../utils.rs"]

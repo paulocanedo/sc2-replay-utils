@@ -289,6 +289,13 @@ pub struct PlayerTimeline {
     /// Usado por `production_gap` para detectar slots ociosos.
     pub worker_births: Vec<u32>,
 
+    /// Capacidade de produção de army (Barracks/Factory/Starport/
+    /// Gateway/WarpGate/RoboticsFacility/Stargate). Cada par é
+    /// `(game_loop, delta)`, ordenado. Cache derivado de
+    /// `entity_events`, populado pelo tracker — análogo a
+    /// `worker_capacity`.
+    pub army_capacity: Vec<(u32, i32)>,
+
     /// `(game_loop, attack_level_apos, armor_level_apos)` cumulativo
     /// para queries de scrubbing.
     pub upgrade_cumulative: Vec<(u32, u8, u8)>,

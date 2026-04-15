@@ -45,6 +45,19 @@ pub(super) fn is_worker_producer(name: &str) -> bool {
     )
 }
 
+/// Estruturas que produzem unidades army (Terran e Protoss). Zerg usa
+/// larvas em Hatchery/Lair/Hive — tratamento específico fica fora
+/// dessa lista, consumers pulam a raça inteira.
+pub(super) fn is_army_producer(name: &str) -> bool {
+    matches!(
+        name,
+        // Terran
+        "Barracks" | "Factory" | "Starport"
+        // Protoss
+        | "Gateway" | "WarpGate" | "RoboticsFacility" | "Stargate"
+    )
+}
+
 /// Lista hard-coded de estruturas conhecidas. Usada para classificar
 /// `EntityCategory::Structure` no momento do parser, evitando que
 /// consumers precisem reclassificar.

@@ -83,6 +83,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
                 alive_count: HashMap::new(),
                 worker_capacity: Vec::new(),
                 worker_births: Vec::new(),
+                army_capacity: Vec::new(),
                 upgrade_cumulative: Vec::new(),
                 creep_index: Vec::new(),
             }
