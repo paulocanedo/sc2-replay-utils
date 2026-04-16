@@ -320,7 +320,7 @@ fn player_column(
                 );
                 if is_user {
                     ui.label(
-                        RichText::new(" VOCÊ ")
+                        RichText::new(format!("{} ", t("build_order.you_chip", lang)))
                             .small()
                             .strong()
                             .color(USER_CHIP_FG)
