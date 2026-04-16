@@ -51,6 +51,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+pub use classify::{is_structure_name, is_worker_name};
 pub use parse::parse_replay;
 pub use types::{
     ChatEntry, EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,

@@ -56,9 +56,8 @@ pub struct AppState {
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
     pub timeline_tab_loop: u32,
-    /// Flags de exibição do gráfico de army value.
-    pub charts_show_army: bool,
-    pub charts_show_workers: bool,
+    /// Opções do plot principal de army (métrica, grouping, checkboxes).
+    pub charts_army_opts: tabs::charts::ArmyChartOptions,
     /// Alvo do novo gráfico de eficiência de produção (workers x army).
     pub charts_efficiency_target: EfficiencyTarget,
     pub show_about: bool,
@@ -99,8 +98,7 @@ impl AppState {
             library: ReplayLibrary::new(),
             library_filter,
             timeline_tab_loop: 0,
-            charts_show_army: true,
-            charts_show_workers: false,
+            charts_army_opts: tabs::charts::ArmyChartOptions::default(),
             charts_efficiency_target: EfficiencyTarget::Workers,
             show_about: false,
             timeline_show_heatmap: false,
@@ -494,7 +492,7 @@ impl eframe::App for AppState {
                             &mut self.timeline_show_map,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
-                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_show_army, &mut self.charts_show_workers, &mut self.charts_efficiency_target),
+                        Tab::Charts => tabs::charts::show(ui, loaded, &self.config, &mut self.charts_army_opts, &mut self.charts_efficiency_target),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                     },
                 },

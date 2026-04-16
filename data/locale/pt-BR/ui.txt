@@ -206,17 +206,25 @@ chat.recipient = (→ {to})
 chat.you_chip =  Você
 
 # ── Aba Gráficos ────────────────────────────────────────────────────────────
-charts.army.title = Army Value ao longo do tempo
+charts.army.title = Army ao longo do tempo
 charts.army.show = Army
 charts.workers.show = Workers
-charts.army.no_data = Dados de army value indisponíveis.
+charts.army.no_data = Dados de army indisponíveis.
+charts.army.metric = Métrica:
+charts.army.metric.value = Valor
+charts.army.metric.count = Quantidade
+charts.army.group_by_type = Por tipo de unidade
+charts.army.player_label = Jogador:
 charts.no_players = Sem jogadores.
 charts.axis.time = tempo
 charts.axis.army = army value
+charts.axis.count = quantidade
 charts.tooltip.supply_blocked = ⚠ {who} supply blocked
 charts.tooltip.time = Tempo: {mm}:{ss}
 charts.tooltip.army_named = {name}\nTempo: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
+charts.tooltip.count_named = {name}\nTempo: {mm}:{ss}\nQuantidade: {value}
+charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
 charts.efficiency.title = Eficiência de Produção
 charts.efficiency.no_data = Dados de eficiência indisponíveis.

@@ -205,17 +205,25 @@ chat.recipient = (→ {to})
 chat.you_chip =  You
 
 # ── Charts tab ──────────────────────────────────────────────────────────────
-charts.army.title = Army Value over time
+charts.army.title = Army over time
 charts.army.show = Army
 charts.workers.show = Workers
-charts.army.no_data = Army value data unavailable.
+charts.army.no_data = Army data unavailable.
+charts.army.metric = Metric:
+charts.army.metric.value = Value
+charts.army.metric.count = Count
+charts.army.group_by_type = By unit type
+charts.army.player_label = Player:
 charts.no_players = No players.
 charts.axis.time = time
 charts.axis.army = army value
+charts.axis.count = count
 charts.tooltip.supply_blocked = ⚠ {who} supply blocked
 charts.tooltip.time = Time: {mm}:{ss}
 charts.tooltip.army_named = {name}\nTime: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.army_anon = Time: {mm}:{ss}\nArmy Value: {value}
+charts.tooltip.count_named = {name}\nTime: {mm}:{ss}\nCount: {value}
+charts.tooltip.count_anon = Time: {mm}:{ss}\nCount: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
 charts.efficiency.title = Production Efficiency
 charts.efficiency.no_data = Efficiency data unavailable.

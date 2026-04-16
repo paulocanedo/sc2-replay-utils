@@ -33,7 +33,7 @@ pub(super) fn resource_kind(name: &str) -> Option<ResourceKind> {
 }
 
 /// Workers (coletores de recursos).
-pub(super) fn is_worker_name(name: &str) -> bool {
+pub fn is_worker_name(name: &str) -> bool {
     matches!(name, "SCV" | "Probe" | "Drone" | "MULE")
 }
 
@@ -61,7 +61,7 @@ pub(super) fn is_army_producer(name: &str) -> bool {
 /// Lista hard-coded de estruturas conhecidas. Usada para classificar
 /// `EntityCategory::Structure` no momento do parser, evitando que
 /// consumers precisem reclassificar.
-pub(super) fn is_structure_name(name: &str) -> bool {
+pub fn is_structure_name(name: &str) -> bool {
     matches!(
         name,
         // Terran — base
