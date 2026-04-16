@@ -74,13 +74,17 @@ pub fn show(
     army_opts: &mut ArmyChartOptions,
     efficiency_target: &mut EfficiencyTarget,
 ) {
-    army::army_value_plot(ui, loaded, config, army_opts);
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
-    efficiency::efficiency_plot(ui, loaded, config, efficiency_target);
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
-    summary::summary_cards(ui, loaded, config);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            army::army_value_plot(ui, loaded, config, army_opts);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            efficiency::efficiency_plot(ui, loaded, config, efficiency_target);
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            summary::summary_cards(ui, loaded, config);
+        });
 }
