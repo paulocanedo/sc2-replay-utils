@@ -58,6 +58,33 @@ pub(super) fn is_army_producer(name: &str) -> bool {
     )
 }
 
+/// Hatcheries do Zerg (inclui morphs Lair/Hive) — cada uma contribui
+/// com 1 slot de larva bandwidth na série de eficiência Zerg
+/// (`production_efficiency::compute_series_zerg`). Valor 1 (e não 3)
+/// porque o throughput sustentável é limitado pela regen de larva
+/// (~11s por larva), não pelo cap visual de 3 larvae.
+pub fn is_zerg_hatch(name: &str) -> bool {
+    matches!(name, "Hatchery" | "Lair" | "Hive")
+}
+
+/// Unidades Zerg que nascem diretamente de larva (consomem 1 slot
+/// na série de eficiência Zerg — vertente "Army"). Overlord entra
+/// porque **usa slot de larva**, mesmo não sendo army no sentido
+/// clássico — modelar como army reflete a decisão macro de gastar
+/// uma larva que poderia ter virado Drone/Zergling.
+///
+/// Fora: Queen (morph do prédio, não usa larva), Baneling/Ravager/
+/// Lurker/BroodLord/Overseer (morph de unidade existente).
+pub fn is_larva_born_army(name: &str) -> bool {
+    matches!(
+        name,
+        "Zergling" | "Roach" | "Hydralisk" | "Infestor"
+        | "SwarmHost" | "SwarmHostMP"
+        | "Mutalisk" | "Corruptor" | "Viper"
+        | "Ultralisk" | "Overlord"
+    )
+}
+
 /// Lista hard-coded de estruturas conhecidas. Usada para classificar
 /// `EntityCategory::Structure` no momento do parser, evitando que
 /// consumers precisem reclassificar.

@@ -188,6 +188,7 @@ build_order.clipboard.header = tipo  início  fim     supply  ação
 build_order.clipboard.cancelled_mark =  [cancelado]
 build_order.clipboard.destroyed_mark =  [destruído]
 build_order.chrono_tooltip = Chrono Boost ×{count}
+build_order.you_chip =  VOCÊ
 
 # Nomes completos das categorias de entrada.
 entrykind.worker = Worker
@@ -228,7 +229,6 @@ charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
 charts.efficiency.title = Eficiência de Produção
 charts.efficiency.no_data = Dados de eficiência indisponíveis.
-charts.efficiency.zerg_tbd = {player}: Zerg (em breve)
 charts.axis.efficiency = eficiência (%)
 charts.tooltip.efficiency_named = {name}\nTempo: {mm}:{ss}\nEficiência: {pct}%
 charts.tooltip.efficiency_anon = Tempo: {mm}:{ss}\nEficiência: {pct}%

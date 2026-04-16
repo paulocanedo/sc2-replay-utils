@@ -187,6 +187,7 @@ build_order.clipboard.header = type  start   end     supply  action
 build_order.clipboard.cancelled_mark =  [cancelled]
 build_order.clipboard.destroyed_mark =  [destroyed]
 build_order.chrono_tooltip = Chrono Boost ×{count}
+build_order.you_chip =  YOU
 
 # Entry kind full names (shown in legend, tooltips, clipboard header).
 entrykind.worker = Worker
@@ -227,7 +228,6 @@ charts.tooltip.count_anon = Time: {mm}:{ss}\nCount: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
 charts.efficiency.title = Production Efficiency
 charts.efficiency.no_data = Efficiency data unavailable.
-charts.efficiency.zerg_tbd = {player}: Zerg (coming soon)
 charts.axis.efficiency = efficiency (%)
 charts.tooltip.efficiency_named = {name}\nTime: {mm}:{ss}\nEfficiency: {pct}%
 charts.tooltip.efficiency_anon = Time: {mm}:{ss}\nEfficiency: {pct}%
