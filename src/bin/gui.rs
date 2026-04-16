@@ -19,7 +19,7 @@ mod chat;
 mod army_value;
 #[path = "../production_gap.rs"]
 mod production_gap;
-#[path = "../production_efficiency.rs"]
+#[path = "../production_efficiency/mod.rs"]
 mod production_efficiency;
 #[path = "../supply_block.rs"]
 mod supply_block;
@@ -51,6 +51,8 @@ mod library;
 mod rename;
 #[path = "../gui/tabs/mod.rs"]
 mod tabs;
+#[path = "../gui/sidebar.rs"]
+mod sidebar;
 #[path = "../gui/app.rs"]
 mod app;
 

@@ -8,9 +8,11 @@
 //   - `filter`  — enums e struct de filtro/ordenação.
 //   - `scanner` — `ReplayLibrary` + scanner de diretório e pool de parsers.
 //   - `date`    — utilitários de data usados pelo filtro `DateRange`.
-//   - `ui`      — render egui + `LibraryAction` + `keep_alive`.
+//   - `entry_row` — renderização de entrada individual + helpers de metadados.
+//   - `ui`        — render egui + `LibraryAction` + `keep_alive`.
 
 pub mod date;
+mod entry_row;
 pub mod filter;
 pub mod scanner;
 pub mod types;
