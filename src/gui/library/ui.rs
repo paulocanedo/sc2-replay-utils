@@ -96,12 +96,11 @@ pub fn show(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let total = library.entries.len();
-            let arrow = if filter.sort_ascending { "↑" } else { "↓" };
             egui::ComboBox::from_id_salt("library_sort")
                 .selected_text(tf(
                     "library.sort.total_count",
                     lang,
-                    &[("total", &total.to_string()), ("arrow", arrow)],
+                    &[("total", &total.to_string())],
                 ))
                 .width(120.0)
                 .show_ui(ui, |ui| {
@@ -224,7 +223,7 @@ pub fn show(
         let date_active = filter.date_range != DateRange::All;
         let date_text_color = if date_active { Color32::WHITE } else { Color32::from_gray(160) };
         egui::ComboBox::from_id_salt("date_range_chip")
-            .selected_text(RichText::new(format!("{date_label} ▾")).color(date_text_color).small())
+            .selected_text(RichText::new(date_label).color(date_text_color).small())
             .width(80.0)
             .show_ui(ui, |ui| {
                 ui.selectable_value(
@@ -446,15 +445,7 @@ fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -> eg
         Color32::from_gray(160)
     };
 
-    let icon = if accent.is_some() {
-        if selected {
-            format!("■ {label}")
-        } else {
-            format!("□ {label}")
-        }
-    } else {
-        label.to_string()
-    };
+    let icon = label.to_string();
 
     ui.add(
         egui::Button::new(RichText::new(icon).color(text_color).small())
