@@ -11,6 +11,8 @@ use crate::config::AppConfig;
 use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
+use crate::tokens::SPACE_S;
+use crate::widgets::toggle_chip_bool;
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 6] = [
@@ -73,7 +75,7 @@ impl BuildOrderFilter {
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let lang = config.language;
     let Some(bo) = loaded.build_order.as_ref() else {
-        ui.add_space(40.0);
+        ui.add_space(crate::tokens::SPACE_XXL);
         ui.vertical_centered(|ui| {
             ui.label(RichText::new(t("build_order.unavailable", lang)).italics());
         });
@@ -130,22 +132,14 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     // ── Filtros de categoria ────────────────────────────────────
     let mut filter_changed = false;
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_S;
         let prev = filter;
-        ui.checkbox(&mut filter.show_workers, t("build_order.filter.workers", lang));
-        ui.checkbox(&mut filter.show_units, t("build_order.filter.units", lang));
-        ui.checkbox(
-            &mut filter.show_structures,
-            t("build_order.filter.structures", lang),
-        );
-        ui.checkbox(
-            &mut filter.show_research,
-            t("build_order.filter.research", lang),
-        );
-        ui.checkbox(
-            &mut filter.show_upgrades,
-            t("build_order.filter.upgrades", lang),
-        );
-        ui.checkbox(&mut filter.show_injects, t("build_order.filter.injects", lang));
+        toggle_chip_bool(ui, t("build_order.filter.workers", lang), &mut filter.show_workers, None);
+        toggle_chip_bool(ui, t("build_order.filter.units", lang), &mut filter.show_units, None);
+        toggle_chip_bool(ui, t("build_order.filter.structures", lang), &mut filter.show_structures, None);
+        toggle_chip_bool(ui, t("build_order.filter.research", lang), &mut filter.show_research, None);
+        toggle_chip_bool(ui, t("build_order.filter.upgrades", lang), &mut filter.show_upgrades, None);
+        toggle_chip_bool(ui, t("build_order.filter.injects", lang), &mut filter.show_injects, None);
 
         if filter.active_count() == 0 {
             filter = prev;
@@ -162,7 +156,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
     }
 
-    ui.add_space(4.0);
+    ui.add_space(SPACE_S);
 
     let query_lower = search.to_ascii_lowercase();
 
@@ -320,7 +314,7 @@ fn player_column(
                 );
                 if is_user {
                     ui.label(
-                        RichText::new(format!("{} ", t("build_order.you_chip", lang)))
+                        RichText::new(format!("{} ", t("common.you_chip", lang)))
                             .small()
                             .strong()
                             .color(USER_CHIP_FG)

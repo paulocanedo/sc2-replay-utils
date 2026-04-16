@@ -248,3 +248,32 @@ pub fn loop_to_secs(game_loop: u32, lps: f64) -> f64 {
         0.0
     }
 }
+
+/// Matchup code ("PvT", "ZvP" …) from the replay's player slots.
+/// Returns an em dash when the player count isn't the usual two.
+pub fn build_matchup(players: &[replay::PlayerTimeline]) -> String {
+    if players.len() >= 2 {
+        format!(
+            "{}v{}",
+            crate::utils::race_letter(&players[0].race),
+            crate::utils::race_letter(&players[1].race),
+        )
+    } else {
+        String::from("—")
+    }
+}
+
+/// Formats "2026-04-10T17:46:40" → e.g. "10 apr 2026" / "10 abr 2026"
+/// depending on the active UI language.
+pub fn format_date_short(datetime: &str, lang: crate::locale::Language) -> String {
+    let date_part = datetime.split('T').next().unwrap_or(datetime);
+    let parts: Vec<&str> = date_part.split('-').collect();
+    if parts.len() == 3 {
+        let key = format!("month.{}", parts[1]);
+        let month = crate::locale::t(&key, lang);
+        let day = parts[2].trim_start_matches('0');
+        format!("{day} {month} {}", parts[0])
+    } else {
+        date_part.to_string()
+    }
+}

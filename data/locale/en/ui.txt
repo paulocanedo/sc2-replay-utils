@@ -26,10 +26,6 @@ menu.help.about = About
 # ── File dialogs ────────────────────────────────────────────────────────────
 dialog.filter.sc2_replay = SC2 Replay
 
-# ── Replay bar (analysis screen) ────────────────────────────────────────────
-replay_bar.back_tooltip = Back to replay library
-replay_bar.open = Open replay…
-
 # ── Rename bar ──────────────────────────────────────────────────────────────
 rename_bar.title = Batch Rename Replays
 
@@ -57,15 +53,25 @@ error.load_failed = Error loading {path}: {err}
 empty.heading = No replay loaded
 empty.hint = Use File → Open replay… or enable the file watcher in Settings to auto-load new replays.
 
-# ── Sidebar (right panel in analysis) ───────────────────────────────────────
-sidebar.summary = Summary
-sidebar.players = Players
-sidebar.details = Details
-sidebar.detail.start = Started
-sidebar.detail.loops = Loops
-sidebar.detail.speed = Speed
-sidebar.speed_value = {value} loops/s
-sidebar.you_chip =  YOU
+# ── Shared widgets ──────────────────────────────────────────────────────────
+common.you_chip =  YOU
+common.vs = vs
+
+# ── Status bar messages ────────────────────────────────────────────────────
+status.library.count = {total} replays
+status.library.filtered = {total} replays · {shown} shown
+status.library.scanning = Scanning… ({found} found)
+status.library.parsing = Parsing {pending}/{total}
+
+# ── Analysis top bar (match chrome above the tabs) ──────────────────────────
+topbar.back_tooltip = Back to library
+topbar.details_tooltip = Match details
+topbar.detail.start = Started
+topbar.detail.loops = Loops
+topbar.detail.speed = Speed
+topbar.speed_value = {value} loops/s
+topbar.rename_tooltip = Rename replays…
+topbar.open = Open replay…
 
 # Race full names shown below the player name.
 race.terran = Terran
@@ -187,7 +193,6 @@ build_order.clipboard.header = type  start   end     supply  action
 build_order.clipboard.cancelled_mark =  [cancelled]
 build_order.clipboard.destroyed_mark =  [destroyed]
 build_order.chrono_tooltip = Chrono Boost ×{count}
-build_order.you_chip =  YOU
 
 # Entry kind full names (shown in legend, tooltips, clipboard header).
 entrykind.worker = Worker
@@ -203,7 +208,6 @@ chat.no_messages = No chat messages in this replay.
 chat.heading = Chat ({count} messages)
 chat.subheading = Click a line to highlight — feature coming in future iterations.
 chat.recipient = (→ {to})
-chat.you_chip =  You
 
 # ── Charts tab ──────────────────────────────────────────────────────────────
 charts.army.title = Army over time
@@ -237,7 +241,6 @@ charts.card.efficiency.workers = Workers
 charts.card.efficiency.army = Army
 charts.card.empty = —
 charts.supply_block.summary = {count} ({secs}s)
-charts.you_chip =  You
 
 # ── Timeline tab ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
@@ -274,7 +277,7 @@ rename.status.mkdir_err = Error creating directory: {err}
 rename.status.partial = {ok} copied, {errors} errors:
 rename.status.error_marker = errors
 
-# Short month abbreviations for the sidebar date format.
+# Short month abbreviations for the compact date format in the top bar.
 month.01 = jan
 month.02 = feb
 month.03 = mar

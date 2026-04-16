@@ -33,6 +33,10 @@ mod map_image;
 mod colors;
 #[path = "../gui/config.rs"]
 mod config;
+#[path = "../gui/tokens.rs"]
+mod tokens;
+#[path = "../gui/widgets.rs"]
+mod widgets;
 #[path = "../gui/replay_state.rs"]
 mod replay_state;
 #[path = "../gui/watcher.rs"]
@@ -51,8 +55,6 @@ mod library;
 mod rename;
 #[path = "../gui/tabs/mod.rs"]
 mod tabs;
-#[path = "../gui/sidebar.rs"]
-mod sidebar;
 #[path = "../gui/app.rs"]
 mod app;
 

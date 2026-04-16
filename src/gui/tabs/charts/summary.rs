@@ -129,7 +129,7 @@ fn player_line(ui: &mut Ui, name: &str, index: usize, value: &str, is_user: bool
         ui.label(name_text);
         if is_user {
             ui.label(
-                RichText::new(format!("{} ", t("charts.you_chip", lang)))
+                RichText::new(format!("{} ", t("common.you_chip", lang)))
                     .small()
                     .color(USER_CHIP_FG)
                     .background_color(USER_CHIP_BG),

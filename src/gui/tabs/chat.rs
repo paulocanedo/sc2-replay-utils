@@ -13,6 +13,7 @@ use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
+use crate::tokens::{SPACE_M, SPACE_XXL};
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let lang = config.language;
@@ -81,7 +82,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     // Chip "You" discreto só na linha do usuário.
                     if is_user {
                         ui.label(
-                            RichText::new(format!("{} ", t("chat.you_chip", lang)))
+                            RichText::new(format!("{} ", t("common.you_chip", lang)))
                                 .small()
                                 .color(USER_CHIP_FG)
                                 .background_color(USER_CHIP_BG),
@@ -93,10 +94,10 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 }
 
 fn placeholder(ui: &mut Ui, msg: &str) {
-    ui.add_space(40.0);
+    ui.add_space(SPACE_XXL);
     ui.vertical_centered(|ui| {
         ui.label(RichText::new("📜").size(48.0));
-        ui.add_space(8.0);
+        ui.add_space(SPACE_M);
         ui.label(RichText::new(msg).italics());
     });
 }

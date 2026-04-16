@@ -27,10 +27,6 @@ menu.help.about = Sobre
 # ── Diálogos de arquivo ─────────────────────────────────────────────────────
 dialog.filter.sc2_replay = SC2 Replay
 
-# ── Replay bar (tela de análise) ────────────────────────────────────────────
-replay_bar.back_tooltip = Voltar para a biblioteca de replays
-replay_bar.open = Abrir replay…
-
 # ── Rename bar ──────────────────────────────────────────────────────────────
 rename_bar.title = Renomear Replays em Lote
 
@@ -58,15 +54,25 @@ error.load_failed = Erro ao carregar {path}: {err}
 empty.heading = Nenhum replay carregado
 empty.hint = Use Arquivo → Abrir replay… ou habilite o file watcher em Configurações para auto-carregar replays novos.
 
-# ── Sidebar (painel direito na análise) ─────────────────────────────────────
-sidebar.summary = Resumo
-sidebar.players = Jogadores
-sidebar.details = Detalhes
-sidebar.detail.start = Início
-sidebar.detail.loops = Loops
-sidebar.detail.speed = Veloc.
-sidebar.speed_value = {value} loops/s
-sidebar.you_chip =  VOCÊ
+# ── Widgets compartilhados ──────────────────────────────────────────────────
+common.you_chip =  VOCÊ
+common.vs = vs
+
+# ── Mensagens da barra de status ───────────────────────────────────────────
+status.library.count = {total} replays
+status.library.filtered = {total} replays · {shown} exibidos
+status.library.scanning = Escaneando… ({found} encontrados)
+status.library.parsing = Parseando {pending}/{total}
+
+# ── Barra superior da análise (chrome da partida acima das abas) ────────────
+topbar.back_tooltip = Voltar à biblioteca
+topbar.details_tooltip = Detalhes da partida
+topbar.detail.start = Início
+topbar.detail.loops = Loops
+topbar.detail.speed = Veloc.
+topbar.speed_value = {value} loops/s
+topbar.rename_tooltip = Renomear replays…
+topbar.open = Abrir replay…
 
 # Nomes completos das raças exibidos abaixo do nome do jogador.
 race.terran = Terran
@@ -188,7 +194,6 @@ build_order.clipboard.header = tipo  início  fim     supply  ação
 build_order.clipboard.cancelled_mark =  [cancelado]
 build_order.clipboard.destroyed_mark =  [destruído]
 build_order.chrono_tooltip = Chrono Boost ×{count}
-build_order.you_chip =  VOCÊ
 
 # Nomes completos das categorias de entrada.
 entrykind.worker = Worker
@@ -204,7 +209,6 @@ chat.no_messages = Nenhuma mensagem de chat neste replay.
 chat.heading = Chat ({count} mensagens)
 chat.subheading = Clique em uma linha para destacar — funcionalidade virá em iterações futuras.
 chat.recipient = (→ {to})
-chat.you_chip =  Você
 
 # ── Aba Gráficos ────────────────────────────────────────────────────────────
 charts.army.title = Army ao longo do tempo
@@ -238,7 +242,6 @@ charts.card.efficiency.workers = Workers
 charts.card.efficiency.army = Army
 charts.card.empty = —
 charts.supply_block.summary = {count} ({secs}s)
-charts.you_chip =  Você
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
@@ -275,7 +278,7 @@ rename.status.mkdir_err = Erro ao criar diretório: {err}
 rename.status.partial = {ok} copiados, {errors} erros:
 rename.status.error_marker = erros
 
-# Abreviações de mês usadas no formato curto da sidebar.
+# Abreviações de mês usadas no formato curto da barra superior.
 month.01 = jan
 month.02 = fev
 month.03 = mar

@@ -3,6 +3,7 @@
 
 use egui::{Color32, RichText, Sense, Ui};
 
+use crate::colors::{race_color, RACE_PROTOSS, RACE_TERRAN, RACE_ZERG};
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
 
@@ -87,20 +88,17 @@ pub(super) fn row_height(ui: &Ui) -> f32 {
 
 const FRAME_CHROME_V: f32 = 13.0;
 
-// Cores de raça — distintas das cores de slot P1/P2 (vermelho/azul)
-// para que "raça" e "jogador" nunca se confundam visualmente.
-pub(super) const RACE_COLOR_TERRAN: Color32 = Color32::from_rgb(90, 130, 180);   // azul aço
-pub(super) const RACE_COLOR_PROTOSS: Color32 = Color32::from_rgb(120, 180, 100); // verde dourado
-pub(super) const RACE_COLOR_ZERG: Color32 = Color32::from_rgb(160, 80, 150);     // roxo magenta
+// Race colours — distinct from the P1/P2 slot palette (red/blue) so
+// "race" and "player" never collide visually. Single source of truth
+// in `crate::colors` — this module re-exports under the Library's
+// legacy names for grep-friendliness at call sites.
+pub(super) const RACE_COLOR_TERRAN: Color32 = RACE_TERRAN;
+pub(super) const RACE_COLOR_PROTOSS: Color32 = RACE_PROTOSS;
+pub(super) const RACE_COLOR_ZERG: Color32 = RACE_ZERG;
 
 /// Cor da borda esquerda baseada na raça.
 fn race_border_color(race: &str) -> Color32 {
-    match race_letter(race) {
-        'T' => RACE_COLOR_TERRAN,
-        'P' => RACE_COLOR_PROTOSS,
-        'Z' => RACE_COLOR_ZERG,
-        _ => Color32::from_gray(100),
-    }
+    race_color(race)
 }
 
 pub(super) fn entry_row(

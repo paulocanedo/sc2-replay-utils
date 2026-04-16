@@ -6,6 +6,7 @@ use egui::{Color32, Context, RichText, ScrollArea, Ui};
 
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
+use crate::widgets::chip;
 
 use super::date::{matches_date_range, today_str};
 use super::entry_row::*;
@@ -33,54 +34,9 @@ pub fn show(
     let mut action = LibraryAction::None;
     let lang = config.language;
 
-    // ── Header ───────────────────────────────────────────────────────
-    ui.horizontal(|ui| {
-        ui.heading(t("library.title", lang));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .small_button("↻")
-                .on_hover_text(t("library.reload_tooltip", lang))
-                .clicked()
-            {
-                action = LibraryAction::Refresh;
-            }
-            if ui
-                .small_button("🔎")
-                .on_hover_text(t("library.zoom_tooltip", lang))
-                .clicked()
-            {}
-            if ui
-                .small_button("✏")
-                .on_hover_text(t("library.rename_tooltip", lang))
-                .clicked()
-            {
-                action = LibraryAction::OpenRename;
-            }
-            if ui
-                .small_button("📂")
-                .on_hover_text(t("library.pick_dir_tooltip", lang))
-                .clicked()
-            {
-                if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                    action = LibraryAction::PickWorkingDir(p);
-                }
-            }
-        });
-    });
-
-    match library.working_dir.as_ref() {
-        Some(dir) => {
-            ui.small(
-                RichText::new(format!("📁 {}", dir.display()))
-                    .color(Color32::from_gray(120)),
-            );
-        }
-        None => {
-            ui.small(RichText::new(t("library.dir_unset", lang)).italics());
-        }
-    }
-
-    ui.add_space(4.0);
+    // Header chrome (title + folder path + reload/pick/rename icons)
+    // lives in the app-level `library_topbar`. This function renders
+    // only the central content: search/sort, filter chips, entry list.
 
     // ── Barra de busca + contagem/sort ───────────────────────────────
     ui.horizontal(|ui| {
@@ -423,35 +379,6 @@ pub fn show(
         });
 
     action
-}
-
-// ── UI components ────────────────────────────────────────────────────
-
-fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -> egui::Response {
-    let fill = if selected {
-        accent.map_or(Color32::from_rgb(55, 75, 55), |c| {
-            Color32::from_rgb(
-                (c.r() as u16 / 3) as u8 + 20,
-                (c.g() as u16 / 3) as u8 + 20,
-                (c.b() as u16 / 3) as u8 + 20,
-            )
-        })
-    } else {
-        Color32::from_gray(40)
-    };
-    let text_color = if selected {
-        Color32::WHITE
-    } else {
-        Color32::from_gray(160)
-    };
-
-    let icon = label.to_string();
-
-    ui.add(
-        egui::Button::new(RichText::new(icon).color(text_color).small())
-            .fill(fill)
-            .corner_radius(12.0),
-    )
 }
 
 /// Helper para a `app.rs` pedir repaint quando houver trabalho em andamento.

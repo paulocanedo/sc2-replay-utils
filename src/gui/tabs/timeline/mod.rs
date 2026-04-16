@@ -35,6 +35,8 @@ use egui::{Color32, TextStyle, Ui};
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::{fmt_time, LoadedReplay};
+use crate::tokens::{SPACE_L, SPACE_XS};
+use crate::widgets::toggle_chip_bool;
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
 /// Compartilhado entre `minimap` (camera rect) e `overlays` (heatmap
@@ -92,19 +94,19 @@ pub fn show(
     egui::Panel::top("timeline_top")
         .resizable(false)
         .show_inside(ui, |ui| {
-            ui.add_space(2.0);
+            ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
                 ui.monospace(format!(
                     "{} / {}",
                     fmt_time(*current_loop, tl.loops_per_second),
                     fmt_time(tl.game_loops, tl.loops_per_second),
                 ));
-                ui.add_space(12.0);
-                ui.toggle_value(show_heatmap, t("timeline.toggle.heatmap", lang));
-                ui.toggle_value(show_creep, t("timeline.toggle.creep", lang));
-                ui.toggle_value(show_map, t("timeline.toggle.map", lang));
+                ui.add_space(SPACE_L);
+                toggle_chip_bool(ui, t("timeline.toggle.heatmap", lang), show_heatmap, None);
+                toggle_chip_bool(ui, t("timeline.toggle.creep", lang), show_creep, None);
+                toggle_chip_bool(ui, t("timeline.toggle.map", lang), show_map, None);
             });
-            ui.add_space(2.0);
+            ui.add_space(SPACE_XS);
         });
 
     egui::Panel::bottom("timeline_bottom")

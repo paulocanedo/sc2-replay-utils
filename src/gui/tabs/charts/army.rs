@@ -8,6 +8,8 @@ use crate::config::AppConfig;
 use crate::locale::{localize, t, tf, Language};
 use crate::replay::is_worker_name;
 use crate::replay_state::{loop_to_secs, LoadedReplay};
+use crate::tokens::SPACE_XL;
+use crate::widgets::toggle_chip_bool;
 use crate::{army_value, balance_data};
 
 use super::classify::*;
@@ -36,11 +38,11 @@ pub(super) fn army_value_plot(
         ui.label(t("charts.army.metric", lang));
         ui.radio_value(&mut opts.metric, ChartMetric::Value, t("charts.army.metric.value", lang));
         ui.radio_value(&mut opts.metric, ChartMetric::Count, t("charts.army.metric.count", lang));
-        ui.add_space(16.0);
-        ui.checkbox(&mut opts.group_by_type, t("charts.army.group_by_type", lang));
+        ui.add_space(SPACE_XL);
+        toggle_chip_bool(ui, t("charts.army.group_by_type", lang), &mut opts.group_by_type, None);
 
         if opts.group_by_type {
-            ui.add_space(16.0);
+            ui.add_space(SPACE_XL);
             ui.label(t("charts.army.player_label", lang));
             let player_count = loaded.timeline.players.len();
             if opts.grouped_player >= player_count && player_count > 0 {
@@ -60,23 +62,23 @@ pub(super) fn army_value_plot(
                     }
                 });
         } else {
-            ui.add_space(16.0);
-            // No modo agregado, as checkboxes Army/Workers controlam o
-            // que entra na soma. Impede desmarcar ambos simultaneamente.
+            ui.add_space(SPACE_XL);
+            // No modo agregado, os chips Army/Workers controlam o que
+            // entra na soma. Impede desmarcar ambos simultaneamente.
             let only_army = opts.show_army && !opts.show_workers;
             let only_workers = !opts.show_army && opts.show_workers;
             let army_label = t("charts.army.show", lang);
             let workers_label = t("charts.workers.show", lang);
-            if only_army {
-                ui.add_enabled(false, egui::Checkbox::new(&mut opts.show_army, army_label));
-            } else {
-                ui.checkbox(&mut opts.show_army, army_label);
+            let army_resp = toggle_chip_bool(ui, army_label, &mut opts.show_army, None);
+            if only_army && !opts.show_army {
+                opts.show_army = true; // não permite desmarcar o último ativo
             }
-            if only_workers {
-                ui.add_enabled(false, egui::Checkbox::new(&mut opts.show_workers, workers_label));
-            } else {
-                ui.checkbox(&mut opts.show_workers, workers_label);
+            let _ = army_resp;
+            let workers_resp = toggle_chip_bool(ui, workers_label, &mut opts.show_workers, None);
+            if only_workers && !opts.show_workers {
+                opts.show_workers = true;
             }
+            let _ = workers_resp;
         }
     });
 
