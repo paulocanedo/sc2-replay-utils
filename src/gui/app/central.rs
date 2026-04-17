@@ -34,14 +34,36 @@ impl AppState {
 
             match self.screen {
                 Screen::Library => {
+                    if self.library_sidebar_open {
+                        let mut side_action = LibraryAction::None;
+                        egui::Panel::left("library_filters")
+                            .resizable(false)
+                            .exact_size(260.0)
+                            .show_inside(ui, |ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    side_action = library::show_sidebar(
+                                        ui,
+                                        &mut self.library_filter,
+                                        self.library.stats(),
+                                        &self.config,
+                                    );
+                                });
+                            });
+                        if !matches!(side_action, LibraryAction::None) {
+                            library_action = side_action;
+                        }
+                    }
                     let current = self.loaded.as_ref().map(|l| l.path.as_path());
-                    library_action = library::show(
+                    let central_action = library::show(
                         ui,
                         &self.library,
                         current,
                         &self.config,
                         &mut self.library_filter,
                     );
+                    if !matches!(central_action, LibraryAction::None) {
+                        library_action = central_action;
+                    }
                 }
                 Screen::Analysis => match self.loaded.as_ref() {
                     None => empty_state(ui, lang),

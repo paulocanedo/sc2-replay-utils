@@ -6,11 +6,12 @@ use egui::{Color32, Context, RichText, ScrollArea, Ui};
 
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
-use crate::widgets::chip;
+use crate::tokens::SPACE_S;
 
 use super::date::{matches_date_range, today_str};
 use super::entry_row::*;
 use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder};
+use super::hero::{self, HeroAction};
 use super::scanner::ReplayLibrary;
 use super::types::MetaState;
 
@@ -34,181 +35,45 @@ pub fn show(
     let mut action = LibraryAction::None;
     let lang = config.language;
 
-    // Header chrome (title + folder path + reload/pick/rename icons)
-    // lives in the app-level `library_topbar`. This function renders
-    // only the central content: search/sort, filter chips, entry list.
+    // Header chrome (title + folder path + reload/pick/rename icons) and
+    // the filter sidebar (search/chips/sort) live in app-level panels.
+    // This function renders only: hero KPI strip, status, and the
+    // virtualized entry list.
 
-    // ── Barra de busca + contagem/sort ───────────────────────────────
-    ui.horizontal(|ui| {
-        ui.label("🔎");
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut filter.search)
-                .hint_text(t("library.search_placeholder", lang))
-                .desired_width(ui.available_width() - 150.0),
-        );
-        if !filter.search.is_empty() && resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            filter.search.clear();
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let total = library.entries.len();
-            egui::ComboBox::from_id_salt("library_sort")
-                .selected_text(tf(
-                    "library.sort.total_count",
-                    lang,
-                    &[("total", &total.to_string())],
-                ))
-                .width(120.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut filter.sort,
-                        SortOrder::Date,
-                        t("library.sort.date", lang),
-                    );
-                    ui.selectable_value(
-                        &mut filter.sort,
-                        SortOrder::Duration,
-                        t("library.sort.duration", lang),
-                    );
-                    ui.selectable_value(
-                        &mut filter.sort,
-                        SortOrder::Mmr,
-                        t("library.sort.mmr", lang),
-                    );
-                    ui.selectable_value(
-                        &mut filter.sort,
-                        SortOrder::Map,
-                        t("library.sort.map", lang),
-                    );
-                    ui.separator();
-                    let asc_label = if filter.sort_ascending {
-                        t("library.sort.ascending_marked", lang)
-                    } else {
-                        t("library.sort.ascending_unmarked", lang)
-                    };
-                    let desc_label = if !filter.sort_ascending {
-                        t("library.sort.descending_marked", lang)
-                    } else {
-                        t("library.sort.descending_unmarked", lang)
-                    };
-                    if ui.selectable_label(filter.sort_ascending, asc_label).clicked() {
-                        filter.sort_ascending = true;
+    // ── Hero KPI strip ───────────────────────────────────────────────
+    if let Some(stats) = library.stats() {
+        if stats.total_parsed > 0 {
+            if let Some(ha) = hero::show(ui, stats, config) {
+                match ha {
+                    HeroAction::ClearFilters => {
+                        filter.search.clear();
+                        filter.race = None;
+                        filter.outcome = OutcomeFilter::All;
+                        let prev_range = filter.date_range;
+                        filter.date_range = DateRange::All;
+                        if prev_range != DateRange::All {
+                            action = LibraryAction::SaveDateRange(DateRange::All);
+                        }
                     }
-                    if ui
-                        .selectable_label(!filter.sort_ascending, desc_label)
-                        .clicked()
-                    {
+                    HeroAction::FilterWins => {
+                        filter.outcome = if filter.outcome == OutcomeFilter::Wins {
+                            OutcomeFilter::All
+                        } else {
+                            OutcomeFilter::Wins
+                        };
+                    }
+                    HeroAction::SortByDateDesc => {
+                        filter.sort = SortOrder::Date;
                         filter.sort_ascending = false;
                     }
-                });
-        });
-    });
-
-    ui.add_space(2.0);
-
-    // ── Chips de filtro rápido ────────────────────────────────────────
-    let has_nicknames = !config.user_nicknames.is_empty();
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-
-        let todos_active = filter.race.is_none()
-            && filter.outcome == OutcomeFilter::All
-            && filter.date_range == DateRange::All;
-        if chip(ui, t("library.filter.all", lang), todos_active, None).clicked() {
-            filter.race = None;
-            filter.outcome = OutcomeFilter::All;
-            filter.date_range = DateRange::All;
-        }
-
-        ui.add_space(4.0);
-
-        for (label, letter, color) in [
-            (t("race.terran", lang), 'T', RACE_COLOR_TERRAN),
-            (t("race.protoss", lang), 'P', RACE_COLOR_PROTOSS),
-            (t("race.zerg", lang), 'Z', RACE_COLOR_ZERG),
-        ] {
-            let selected = filter.race == Some(letter);
-            let resp = chip(ui, label, selected, Some(color));
-            if resp.clicked() && has_nicknames {
-                filter.race = if selected { None } else { Some(letter) };
+                    HeroAction::SetSearch(s) => {
+                        filter.search = s;
+                    }
+                }
             }
-            if !has_nicknames {
-                resp.on_hover_text(t("library.filter.nicknames_race_tooltip", lang));
-            }
+            ui.add_space(SPACE_S);
         }
-
-        ui.add_space(4.0);
-
-        let wins_selected = filter.outcome == OutcomeFilter::Wins;
-        let resp = chip(
-            ui,
-            t("library.filter.wins", lang),
-            wins_selected,
-            Some(Color32::from_rgb(80, 180, 80)),
-        );
-        if resp.clicked() && has_nicknames {
-            filter.outcome = if wins_selected { OutcomeFilter::All } else { OutcomeFilter::Wins };
-        }
-        if !has_nicknames {
-            resp.on_hover_text(t("library.filter.nicknames_outcome_tooltip", lang));
-        }
-
-        let losses_selected = filter.outcome == OutcomeFilter::Losses;
-        let resp = chip(
-            ui,
-            t("library.filter.losses", lang),
-            losses_selected,
-            Some(Color32::from_rgb(180, 80, 80)),
-        );
-        if resp.clicked() && has_nicknames {
-            filter.outcome = if losses_selected { OutcomeFilter::All } else { OutcomeFilter::Losses };
-        }
-        if !has_nicknames {
-            resp.on_hover_text(t("library.filter.nicknames_outcome_tooltip", lang));
-        }
-
-        ui.add_space(4.0);
-
-        let prev_date_range = filter.date_range;
-        let date_label = match filter.date_range {
-            DateRange::All => t("library.date.always", lang),
-            DateRange::Today => t("library.date.today", lang),
-            DateRange::ThisWeek => t("library.date.week", lang),
-            DateRange::ThisMonth => t("library.date.month", lang),
-        };
-        let date_active = filter.date_range != DateRange::All;
-        let date_text_color = if date_active { Color32::WHITE } else { Color32::from_gray(160) };
-        egui::ComboBox::from_id_salt("date_range_chip")
-            .selected_text(RichText::new(date_label).color(date_text_color).small())
-            .width(80.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut filter.date_range,
-                    DateRange::All,
-                    t("library.date.always_full", lang),
-                );
-                ui.selectable_value(
-                    &mut filter.date_range,
-                    DateRange::Today,
-                    t("library.date.today_full", lang),
-                );
-                ui.selectable_value(
-                    &mut filter.date_range,
-                    DateRange::ThisWeek,
-                    t("library.date.this_week", lang),
-                );
-                ui.selectable_value(
-                    &mut filter.date_range,
-                    DateRange::ThisMonth,
-                    t("library.date.this_month", lang),
-                );
-            });
-        if filter.date_range != prev_date_range {
-            action = LibraryAction::SaveDateRange(filter.date_range);
-        }
-    });
-
-    ui.add_space(2.0);
+    }
 
     // ── Status ───────────────────────────────────────────────────────
     if library.scanning {

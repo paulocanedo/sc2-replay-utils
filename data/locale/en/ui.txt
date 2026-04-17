@@ -155,6 +155,24 @@ library.entry.parsing = reading metadata…
 library.entry.unsupported = ⚠ unsupported: {reason}
 library.entry.failed = failed: {err}
 library.entry.open = open
+library.hero.total = TOTAL
+library.hero.winrate = WINRATE
+library.hero.mmr = MMR
+library.hero.best_matchup = BEST MATCHUP
+library.hero.top_map = TOP MAP
+library.hero.wins_suffix = W
+library.hero.losses_suffix = L
+library.sidebar.search = Search
+library.sidebar.race = Race
+library.sidebar.outcome = Outcome
+library.sidebar.date_range = Period
+library.sidebar.sort = Sort by
+library.sidebar.ascending = Ascending
+library.sidebar.descending = Descending
+library.sidebar.insights_matchup = Matchup winrate
+library.sidebar.insights_maps = Top maps
+library.sidebar.toggle_tooltip = Toggle filter sidebar
+library.filter.clear_all = Clear filters
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 tab.timeline = Timeline

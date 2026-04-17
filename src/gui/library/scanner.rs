@@ -19,8 +19,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::config::AppConfig;
 use crate::replay::parse_replay;
 
+use super::stats::{LibraryStats, compute_library_stats};
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
 /// Acima deste número de novos arquivos a parsear em um único `refresh`,
@@ -85,6 +87,12 @@ pub struct ReplayLibrary {
     /// Acumulador de arquivos que precisam de parsing, preenchido
     /// progressivamente pelo scanner e despachado em lotes.
     scan_parse_queue: Vec<(PathBuf, Option<SystemTime>)>,
+    /// Derived cache: aggregates computed from `entries` on demand.
+    /// Invalidated whenever `entries` mutates or when the nickname list
+    /// in `AppConfig` differs from the one used to build the cache.
+    cached_stats: Option<LibraryStats>,
+    stats_dirty: bool,
+    cached_nicknames: Vec<String>,
 }
 
 impl ReplayLibrary {
@@ -102,6 +110,9 @@ impl ReplayLibrary {
             scanning: false,
             scan_latest: None,
             scan_parse_queue: Vec::new(),
+            cached_stats: None,
+            stats_dirty: true,
+            cached_nicknames: Vec::new(),
         }
     }
 
@@ -115,6 +126,7 @@ impl ReplayLibrary {
         // o send() do scanner falhar e a thread encerrar.
         self.rx_scan = None;
         self.entries.clear();
+        self.stats_dirty = true;
         self.scan_parse_queue.clear();
         self.scan_latest = None;
 
@@ -309,6 +321,9 @@ impl ReplayLibrary {
                 updated = true;
             }
         }
+        if updated {
+            self.stats_dirty = true;
+        }
         // Salva o cache quando todos os workers terminaram.
         if self.cache_dirty && !self.scanning && self.pending_count() == 0 {
             self.save_cache();
@@ -330,6 +345,27 @@ impl ReplayLibrary {
             .iter()
             .filter(|e| matches!(e.meta, MetaState::Pending))
             .count()
+    }
+
+    /// Recomputes the derived stats cache if `entries` has mutated since
+    /// last call, or if the user's nickname list has changed. Cheap to
+    /// call on every frame: the fast path is a dirty-flag check and a
+    /// slice comparison of nicknames (typically ≤3 strings).
+    pub fn ensure_stats(&mut self, config: &AppConfig) {
+        let nicknames_changed = self.cached_nicknames != config.user_nicknames;
+        if self.stats_dirty || self.cached_stats.is_none() || nicknames_changed {
+            self.cached_stats = Some(compute_library_stats(&self.entries, config));
+            self.stats_dirty = false;
+            if nicknames_changed {
+                self.cached_nicknames = config.user_nicknames.clone();
+            }
+        }
+    }
+
+    /// Returns the last computed stats snapshot. Call `ensure_stats` on
+    /// the same frame first — otherwise the snapshot may be stale.
+    pub fn stats(&self) -> Option<&LibraryStats> {
+        self.cached_stats.as_ref()
     }
 }
 

@@ -64,6 +64,8 @@ impl eframe::App for AppState {
         if self.library.poll() {
             ctx.request_repaint();
         }
+        // Recompute derived library stats if entries or nicknames changed.
+        self.library.ensure_stats(&self.config);
         // Carrega o replay mais recente quando o scanner terminar.
         if self.pending_load_latest && !self.library.scanning {
             self.pending_load_latest = false;
