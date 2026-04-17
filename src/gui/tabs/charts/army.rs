@@ -168,7 +168,15 @@ pub(super) fn army_value_plot(
         t("charts.axis.army", lang)
     };
 
-    Plot::new("army_value_plot")
+    let plot_id = format!(
+        "army_value_plot_m{}_g{}_a{}_w{}_p{}",
+        opts.metric as u8,
+        opts.group_by_type as u8,
+        opts.show_army as u8,
+        opts.show_workers as u8,
+        opts.grouped_player,
+    );
+    Plot::new(plot_id)
         .legend(Legend::default())
         .height(360.0)
         .allow_boxed_zoom(true)
