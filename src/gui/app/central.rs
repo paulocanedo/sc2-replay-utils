@@ -1,0 +1,122 @@
+// Roteamento do painel central: biblioteca, aba de análise (Timeline /
+// BuildOrder / Charts / Chat) ou tela de rename. Também consume a
+// `LibraryAction` devolvida pela biblioteca após o render.
+
+use egui::{Color32, RichText};
+
+use crate::library::{self, LibraryAction};
+use crate::locale::{t, tf, Language};
+use crate::tabs::{self, Tab};
+use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
+
+use super::state::{AppState, Screen};
+
+impl AppState {
+    pub(super) fn show_central(&mut self, ui: &mut egui::Ui) -> LibraryAction {
+        let lang = self.config.language;
+        let mut library_action = LibraryAction::None;
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            if let Some(err) = self.load_error.clone() {
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(60, 20, 20))
+                    .stroke(egui::Stroke::new(1.0, Color32::LIGHT_RED))
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(err).color(Color32::LIGHT_RED));
+                            if ui.small_button("×").clicked() {
+                                self.load_error = None;
+                            }
+                        });
+                    });
+                ui.add_space(8.0);
+            }
+
+            match self.screen {
+                Screen::Library => {
+                    let current = self.loaded.as_ref().map(|l| l.path.as_path());
+                    library_action = library::show(
+                        ui,
+                        &self.library,
+                        current,
+                        &self.config,
+                        &mut self.library_filter,
+                    );
+                }
+                Screen::Analysis => match self.loaded.as_ref() {
+                    None => empty_state(ui, lang),
+                    Some(loaded) => match self.active_tab {
+                        Tab::Timeline => tabs::timeline::show(
+                            ui,
+                            loaded,
+                            &self.config,
+                            &mut self.timeline_tab_loop,
+                            &mut self.timeline_show_heatmap,
+                            &mut self.timeline_show_creep,
+                            &mut self.timeline_show_map,
+                        ),
+                        Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
+                        Tab::Charts => tabs::charts::show(
+                            ui,
+                            loaded,
+                            &self.config,
+                            &mut self.charts_army_opts,
+                            &mut self.charts_efficiency_target,
+                        ),
+                        Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
+                    },
+                },
+                Screen::Rename => {
+                    crate::rename::show(
+                        ui,
+                        &self.library,
+                        &self.config,
+                        &mut self.rename_template,
+                        &mut self.rename_previews,
+                        &mut self.rename_status,
+                    );
+                }
+            }
+        });
+        library_action
+    }
+
+    pub(super) fn handle_library_action(&mut self, action: LibraryAction) {
+        let lang = self.config.language;
+        match action {
+            LibraryAction::None => {}
+            LibraryAction::Load(p) => self.load_path(p),
+            LibraryAction::Refresh => self.refresh_library(),
+            LibraryAction::PickWorkingDir(p) => {
+                self.config.working_dir = Some(p);
+                if let Err(e) = self.config.save() {
+                    self.set_toast(tf("toast.save_error", lang, &[("err", &e)]));
+                }
+                self.refresh_library();
+            }
+            LibraryAction::SaveDateRange(range) => {
+                self.config.library_date_range = range;
+                if let Err(e) = self.config.save() {
+                    self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
+                }
+            }
+            LibraryAction::OpenRename => {
+                self.rename_previews =
+                    crate::rename::generate_previews(&self.library, &self.rename_template);
+                self.rename_status = None;
+                self.screen = Screen::Rename;
+            }
+        }
+    }
+}
+
+fn empty_state(ui: &mut egui::Ui, lang: Language) {
+    ui.add_space(SPACE_XXL * 2.5);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new("🎮").size(56.0));
+        ui.add_space(SPACE_M);
+        ui.label(RichText::new(t("empty.heading", lang)).heading());
+        ui.add_space(SPACE_S);
+        ui.label(RichText::new(t("empty.hint", lang)).italics());
+    });
+}
