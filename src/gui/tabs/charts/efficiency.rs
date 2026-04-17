@@ -39,7 +39,7 @@ pub(super) fn efficiency_plot(
     let lps = series.loops_per_second;
 
 
-    Plot::new("efficiency_plot")
+    Plot::new(format!("efficiency_plot_t{}", *target as u8))
         .legend(Legend::default())
         .height(280.0)
         .allow_boxed_zoom(true)
