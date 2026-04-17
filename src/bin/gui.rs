@@ -55,7 +55,7 @@ mod library;
 mod rename;
 #[path = "../gui/tabs/mod.rs"]
 mod tabs;
-#[path = "../gui/app.rs"]
+#[path = "../gui/app/mod.rs"]
 mod app;
 
 fn main() -> eframe::Result<()> {
