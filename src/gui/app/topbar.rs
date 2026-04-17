@@ -26,6 +26,7 @@ impl AppState {
         let mut reload_clicked = false;
         let mut pick_dir: Option<PathBuf> = None;
         let mut rename_clicked = false;
+        let mut toggle_sidebar = false;
         let working_dir_display = self
             .library
             .working_dir
@@ -87,6 +88,16 @@ impl AppState {
                             {
                                 reload_clicked = true;
                             }
+                            ui.add_space(SPACE_XS);
+                            if icon_button(
+                                ui,
+                                "☰",
+                                t("library.sidebar.toggle_tooltip", lang),
+                            )
+                            .clicked()
+                            {
+                                toggle_sidebar = true;
+                            }
                         },
                     );
                 });
@@ -106,6 +117,9 @@ impl AppState {
                 crate::rename::generate_previews(&self.library, &self.rename_template);
             self.rename_status = None;
             self.screen = Screen::Rename;
+        }
+        if toggle_sidebar {
+            self.library_sidebar_open = !self.library_sidebar_open;
         }
     }
 

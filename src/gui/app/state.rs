@@ -42,6 +42,10 @@ pub struct AppState {
     pub toast: Option<(String, Instant)>,
     pub library: ReplayLibrary,
     pub library_filter: library::LibraryFilter,
+    /// Whether the left filter sidebar on the Library screen is expanded.
+    /// Toggled by the ☰ button in the Library topbar; persisted only in
+    /// session memory (not saved to disk).
+    pub library_sidebar_open: bool,
     /// Game loop selecionado no slider da aba Timeline (mini-mapa).
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
@@ -87,6 +91,7 @@ impl AppState {
             toast: None,
             library: ReplayLibrary::new(),
             library_filter,
+            library_sidebar_open: true,
             timeline_tab_loop: 0,
             charts_army_opts: tabs::charts::ArmyChartOptions::default(),
             charts_efficiency_target: EfficiencyTarget::Workers,

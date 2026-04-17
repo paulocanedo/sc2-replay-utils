@@ -156,6 +156,24 @@ library.entry.parsing = lendo metadados…
 library.entry.unsupported = ⚠ não suportado: {reason}
 library.entry.failed = falha: {err}
 library.entry.open = abrir
+library.hero.total = TOTAL
+library.hero.winrate = VITÓRIAS
+library.hero.mmr = MMR
+library.hero.best_matchup = MELHOR MATCHUP
+library.hero.top_map = MAPA TOP
+library.hero.wins_suffix = V
+library.hero.losses_suffix = D
+library.sidebar.search = Busca
+library.sidebar.race = Raça
+library.sidebar.outcome = Resultado
+library.sidebar.date_range = Período
+library.sidebar.sort = Ordenar por
+library.sidebar.ascending = Crescente
+library.sidebar.descending = Decrescente
+library.sidebar.insights_matchup = Winrate por matchup
+library.sidebar.insights_maps = Mapas mais jogados
+library.sidebar.toggle_tooltip = Mostrar/ocultar filtros
+library.filter.clear_all = Limpar filtros
 
 # ── Abas ────────────────────────────────────────────────────────────────────
 tab.timeline = Timeline
