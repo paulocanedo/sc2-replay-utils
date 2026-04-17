@@ -190,9 +190,17 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // que o jogador tinha quando emitiu o comando.
         let (supply, supply_made) = supply_at(player, start_loop);
 
-        // Chrono boost: só estimamos quando temos start via cmd
-        // matching (tempo real) e a entrada completou normalmente.
-        let chrono_boosts = if cmd_match.is_some() && outcome == EntryOutcome::Completed {
+        // Chrono boost: só Protoss pode acelerar a própria produção. Para
+        // Terran/Zerg a estimativa baseada em (expected − actual) gera
+        // falsos positivos sempre que o cmd matching pareia um cmd com o
+        // "slot" errado da fila do produtor (cmd emitido depois do
+        // anterior nascer mas antes do atual — ele é o cmd do próximo
+        // SCV/Marine, não desse). Como a heurística não tem como
+        // distinguir, restringimos por raça.
+        let chrono_boosts = if player.race == "Protoss"
+            && cmd_match.is_some()
+            && outcome == EntryOutcome::Completed
+        {
             let expected_bt = build_time_loops(&ev.entity_type, base_build);
             let actual_bt = projected_finish.saturating_sub(start_loop);
             estimate_chrono_count(expected_bt, actual_bt)
@@ -232,7 +240,7 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             consume_global_cmd(&mut consumed, &player.production_cmds, &u.name, max_cmd);
         let start_loop =
             cmd_loop.unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
-        let chrono_boosts = if cmd_loop.is_some() {
+        let chrono_boosts = if player.race == "Protoss" && cmd_loop.is_some() {
             let actual_bt = finish_loop.saturating_sub(start_loop);
             estimate_chrono_count(expected_bt, actual_bt)
         } else {
