@@ -23,7 +23,17 @@ use super::types::{
 /// que custam tempo/recursos e que um jogador iniciou explicitamente —
 /// transformações mecânicas (siege mode, lift/lower, transform) ficam de
 /// fora.
-fn synthetic_morph_ability(new_type: &str) -> Option<String> {
+///
+/// O `old_type` é necessário pra distinguir um morph verdadeiro
+/// (`CommandCenter → OrbitalCommand`) de uma aterrissagem após lift-off
+/// (`OrbitalCommandFlying → OrbitalCommand`) — ambos têm o mesmo
+/// `new_type`, mas só o primeiro deve aparecer no build order.
+fn synthetic_morph_ability(old_type: &str, new_type: &str) -> Option<String> {
+    // Lift-off/land cycle: `X → XFlying → X`. A aterrissagem não é um
+    // novo build order entry, então filtramos.
+    if old_type.strip_suffix("Flying") == Some(new_type) {
+        return None;
+    }
     matches!(
         new_type,
         "OrbitalCommand"
@@ -453,7 +463,7 @@ pub(super) fn process_tracker_events(
                 let old_type = state.entity_type.clone();
                 let Some(&idx) = player_idx.get(&pid) else { continue };
 
-                let synthetic_ability = synthetic_morph_ability(&e.unit_type_name);
+                let synthetic_ability = synthetic_morph_ability(&old_type, &e.unit_type_name);
                 apply_type_change(
                     &mut players[idx],
                     game_loop,

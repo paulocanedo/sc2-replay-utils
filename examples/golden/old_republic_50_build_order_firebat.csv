@@ -45,9 +45,7 @@
 04:48,05:09,42,61,U,Marauder,1,C
 04:49,05:02,42,61,W,SCV,1,C
 04:52,05:09,42,61,S,BarracksTechLab,1,C
-04:57,05:15,45,61,U,Marine,1,C
-04:58,05:23,45,61,S,OrbitalCommand,1,C
-05:00,05:18,45,61,U,Marine,1,C
+04:57,05:15,45,61,U,Marine,2,C
 05:02,05:14,47,61,W,SCV,1,C
 05:09,05:31,48,61,U,Marauder,1,C
 05:17,05:29,50,61,W,SCV,2,C
@@ -79,7 +77,6 @@
 06:46,07:32,82,101,S,Barracks,3,C
 06:53,08:31,85,101,U,Marauder,1,C
 06:55,07:10,85,101,W,SCV,2,C
-06:58,07:23,85,101,S,OrbitalCommand,1,C
 06:59,08:54,85,101,P,TerranInfantryArmorsLevel1,1,C
 07:04,07:29,88,101,S,EngineeringBay,1,C
 07:04,07:50,88,101,S,Armory,1,C
@@ -186,12 +183,10 @@
 16:00,17:55,138,271,P,TerranVehicleAndShipArmorsLevel1,1,C
 16:07,16:25,138,271,S,MissileTurret,1,C
 16:20,17:24,138,271,U,Battlecruiser,3,C
-16:26,16:51,148,271,S,OrbitalCommand,1,C
 16:27,16:45,148,271,S,MissileTurret,1,C
 16:32,16:53,148,271,U,WidowMine,2,C
 16:53,17:28,160,271,S,Starport,2,C
 16:59,16:59,160,271,U,GhostAlternate,4,C
-16:59,17:24,160,271,S,OrbitalCommand,1,C
 17:13,17:35,166,271,S,Refinery,2,C
 17:27,17:27,154,271,U,GhostAlternate,3,C
 17:47,18:05,136,256,S,StarportTechLab,3,C
@@ -210,7 +205,6 @@
 19:25,19:46,195,256,S,Refinery,1,C
 19:36,20:40,191,256,U,Battlecruiser,2,C
 19:42,20:00,180,241,U,Marine,1,C
-19:49,20:14,178,241,S,OrbitalCommand,1,C
 19:52,21:32,178,241,R,BattlecruiserEnableSpecializations,1,C
 20:02,20:14,157,226,W,SCV,4,C
 20:10,20:10,162,226,U,GhostAlternate,3,C
