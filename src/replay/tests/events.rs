@@ -137,17 +137,31 @@ fn morph_only_unit_type_change_carries_synthetic_ability() {
             if ev.kind != EntityEventKind::ProductionStarted {
                 continue;
             }
-            if matches!(
+            if !matches!(
                 ev.entity_type.as_str(),
                 "OrbitalCommand" | "PlanetaryFortress" | "WarpGate"
             ) {
-                let ability = ev.creator_ability.as_deref().unwrap_or("");
-                assert!(
-                    ability.starts_with("MorphTo"),
-                    "esperava creator_ability=MorphTo* para {} no loop {}, achei {:?}",
-                    ev.entity_type, ev.game_loop, ev.creator_ability,
-                );
+                continue;
             }
+            // Lift/land cycles (X → XFlying → X) também emitem
+            // ProductionStarted via `apply_type_change`, mas não são
+            // morphs reais — ficam sem `creator_ability`. Identificamos
+            // pelo `Died` pareado cujo entity_type é a versão Flying.
+            let is_land = p.entity_events.iter().any(|d| {
+                d.tag == ev.tag
+                    && d.game_loop == ev.game_loop
+                    && d.kind == EntityEventKind::Died
+                    && d.entity_type == format!("{}Flying", ev.entity_type)
+            });
+            if is_land {
+                continue;
+            }
+            let ability = ev.creator_ability.as_deref().unwrap_or("");
+            assert!(
+                ability.starts_with("MorphTo"),
+                "esperava creator_ability=MorphTo* para {} no loop {}, achei {:?}",
+                ev.entity_type, ev.game_loop, ev.creator_ability,
+            );
         }
     }
 }
