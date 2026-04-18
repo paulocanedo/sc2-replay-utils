@@ -448,7 +448,11 @@ fn grouped_series(
         .map(|(canonical, series_refs)| {
             let value_weight = match metric {
                 ChartMetric::Value => {
-                    balance_data::supply_cost_x10(&canonical, base_build) as f64 / 10.0
+                    // Valor em recursos = minerals + vespene, batendo com
+                    // o que `army_value` usa para o modo agregado
+                    // (`army_value_minerals + army_value_vespene`).
+                    let (m, v) = balance_data::resource_cost(&canonical, base_build);
+                    (m + v) as f64
                 }
                 ChartMetric::Count => 1.0,
             };
