@@ -73,6 +73,9 @@ fn main() {
     let mut abilities: BTreeMap<AbilityKey, String> = BTreeMap::new();
     // (versão, nome) → supply_cost × 10 (ex.: Marine=10, Zergling=5).
     let mut supply: BTreeMap<(u32, String), u32> = BTreeMap::new();
+    // (versão, nome) → (minerals, vespene). Usado pelo gráfico de army value
+    // agrupado por tipo para converter contagem de unidades em valor de recursos.
+    let mut cost: BTreeMap<(u32, String), (u32, u32)> = BTreeMap::new();
 
     for version_entry in fs::read_dir(&balance_dir).expect("read_dir BalanceData") {
         let version_entry = version_entry.expect("entry");
@@ -98,7 +101,7 @@ fn main() {
                 Ok(v) => v,
                 Err(e) => panic!("falha ao parsear {}: {e}", unit_path.display()),
             };
-            collect_unit(&json, version, &mut entries, &mut supply);
+            collect_unit(&json, version, &mut entries, &mut supply, &mut cost);
             collect_abilities(&json, version, &mut abilities);
         }
     }
@@ -112,7 +115,7 @@ fn main() {
         "nenhuma entrada de abilities extraída — algo está errado"
     );
 
-    write_generated(&entries, &abilities, &supply);
+    write_generated(&entries, &abilities, &supply, &cost);
 
     // Re-roda o build script se a árvore de balance data mudar (cargo
     // update do s2protocol troca o source dir, e o cargo já invalida
@@ -134,6 +137,7 @@ fn collect_unit(
     version: u32,
     out: &mut BTreeMap<(u32, String), u32>,
     supply_out: &mut BTreeMap<(u32, String), u32>,
+    cost_out: &mut BTreeMap<(u32, String), (u32, u32)>,
 ) {
     let Some(id) = json.get("@id").and_then(Value::as_str) else {
         return;
@@ -159,6 +163,25 @@ fn collect_unit(
             let cost_x10 = (supply * 10.0).round() as u32;
             insert(supply_out, version, id.to_string(), cost_x10);
         }
+    }
+
+    // Custo em recursos (minerals, vespene). Campos podem ser `null`
+    // no JSON — tratamos como zero. Só grava entradas com pelo menos
+    // um dos dois > 0 para não poluir a tabela com unidades gratuitas.
+    let minerals = json
+        .get("cost")
+        .and_then(|c| c.get("@minerals"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let vespene = json
+        .get("cost")
+        .and_then(|c| c.get("@vespene"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    if minerals > 0 || vespene > 0 {
+        cost_out
+            .entry((version, id.to_string()))
+            .or_insert((minerals, vespene));
     }
 
     if let Some(upgrades) = json
@@ -322,6 +345,7 @@ fn write_generated(
     entries: &BTreeMap<(u32, String), u32>,
     abilities: &BTreeMap<AbilityKey, String>,
     supply: &BTreeMap<(u32, String), u32>,
+    cost: &BTreeMap<(u32, String), (u32, u32)>,
 ) {
     let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR não definido");
     let out_path = Path::new(&out_dir).join("balance_data_generated.rs");
@@ -358,6 +382,16 @@ fn write_generated(
     for ((version, name), cost_x10) in supply {
         let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
         s.push_str(&format!("    ({version}, \"{escaped}\", {cost_x10}),\n"));
+    }
+    s.push_str("];\n\n");
+
+    s.push_str("// Cada tupla é (protocol_version, unit_name, minerals, vespene).\n");
+    s.push_str("pub static COST_ENTRIES: &[(u32, &str, u32, u32)] = &[\n");
+    for ((version, name), (minerals, vespene)) in cost {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        s.push_str(&format!(
+            "    ({version}, \"{escaped}\", {minerals}, {vespene}),\n",
+        ));
     }
     s.push_str("];\n");
 

@@ -52,12 +52,16 @@ type AbilityTable = HashMap<&'static str, HashMap<(u16, i64), &'static str>>;
 /// Tabela `nome_unidade → supply_cost × 10` para uma única versão.
 type SupplyTable = HashMap<&'static str, u32>;
 
+/// Tabela `nome_unidade → (minerals, vespene)` para uma única versão.
+type CostTable = HashMap<&'static str, (u32, u32)>;
+
 struct Balance {
     /// `BTreeMap` para permitir busca pelo maior `version ≤ alvo` em
     /// O(log n).
     versions: BTreeMap<u32, Table>,
     abilities: BTreeMap<u32, AbilityTable>,
     supply: BTreeMap<u32, SupplyTable>,
+    cost: BTreeMap<u32, CostTable>,
 }
 
 static GLOBAL: OnceLock<Balance> = OnceLock::new();
@@ -81,10 +85,17 @@ fn load() -> &'static Balance {
         for &(version, name, cost_x10) in SUPPLY_ENTRIES {
             supply.entry(version).or_default().insert(name, cost_x10);
         }
+        let mut cost: BTreeMap<u32, CostTable> = BTreeMap::new();
+        for &(version, name, minerals, vespene) in COST_ENTRIES {
+            cost.entry(version)
+                .or_default()
+                .insert(name, (minerals, vespene));
+        }
         Balance {
             versions,
             abilities,
             supply,
+            cost,
         }
     })
 }
@@ -117,12 +128,29 @@ fn pick_supply_table(b: &Balance, base_build: u32) -> Option<&SupplyTable> {
         .map(|(_, t)| t)
 }
 
+fn pick_cost_table(b: &Balance, base_build: u32) -> Option<&CostTable> {
+    b.cost
+        .range(..=base_build)
+        .next_back()
+        .or_else(|| b.cost.iter().next())
+        .map(|(_, t)| t)
+}
+
 /// Custo de supply de `name` em décimos (ex.: Marine = 10, Zergling = 5).
 /// Retorna `0` quando desconhecido.
 pub fn supply_cost_x10(name: &str, base_build: u32) -> u32 {
     let b = load();
     let Some(table) = pick_supply_table(b, base_build) else { return 0 };
     table.get(name).copied().unwrap_or(0)
+}
+
+/// Custo em recursos (minerals, vespene) de `name`. Retorna `(0, 0)`
+/// quando desconhecido. Espelha o mesmo esquema de fallback de versão
+/// usado pelos outros lookups de balance data.
+pub fn resource_cost(name: &str, base_build: u32) -> (u32, u32) {
+    let b = load();
+    let Some(table) = pick_cost_table(b, base_build) else { return (0, 0) };
+    table.get(name).copied().unwrap_or((0, 0))
 }
 
 /// Tempo de build/research/upgrade para `name` em **game loops**,
