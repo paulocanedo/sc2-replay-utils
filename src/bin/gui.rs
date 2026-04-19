@@ -23,6 +23,8 @@ mod production_gap;
 mod production_efficiency;
 #[path = "../supply_block.rs"]
 mod supply_block;
+#[path = "../worker_potential.rs"]
+mod worker_potential;
 #[path = "../utils.rs"]
 mod utils;
 #[path = "../map_image/mod.rs"]

@@ -180,6 +180,7 @@ tab.timeline = Timeline
 tab.build_order = Build Order
 tab.charts = Gráficos
 tab.chat = Chat
+tab.discoveries = Descobertas
 
 # ── Aba Build Order ─────────────────────────────────────────────────────────
 build_order.search_placeholder = 🔎  buscar ação... (ex: Marine, Stimpack)
@@ -295,6 +296,19 @@ rename.status.ok = {count} replays copiados para {dir}
 rename.status.mkdir_err = Erro ao criar diretório: {err}
 rename.status.partial = {ok} copiados, {errors} erros:
 rename.status.error_marker = erros
+
+# ── Aba Descobertas ─────────────────────────────────────────────────────────
+discoveries.pov_label = Ponto de vista
+discovery.worker_potential.title = Potencial de produção de workers até o minuto {minutes}
+discovery.worker_potential.help = Compara quantos workers você realmente **produziu** até o minuto {minutes} contra quantos poderia ter produzido com produção ininterrupta, respeitando o timing das bases, os chronos que você gastou em probes (Protoss) e a regra de 80% das larvas viram drones (Zerg). Perdas de workers são ignoradas — o foco é expor lapsos de macro, não combate. Parte de 12 workers iniciais.
+discovery.worker_potential.produced = Você fez
+discovery.worker_potential.potential = Poderia fazer
+discovery.worker_potential.gap_label = Diferença
+discovery.worker_potential.limited_by_bases = Limitado por expansões tardias
+discovery.worker_potential.limited_by_chrono_budget = Limitado pelos chronos que você gastou em probes
+discovery.worker_potential.limited_by_larva80 = Limitado pela regra de 80% drones/larva
+discovery.worker_potential.limited_by_none = Produção rodou na capacidade máxima
+discovery.worker_potential.clamped_caveat = O replay terminou antes do minuto {minutes}.
 
 # Abreviações de mês usadas no formato curto da barra superior.
 month.01 = jan

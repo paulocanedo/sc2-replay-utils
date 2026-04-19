@@ -86,6 +86,12 @@ impl AppState {
                             &mut self.charts_efficiency_target,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
+                        Tab::Discoveries => tabs::discoveries::show(
+                            ui,
+                            loaded,
+                            &self.config,
+                            &mut self.discoveries_pov,
+                        ),
                     },
                 },
                 Screen::Rename => {
