@@ -47,6 +47,16 @@ pub struct AppConfig {
     pub language_selected: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
     pub library_date_range: DateRange,
+    /// Minuto do jogo usado pelo card de potencial de workers da aba
+    /// Descobertas. Persistido pra permitir ajuste fino editando o YAML
+    /// direto — não há UI intencionalmente, pra desencorajar mudanças
+    /// casuais que mudem a baseline das descobertas.
+    #[serde(default = "default_discovery_worker_minutes")]
+    pub discovery_worker_minutes: u32,
+}
+
+fn default_discovery_worker_minutes() -> u32 {
+    6
 }
 
 impl Default for AppConfig {
@@ -63,6 +73,7 @@ impl Default for AppConfig {
             language: Language::default(),
             language_selected: false,
             library_date_range: DateRange::default(),
+            discovery_worker_minutes: default_discovery_worker_minutes(),
         }
     }
 }

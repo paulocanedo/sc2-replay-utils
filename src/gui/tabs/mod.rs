@@ -3,6 +3,7 @@
 pub mod build_order;
 pub mod chat;
 pub mod charts;
+pub mod discoveries;
 pub mod timeline;
 
 use crate::locale::{t, Language};
@@ -13,6 +14,7 @@ pub enum Tab {
     BuildOrder,
     Charts,
     Chat,
+    Discoveries,
 }
 
 impl Tab {
@@ -23,9 +25,16 @@ impl Tab {
             Tab::BuildOrder => "tab.build_order",
             Tab::Charts => "tab.charts",
             Tab::Chat => "tab.chat",
+            Tab::Discoveries => "tab.discoveries",
         };
         t(key, lang)
     }
 
-    pub const ALL: [Tab; 4] = [Tab::Timeline, Tab::BuildOrder, Tab::Charts, Tab::Chat];
+    pub const ALL: [Tab; 5] = [
+        Tab::Timeline,
+        Tab::BuildOrder,
+        Tab::Charts,
+        Tab::Chat,
+        Tab::Discoveries,
+    ];
 }

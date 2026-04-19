@@ -70,6 +70,10 @@ pub struct AppState {
     /// the draft separate from `config.language` so cancelling the
     /// modal leaves the real config alone.
     pub language_draft: Language,
+    /// Índice do jogador de referência na aba Descobertas. `None` até
+    /// o primeiro render pós-load, que resolve pelo nickname do usuário
+    /// (cai em 0 se não houver match). Resetado a cada novo replay.
+    pub discoveries_pov: Option<usize>,
 }
 
 impl AppState {
@@ -104,6 +108,7 @@ impl AppState {
             rename_status: None,
             pending_load_latest: false,
             language_draft,
+            discoveries_pov: None,
         };
         me.restart_watcher();
         me.refresh_library();
@@ -152,6 +157,9 @@ impl AppState {
                 // Reset do scrubbing da aba Timeline: replay novo
                 // sempre começa em t=0.
                 self.timeline_tab_loop = 0;
+                // Reset do POV da aba Descobertas: novo replay
+                // re-resolve o default via user_nicknames.
+                self.discoveries_pov = None;
                 // Carregar com sucesso sempre transiciona para a Tela
                 // Análise — é a única forma de chegar lá.
                 self.screen = Screen::Analysis;
