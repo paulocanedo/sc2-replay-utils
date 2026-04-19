@@ -19,6 +19,14 @@ pub struct PlayerMeta {
     pub race: String,
     pub mmr: Option<i32>,
     pub result: String,
+    /// Rótulo estratégico de abertura (ex: "Hatch First — Ling/Queen",
+    /// "1 Rax FE — Stim Timing", "Gate Expand — Stalker/Sentry").
+    /// String já formatada para display — a lógica de classificação
+    /// vive em `crate::build_order::classify_opening` e roda uma única
+    /// vez no scanner, com o resultado persistido no cache bincode.
+    /// `None` quando o replay não pôde ser parseado para extrair o
+    /// build order (raro — só em replays curtíssimos ou corrompidos).
+    pub opening: Option<String>,
 }
 
 #[derive(Clone)]

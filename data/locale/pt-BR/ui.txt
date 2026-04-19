@@ -156,6 +156,13 @@ library.entry.parsing = lendo metadados…
 library.entry.unsupported = ⚠ não suportado: {reason}
 library.entry.failed = falha: {err}
 library.entry.open = abrir
+# Rótulo de abertura — nomes estratégicos ("Hatch First", "3 Rax",
+# "Gate Expand") ficam em inglês em ambos os locales porque é o
+# vocabulário usado pela comunidade brasileira. Traduzimos só os
+# fallbacks genéricos.
+library.opening.standard = Abertura padrão
+library.opening.unknown = —
+library.opening.early_end = Muito curto
 library.hero.total = TOTAL
 library.hero.winrate = VITÓRIAS
 library.hero.mmr = MMR

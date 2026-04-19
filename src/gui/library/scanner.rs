@@ -19,11 +19,20 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
+use crate::build_order::{classify_opening, extract_build_order};
 use crate::config::AppConfig;
 use crate::replay::parse_replay;
 
 use super::stats::{LibraryStats, compute_library_stats};
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
+
+/// Quantos segundos de game time parseamos para extrair o rótulo de
+/// abertura. A janela interna de classificação vai até `T_FOLLOW_UP_END`
+/// (5 min); usamos o mesmo valor aqui para coletar todos os eventos
+/// relevantes sem pagar o custo de parsear o replay inteiro. Replays
+/// mais curtos que isso são parseados por inteiro de qualquer jeito
+/// (parse_replay respeita o `max_time`).
+const LIBRARY_META_PARSE_SECONDS: u32 = 300;
 
 /// Acima deste número de novos arquivos a parsear em um único `refresh`,
 /// a biblioteca passa a usar um pool multi-thread. Abaixo disso, um
@@ -370,9 +379,11 @@ impl ReplayLibrary {
 }
 
 fn parse_meta(path: &Path) -> ParseOutcome {
-    // max_time=1 evita processar a maior parte dos eventos. Só precisamos
-    // dos metadados (map, datetime, game_loops, jogadores).
-    let data = match parse_replay(path, 1) {
+    // Parseamos os primeiros 5 min de game time para extrair o rótulo
+    // de abertura (`PlayerMeta.opening`). Abaixo desse tempo o parser
+    // decodifica o replay inteiro, o que é aceitável — são replays
+    // curtos (30s–5min) onde o custo total é pequeno.
+    let data = match parse_replay(path, LIBRARY_META_PARSE_SECONDS) {
         Ok(d) => d,
         Err(e) => return ParseOutcome::Failed(e),
     };
@@ -382,6 +393,19 @@ fn parse_meta(path: &Path) -> ParseOutcome {
             data.players.len()
         ));
     }
+
+    // Extrai build order dos primeiros 5 min e classifica abertura.
+    // Se qualquer passo falhar, `opening = None` e seguimos — o rótulo
+    // é um "nice-to-have", não pode bloquear a listagem.
+    let openings: Vec<Option<String>> = match extract_build_order(&data) {
+        Ok(bo) => bo
+            .players
+            .iter()
+            .map(|p| Some(classify_opening(p, bo.loops_per_second).to_display_string()))
+            .collect(),
+        Err(_) => vec![None; data.players.len()],
+    };
+
     ParseOutcome::Parsed(ParsedMeta {
         map: data.map,
         datetime: data.datetime,
@@ -390,11 +414,13 @@ fn parse_meta(path: &Path) -> ParseOutcome {
         players: data
             .players
             .into_iter()
-            .map(|p| PlayerMeta {
+            .enumerate()
+            .map(|(i, p)| PlayerMeta {
                 name: p.name,
                 race: p.race,
                 mmr: p.mmr,
                 result: p.result.clone().unwrap_or_default(),
+                opening: openings.get(i).cloned().unwrap_or(None),
             })
             .collect(),
     })
