@@ -347,6 +347,12 @@ insight.army_trades.header = Maiores combates perdidos
 insight.army_trades.line = {mm}:{ss} — perdeu {lost}, matou {killed}
 insight.army_trades.no_trades = Nenhum trade negativo detectado.
 
+insight.army_prod_by_battle.title = Eficiência de produção de army por luta
+insight.army_prod_by_battle.help = Percentual de tempo em que seus prédios de produção de army estiveram ocupados entre as 3 primeiras grandes lutas. Cada luta importante fecha a janela atual e zera a contagem — o segmento 1 vai de quando o primeiro producer fica pronto até a 1ª luta, o segmento 2 até a 2ª luta, e assim por diante. Barracks/Factory/Starport ficam de fora enquanto constroem addon; Gateway fica de fora durante o morph para Warp Gate. Períodos em supply cap contam como 100%. Mesmo threshold de luta do card Army Trades (≥300 recursos, gap de 15s). Zerg ainda não é coberto — o modelo de produção é diferente.
+insight.army_prod_by_battle.header = Janelas de produção entre lutas
+insight.army_prod_by_battle.segment_line = Janela {index} ({start_mm}:{start_ss} → {end_mm}:{end_ss}):
+insight.army_prod_by_battle.no_battles = Sem dados suficientes — nenhuma grande luta ou producer de army ainda.
+
 insight.key_losses.title = Perdas principais
 insight.key_losses.help = As unidades e estruturas individuais mais caras que você perdeu na partida. Expõe os desastres pontuais — um Battlecruiser picado, um Nexus sniped — que um resumo de trade tende a esconder. Perdas abaixo de 100 recursos são filtradas como ruído.
 insight.key_losses.header = Perdas mais caras

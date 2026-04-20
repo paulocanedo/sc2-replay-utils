@@ -24,9 +24,9 @@ use crate::tokens::{INSIGHT_CARD_MIN_W, INSIGHT_COL_GAP, INSIGHT_MAX_COLS, SPACE
 
 use super::card::MIN_INNER_H_KEY;
 use super::{
-    army_trades, base_timings, chrono_distribution, economy_gap, inject_efficiency,
-    key_losses, production_idle, resources_unspent, supply_block, tech_timings,
-    turning_point, worker_potential,
+    army_prod_by_battle, army_trades, base_timings, chrono_distribution, economy_gap,
+    inject_efficiency, key_losses, production_idle, resources_unspent, supply_block,
+    tech_timings, turning_point, worker_potential,
 };
 
 // Threshold below which a card is considered "not rendered".
@@ -77,6 +77,10 @@ fn wrap_army_trades(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> O
     army_trades::show(ui, l, c, i);
     None
 }
+fn wrap_army_prod_by_battle(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> Option<u32> {
+    army_prod_by_battle::show(ui, l, c, i);
+    None
+}
 fn wrap_key_losses(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> Option<u32> {
     key_losses::show(ui, l, c, i);
     None
@@ -93,6 +97,7 @@ const CARDS: &[CardFn] = &[
     wrap_chrono_distribution,
     wrap_inject_efficiency,
     wrap_army_trades,
+    wrap_army_prod_by_battle,
     wrap_key_losses,
     turning_point::show,
 ];

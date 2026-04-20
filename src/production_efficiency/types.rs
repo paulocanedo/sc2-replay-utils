@@ -18,7 +18,7 @@ pub(super) const CHART_BUCKET_SECONDS: f64 = 10.0;
 /// o jogador não *pode* produzir mais army supply. Penalizar idleness
 /// nesse regime distorce o gráfico e esconde os momentos realmente
 /// importantes (early/mid-game, onde cada segundo de idle importa).
-pub(super) const ARMY_SUPPLY_MAXED_THRESHOLD: i32 = 185;
+pub(crate) const ARMY_SUPPLY_MAXED_THRESHOLD: i32 = 185;
 
 /// Duração total (em game loops) do ciclo de warp de uma WarpGate,
 /// contado a partir do instante em que o jogador emite o comando
