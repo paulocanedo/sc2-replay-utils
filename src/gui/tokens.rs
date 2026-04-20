@@ -70,9 +70,9 @@ pub const CHIP_MIN_HEIGHT: f32 = 22.0;
 /// enough to read as "above the surface" without competing with content.
 pub const SHADOW_CARD: egui::epaint::Shadow = egui::epaint::Shadow {
     offset: [0, 2],
-    blur: 6,
+    blur: 8,
     spread: 0,
-    color: egui::Color32::from_black_alpha(40),
+    color: egui::Color32::from_black_alpha(55),
 };
 
 /// Window-level shadow for modals / popups. Slightly more pronounced

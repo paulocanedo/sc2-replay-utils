@@ -39,9 +39,10 @@ pub fn user_fill(index: usize) -> Color32 {
     }
 }
 
-/// Chip "Você" — neutro, sem competir com a cor do slot.
-pub const USER_CHIP_BG: Color32 = Color32::from_rgb(55, 55, 55);
-pub const USER_CHIP_FG: Color32 = Color32::from_rgb(200, 200, 200);
+/// Chip "Você" — neutro com tint teal sutil para harmonizar com o
+/// sistema de seleção (FOCUS_RING) sem competir com a cor do slot.
+pub const USER_CHIP_BG: Color32 = Color32::from_rgb(48, 62, 66);
+pub const USER_CHIP_FG: Color32 = Color32::from_rgb(210, 220, 222);
 
 // ── Surfaces & borders ───────────────────────────────────────────────
 //
@@ -79,7 +80,7 @@ pub const FOCUS_RING: Color32 = Color32::from_rgb(100, 180, 190);
 
 /// Selection fill (text highlight, selected rows). Dimmed variant of
 /// `FOCUS_RING` so the foreground stays readable.
-pub const SELECTION_BG: Color32 = Color32::from_rgb(40, 80, 90);
+pub const SELECTION_BG: Color32 = Color32::from_rgb(48, 100, 112);
 
 // ── Labels ───────────────────────────────────────────────────────────
 

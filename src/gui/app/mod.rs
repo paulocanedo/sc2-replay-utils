@@ -238,8 +238,8 @@ fn apply_dark_palette(v: &mut egui::Visuals) {
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, LABEL_STRONG);
     v.widgets.noninteractive.corner_radius = r_button;
 
-    v.widgets.inactive.bg_fill = egui::Color32::from_gray(36);
-    v.widgets.inactive.weak_bg_fill = egui::Color32::from_gray(30);
+    v.widgets.inactive.bg_fill = egui::Color32::from_gray(33);
+    v.widgets.inactive.weak_bg_fill = egui::Color32::from_gray(28);
     v.widgets.inactive.bg_stroke = Stroke::NONE;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, LABEL_SOFT);
     v.widgets.inactive.corner_radius = r_button;
