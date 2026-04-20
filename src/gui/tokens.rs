@@ -64,3 +64,9 @@ pub const CHIP_INNER_MY: i8 = 3;
 
 pub const TOPBAR_HEIGHT: f32 = 54.0;
 pub const STATUSBAR_HEIGHT: f32 = 22.0;
+
+// ── Insights tab — responsive masonry grid ───────────────────────────
+
+pub const INSIGHT_CARD_MIN_W: f32 = 360.0;
+pub const INSIGHT_COL_GAP: f32 = SPACE_M;
+pub const INSIGHT_MAX_COLS: usize = 3;
