@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
 use crate::balance_data::supply_cost_x10;
-use crate::production_efficiency::{
-    is_warp_gate_unit, WARP_GATE_CYCLE_LOOPS, WARP_GATE_RESEARCH,
-};
+use crate::production_efficiency::WARP_GATE_RESEARCH;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
 
 // ── Structs ───────────────────────────────────────────────────────────────────
@@ -108,15 +106,8 @@ pub fn extract_supply_blocks(
         /// Warpgate entra em jogo (morph Gateway→WarpGate ou build
         /// direto). Entra pronta para warpar.
         WarpGateSpawn { tag: i64 },
-        /// Warpgate destruída. Se estava em cooldown, o contador
-        /// `busy_gates` é clampado para não exceder `alive_warpgates.len()`.
+        /// Warpgate destruída.
         WarpGateDied { tag: i64 },
-        /// Início de um warp-in (unidade warpável, após `WarpGateResearch`).
-        /// Ocupa uma warpgate por `WARP_GATE_CYCLE_LOOPS`.
-        WarpStart,
-        /// Fim do ciclo de uma warpgate (sintético, agendado em
-        /// `WarpStart.loop + WARP_GATE_CYCLE_LOOPS`).
-        WarpGateReady,
     }
 
     // Loop em que `WarpGateResearch` ficou pronto. `None` quando o
@@ -149,16 +140,6 @@ pub fn extract_supply_blocks(
             EntityEventKind::ProductionStarted if is_unit => {
                 let cost = supply_cost_x10(&e.entity_type, base_build);
                 merged.push((e.game_loop, Event::ProductionStart { cost_x10: cost }));
-
-                // Warp-in: após pesquisa concluída e unidade no roster.
-                // Ocupa uma warpgate pelo ciclo completo.
-                if let Some(r) = warp_research_loop {
-                    if e.game_loop >= r && is_warp_gate_unit(&e.entity_type) {
-                        merged.push((e.game_loop, Event::WarpStart));
-                        let ready_at = e.game_loop.saturating_add(WARP_GATE_CYCLE_LOOPS).min(game_loops);
-                        merged.push((ready_at, Event::WarpGateReady));
-                    }
-                }
             }
             EntityEventKind::ProductionFinished if is_unit => {
                 let cost = supply_cost_x10(&e.entity_type, base_build);
@@ -206,9 +187,9 @@ pub fn extract_supply_blocks(
     // Ordena por game_loop. Dentro do mesmo loop:
     //   Snapshot (0)
     //   → SupplyReady/UnitDied/ProductionCancel/WarpGateSpawn/
-    //     WarpGateDied/WarpGateReady (1)
+    //     WarpGateDied (1)
     //   → ProductionFinish (2)
-    //   → ProductionStart/WarpStart (3)
+    //   → ProductionStart (3)
     // Snapshot primeiro para sincronizar o supply;
     // Liberações e mudanças de capacidade antes de qualquer produção;
     // ProductionFinish antes de ProductionStart porque uma unidade que
@@ -221,10 +202,9 @@ pub fn extract_supply_blocks(
             | Event::UnitDied { .. }
             | Event::ProductionCancel { .. }
             | Event::WarpGateSpawn { .. }
-            | Event::WarpGateDied { .. }
-            | Event::WarpGateReady => 1,
+            | Event::WarpGateDied { .. } => 1,
             Event::ProductionFinish { .. } => 2,
-            Event::ProductionStart { .. } | Event::WarpStart => 3,
+            Event::ProductionStart { .. } => 3,
         };
         (*loop_, order)
     });
@@ -244,15 +224,13 @@ pub fn extract_supply_blocks(
     let mut total_supply_used = 0i32;
 
     // Estado warpgate — usado só quando `warp_research_loop.is_some()`.
-    // `alive_warpgates` rastreia os tags de warpgates vivas (lifecycle
-    // por tag é confiável: `ProductionFinished(WarpGate)` +
-    // `Died(WarpGate)` vêm da stream normal do tracker).
-    // `busy_gates` é um contador pool — não dá pra amarrar um warp-in
-    // a uma warpgate específica porque `UnitInit` vem com
-    // `creator_tag: None`. Aceita-se a aproximação (idem
-    // `production_efficiency/models.rs`).
+    // Rastreamos apenas o set de tags vivas; não modelamos cooldowns
+    // individuais. A semântica do gatilho warpgate-aware é: "jogador
+    // Protoss em modo warpgate está supply-capped (não cobre Zealot)".
+    // Supply cap É supply cap independente de qual gate está ocupada
+    // no microinstante — gates que estão em cooldown logo estarão
+    // prontas e o jogador perde o warp ali também.
     let mut alive_warpgates: HashSet<i64> = HashSet::new();
-    let mut busy_gates: u32 = 0;
 
     for (loop_, event) in &merged {
         match event {
@@ -300,6 +278,10 @@ pub fn extract_supply_blocks(
             }
             Event::ProductionCancel { cost_x10 } => {
                 let cost = *cost_x10 as i32 / 10;
+                // Virtual tracking: libera o supply reservado no
+                // `ProductionStart` correspondente. Resync com snapshot
+                // no próximo tick.
+                last_supply_used = (last_supply_used - cost).max(0);
                 total_supply_used = (total_supply_used - cost).max(0);
                 if in_block && supply_freed(
                     last_supply_made,
@@ -334,19 +316,31 @@ pub fn extract_supply_blocks(
 
                 match ACTIVE_STRATEGY {
                     StartStrategy::ProductionAttempt => {
-                        if in_block {
-                            continue;
+                        // Checa ANTES de atualizar `last_supply_used`,
+                        // porque a pergunta é "o jogador conseguiu
+                        // iniciar esta produção?". Uma produção com
+                        // custo exatamente igual ao supply disponível
+                        // (`avail == cost`) passa — é warpada/treinada
+                        // com sucesso.
+                        if !in_block
+                            && last_supply_made > 0
+                            && last_supply_made < 200
+                        {
+                            let available_x10 = (last_supply_made - last_supply_used) * 10;
+                            if available_x10 < *cost_x10 as i32 {
+                                in_block = true;
+                                block_start_loop = *loop_;
+                                block_supply = last_supply_used;
+                            }
                         }
-                        // Ignora produção antes do primeiro snapshot de stats.
-                        if last_supply_made == 0 {
-                            continue;
-                        }
-                        let available_x10 = (last_supply_made - last_supply_used) * 10;
-                        if last_supply_made < 200 && available_x10 < *cost_x10 as i32 {
-                            in_block = true;
-                            block_start_loop = *loop_;
-                            block_supply = last_supply_used;
-                        }
+
+                        // Virtual tracking: reserva o supply desta
+                        // produção para que eventos subsequentes entre
+                        // snapshots (warpgate-aware, outro
+                        // ProductionStart) vejam o estado correto. O
+                        // próximo snapshot resyncará com o valor do
+                        // tracker (que também inclui reservas).
+                        last_supply_used += *cost_x10 as i32 / 10;
                     }
                     StartStrategy::TotalSupplyCap => {
                         if !in_block
@@ -367,24 +361,20 @@ pub fn extract_supply_blocks(
             }
             Event::WarpGateDied { tag } => {
                 alive_warpgates.remove(tag);
-                // Se a warpgate morreu em cooldown, `busy_gates` pode
-                // passar a exceder o número de vivas. Clampa.
-                busy_gates = busy_gates.min(alive_warpgates.len() as u32);
-            }
-            Event::WarpStart => {
-                busy_gates = busy_gates.saturating_add(1);
-            }
-            Event::WarpGateReady => {
-                busy_gates = busy_gates.saturating_sub(1);
             }
         }
 
         // Gatilho warpgate-aware: avaliado após cada evento. Só ativa
-        // quando `WarpGateResearch` já foi pesquisado. Não duplica
-        // blocos — respeita o `in_block` guard existente.
+        // quando `WarpGateResearch` já foi pesquisado e há pelo menos
+        // uma warpgate viva. Não duplica blocos — respeita o
+        // `in_block` guard. Usa `last_supply_used` virtual (atualizado
+        // em ProductionStart/UnitDied/ProductionCancel), então capta
+        // caps que ocorrem entre snapshots — caso típico do replay
+        // Tourmaline onde o Sentry warp consumia a última fatia de
+        // supply e só víamos o cap ~4s depois no próximo snapshot.
         if !in_block
             && warp_research_loop.is_some()
-            && warpgate_blocked(&alive_warpgates, busy_gates, last_supply_made, last_supply_used)
+            && warpgate_blocked(&alive_warpgates, last_supply_made, last_supply_used)
         {
             in_block = true;
             block_start_loop = *loop_;
@@ -415,17 +405,18 @@ fn supply_freed(supply_made: i32, supply_used: i32, completed: i32, total: i32) 
     supply_made > used
 }
 
-/// Verifica se o jogador está supply-blocked com warpgate pronta.
-/// Retorna true quando há pelo menos uma warpgate fora de cooldown e
-/// o supply disponível é menor que o custo do Zealot.
+/// Verifica se o jogador está supply-blocked em modo warpgate.
+/// Retorna true quando há pelo menos uma warpgate viva e o supply
+/// disponível é menor que o custo do Zealot. Não olha cooldowns
+/// individuais — a presença de qualquer warpgate viva + supply cap
+/// já caracteriza o bloqueio (o cooldown é resolvido em segundos e
+/// o jogador perde o warp quando ela ficar pronta).
 fn warpgate_blocked(
     alive: &HashSet<i64>,
-    busy: u32,
     supply_made: i32,
     supply_used: i32,
 ) -> bool {
-    let ready = (alive.len() as u32).saturating_sub(busy);
-    ready > 0
+    !alive.is_empty()
         && supply_made > 0
         && supply_made < 200
         && (supply_made - supply_used) < CHEAPEST_WARP_SUPPLY
@@ -624,12 +615,14 @@ mod tests {
         assert_eq!(blocks[0].end_loop, 500);
     }
 
-    // (e) Warpgate morre durante cooldown: busy_gates não excede alive.
+    // (e) Warpgate morre, nova nasce depois: bloco só dispara quando
+    // uma warpgate volta a existir. Entre a morte e o renascimento
+    // (alive=0) o supply pode estar capado mas não é bloqueio em modo
+    // warpgate — não há estrutura pra ficar ociosa.
     #[test]
-    fn warpgate_dies_during_cooldown_no_stuck_counter() {
+    fn block_only_while_warpgate_alive() {
         let mut p = mk_player();
         p.upgrades.push(upgrade(40, WARP_GATE_RESEARCH));
-        // 1 warpgate nasce.
         p.entity_events.push(entity_event(
             50,
             1,
@@ -637,15 +630,6 @@ mod tests {
             EntityEventKind::ProductionFinished,
             EntityCategory::Structure,
         ));
-        // Warp começa no loop 80 → busy=1, cooldown até 640.
-        p.entity_events.push(entity_event(
-            80,
-            100,
-            "Zealot",
-            EntityEventKind::ProductionStarted,
-            EntityCategory::Unit,
-        ));
-        // Warpgate morre no loop 200 → alive=0; busy clampeado para 0.
         p.entity_events.push(entity_event(
             200,
             1,
@@ -653,8 +637,10 @@ mod tests {
             EntityEventKind::Died,
             EntityCategory::Structure,
         ));
-        // Nova warpgate nasce no loop 700 (após o "WarpGateReady" agendado
-        // em 640 ter tentado decrementar).
+        // Supply cap enquanto não há warpgate viva (entre 200 e 700).
+        p.stats.push(snapshot(300, 20, 20));
+        // Nova warpgate nasce — nesse instante há alive=1 e supply capado,
+        // então o gatilho warpgate-aware dispara exatamente em 700.
         p.entity_events.push(entity_event(
             700,
             2,
@@ -662,8 +648,6 @@ mod tests {
             EntityEventKind::ProductionFinished,
             EntityCategory::Structure,
         ));
-        // Snapshot em 800 com supply cap.
-        p.stats.push(snapshot(800, 20, 20));
         p.entity_events.push(entity_event(
             900,
             3,
@@ -672,8 +656,184 @@ mod tests {
             EntityCategory::Structure,
         ));
         let blocks = extract_supply_blocks(&p, 10_000, 80000);
-        assert_eq!(blocks.len(), 1, "nova warpgate deve estar pronta — contador não travado");
-        assert_eq!(blocks[0].start_loop, 800);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].start_loop, 700, "dispara no instante em que a warpgate renasce");
+        assert_eq!(blocks[0].end_loop, 900);
+    }
+
+    // (g) Virtual supply tracking: ProductionStart entre snapshots
+    // atualiza o supply_used virtual, disparando o bloco warpgate-aware
+    // imediatamente quando a produção consome a última fatia disponível.
+    // Reproduz o cenário Tourmaline: snapshot mostra avail=2, um warp-in
+    // de custo 2 acontece, e o próximo snapshot só chega ~10s depois.
+    #[test]
+    fn virtual_supply_tracking_catches_cap_between_snapshots() {
+        let mut p = mk_player();
+        p.upgrades.push(upgrade(40, WARP_GATE_RESEARCH));
+        p.entity_events.push(entity_event(
+            50,
+            1,
+            "WarpGate",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Structure,
+        ));
+        // Snapshot em 100: used=68, made=70 (avail=2 — ainda dá pra warpar).
+        p.stats.push(snapshot(100, 68, 70));
+        // Sentry warp em 200: custo=2, consome a última fatia. Sem virtual
+        // tracking, o parser só detectaria o cap no snapshot seguinte.
+        p.entity_events.push(entity_event(
+            200,
+            999,
+            "Sentry",
+            EntityEventKind::ProductionStarted,
+            EntityCategory::Unit,
+        ));
+        // Próximo snapshot muito depois (mimica cadência ~10s).
+        p.stats.push(snapshot(500, 70, 70));
+        p.entity_events.push(entity_event(
+            600,
+            2,
+            "Pylon",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Structure,
+        ));
+        let blocks = extract_supply_blocks(&p, 10_000, 80000);
+        assert_eq!(blocks.len(), 1, "virtual tracking deve detectar o cap em 200, não 500");
+        assert_eq!(
+            blocks[0].start_loop, 200,
+            "bloco inicia no warp do Sentry (virtual_used atualizado in-flight)"
+        );
+        assert_eq!(blocks[0].end_loop, 600);
+    }
+
+    // Diagnóstico do replay Tourmaline LE (21) — dump da janela 5:10-5:16.
+    // Rodar com: cargo test --release -- dump_tourmaline_supply_block --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn dump_tourmaline_supply_block() {
+        use crate::production_efficiency::{is_warp_gate_unit, WARP_GATE_CYCLE_LOOPS};
+        use crate::replay::parse_replay;
+        use std::path::Path;
+
+        let path = std::env::var("HOME").unwrap_or_else(|_| std::env::var("USERPROFILE").unwrap());
+        let replay = format!("{}/Downloads/Tourmaline LE (21).SC2Replay", path);
+        let tl = parse_replay(Path::new(&replay), 0).expect("parse");
+
+        let lps = tl.loops_per_second;
+        let loop_of = |s: f64| (s * lps).round() as u32;
+        let win_start = loop_of(305.0); // 5:05 (margem)
+        let win_end = loop_of(320.0); // 5:20 (margem)
+
+        eprintln!("== Replay: {} (loops/s = {}) ==", replay, lps);
+        eprintln!("  game_loops={}, base_build={}", tl.game_loops, tl.base_build);
+        eprintln!("  janela: [{}, {}] loops ({}s-{}s)", win_start, win_end, 305, 320);
+
+        for (idx, p) in tl.players.iter().enumerate() {
+            if !p.race.starts_with('P') && !p.race.starts_with('p') {
+                continue;
+            }
+            eprintln!("\n-- Player {} ({}) race={} --", idx, p.name, p.race);
+
+            let has_wgr = p.upgrades.iter().find(|u| u.name == WARP_GATE_RESEARCH);
+            eprintln!(
+                "  WarpGateResearch: {:?}",
+                has_wgr.map(|u| (u.game_loop, u.game_loop as f64 / lps))
+            );
+
+            eprintln!("  Stats na janela:");
+            for s in &p.stats {
+                if s.game_loop >= win_start && s.game_loop <= win_end {
+                    eprintln!(
+                        "    loop={:>5} ({:>5.1}s) used={:>3} made={:>3} avail={}",
+                        s.game_loop,
+                        s.game_loop as f64 / lps,
+                        s.supply_used,
+                        s.supply_made,
+                        s.supply_made - s.supply_used
+                    );
+                }
+            }
+
+            eprintln!("  Entity events na janela (WarpGate/warpaveis):");
+            for e in &p.entity_events {
+                if e.game_loop < win_start || e.game_loop > win_end {
+                    continue;
+                }
+                let relevant = e.entity_type == "WarpGate"
+                    || e.entity_type == "Gateway"
+                    || e.entity_type == "Pylon"
+                    || is_warp_gate_unit(&e.entity_type);
+                if !relevant {
+                    continue;
+                }
+                eprintln!(
+                    "    loop={:>5} ({:>5.1}s) {:?} {} tag={}",
+                    e.game_loop,
+                    e.game_loop as f64 / lps,
+                    e.kind,
+                    e.entity_type,
+                    e.tag
+                );
+            }
+
+            eprintln!("  Warpgates vivas imediatamente antes da janela:");
+            let mut alive: std::collections::HashSet<i64> = std::collections::HashSet::new();
+            for e in &p.entity_events {
+                if e.game_loop >= win_start {
+                    break;
+                }
+                if e.entity_type == "WarpGate" && e.category == EntityCategory::Structure {
+                    match e.kind {
+                        EntityEventKind::ProductionFinished => {
+                            alive.insert(e.tag);
+                        }
+                        EntityEventKind::Died => {
+                            alive.remove(&e.tag);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            eprintln!("    count={}, tags={:?}", alive.len(), alive);
+
+            // Warps iniciados antes da janela — quais ainda estão em cooldown?
+            let wgr_loop = has_wgr.map(|u| u.game_loop).unwrap_or(u32::MAX);
+            eprintln!("  Warps iniciados antes da janela (e se estão em cooldown em {}):", win_start);
+            for e in &p.entity_events {
+                if e.game_loop >= win_start {
+                    break;
+                }
+                if e.kind != EntityEventKind::ProductionStarted {
+                    continue;
+                }
+                if !is_warp_gate_unit(&e.entity_type) || e.game_loop < wgr_loop {
+                    continue;
+                }
+                let ready_at = e.game_loop + WARP_GATE_CYCLE_LOOPS;
+                let in_cd = ready_at > win_start;
+                eprintln!(
+                    "    start={:>5} ({:>5.1}s) unit={} ready_at={} in_cd_at_win_start={}",
+                    e.game_loop,
+                    e.game_loop as f64 / lps,
+                    e.entity_type,
+                    ready_at,
+                    in_cd
+                );
+            }
+
+            let blocks = extract_supply_blocks(p, tl.game_loops, tl.base_build);
+            eprintln!("  Blocos detectados (todos):");
+            for b in &blocks {
+                eprintln!(
+                    "    [{:>5}-{:>5}] ({:>5.1}s-{:>5.1}s) supply={}",
+                    b.start_loop,
+                    b.end_loop,
+                    b.start_loop as f64 / lps,
+                    b.end_loop as f64 / lps,
+                    b.supply
+                );
+            }
+        }
     }
 
     // (f) ProductionAttempt + warpgate-ready sobrepostos: bloco não duplica.
