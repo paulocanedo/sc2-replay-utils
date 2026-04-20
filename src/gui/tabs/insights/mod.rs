@@ -6,6 +6,7 @@
 // trocar no ComboBox do topo pra ver os insights do adversário.
 
 pub mod army_trades;
+pub mod base_timings;
 pub mod card;
 pub mod chrono_distribution;
 pub mod economy_gap;
@@ -15,6 +16,7 @@ pub mod loss_analysis;
 pub mod production_idle;
 pub mod resources_unspent;
 pub mod supply_block;
+pub mod tech_timings;
 pub mod turning_point;
 pub mod util;
 pub mod worker_potential;
@@ -85,6 +87,8 @@ pub fn show(
             production_idle::show(ui, loaded, config, selected);
             resources_unspent::show(ui, loaded, config, selected);
             economy_gap::show(ui, loaded, config, selected);
+            base_timings::show(ui, loaded, config, selected);
+            tech_timings::show(ui, loaded, config, selected);
             chrono_distribution::show(ui, loaded, config, selected);
             inject_efficiency::show(ui, loaded, config, selected);
             army_trades::show(ui, loaded, config, selected);

@@ -19,6 +19,12 @@ use super::card::insight_card;
 /// Checkpoints (minutos) em que a economia é amostrada.
 const CHECKPOINT_MINUTES: [u32; 3] = [4, 6, 8];
 
+/// Cada MULE ativo conta como N workers. 3.5 é o peso efetivo que a
+/// comunidade competitiva usa: reflete o rendimento médio de um MULE
+/// (que minera mais rápido que um SCV mas vive só 64s) e já desconta
+/// distância/bounce no patch.
+const MULE_WORKER_EQUIVALENT: f32 = 3.5;
+
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: usize) {
     let lang = config.language;
 
@@ -47,30 +53,42 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: 
                     beyond_end: true,
                     pov_workers: 0,
                     opp_workers: 0,
+                    pov_mules: 0,
+                    opp_mules: 0,
                 };
             }
+            let pov_mules = active_count_at(pov, "MULE", target_loop);
+            let opp_mules = active_count_at(opp, "MULE", target_loop);
             Row {
                 minute: min,
                 beyond_end: false,
-                pov_workers: workers_at(pov, target_loop),
-                opp_workers: workers_at(opp, target_loop),
+                pov_workers: workers_at(pov, target_loop) + mule_bonus(pov_mules),
+                opp_workers: workers_at(opp, target_loop) + mule_bonus(opp_mules),
+                pov_mules,
+                opp_mules,
             }
         })
         .collect();
+
+    let any_mules = rows.iter().any(|r| r.pov_mules > 0 || r.opp_mules > 0);
 
     let title = t("insight.economy_gap.title", lang).to_string();
     let help_text = t("insight.economy_gap.help", lang).to_string();
 
     insight_card(ui, config, "economy_gap", &title, &help_text, |ui| {
-        render_body(ui, config, &rows);
+        render_body(ui, config, &rows, any_mules);
     });
 }
 
 struct Row {
     minute: u32,
     beyond_end: bool,
+    /// Workers efetivos (workers + peso × MULEs ativos).
     pov_workers: i32,
+    /// Idem pro adversário.
     opp_workers: i32,
+    pov_mules: i32,
+    opp_mules: i32,
 }
 
 fn workers_at(player: &PlayerTimeline, target_loop: u32) -> i32 {
@@ -87,7 +105,28 @@ fn workers_at(player: &PlayerTimeline, target_loop: u32) -> i32 {
     player.stats.get(idx).map(|s| s.workers).unwrap_or(0)
 }
 
-fn render_body(ui: &mut Ui, config: &AppConfig, rows: &[Row]) {
+/// Bônus de worker-equivalente dado pelos MULEs ativos, arredondado
+/// ao inteiro mais próximo pra somar ao worker count sem mexer no
+/// tipo.
+fn mule_bonus(mules: i32) -> i32 {
+    (mules as f32 * MULE_WORKER_EQUIVALENT).round() as i32
+}
+
+/// Conta vivos de `entity_type` no instante `target_loop` usando o
+/// índice cumulativo pré-construído em `PlayerTimeline.alive_count`.
+fn active_count_at(player: &PlayerTimeline, entity_type: &str, target_loop: u32) -> i32 {
+    let Some(series) = player.alive_count.get(entity_type) else {
+        return 0;
+    };
+    let idx = match series.binary_search_by_key(&target_loop, |(gl, _)| *gl) {
+        Ok(i) => i,
+        Err(0) => return 0,
+        Err(i) => i - 1,
+    };
+    series.get(idx).map(|(_, count)| *count).unwrap_or(0)
+}
+
+fn render_body(ui: &mut Ui, config: &AppConfig, rows: &[Row], any_mules: bool) {
     let lang = config.language;
     let size = size_subtitle(config);
 
@@ -120,8 +159,8 @@ fn render_body(ui: &mut Ui, config: &AppConfig, rows: &[Row]) {
                     lang,
                     &[
                         ("minute", &r.minute.to_string()),
-                        ("pov", &r.pov_workers.to_string()),
-                        ("opp", &r.opp_workers.to_string()),
+                        ("pov", &format_worker_cell(r.pov_workers, r.pov_mules, lang)),
+                        ("opp", &format_worker_cell(r.opp_workers, r.opp_mules, lang)),
                     ],
                 ))
                 .italics(),
@@ -135,7 +174,33 @@ fn render_body(ui: &mut Ui, config: &AppConfig, rows: &[Row]) {
         });
     }
 
+    if any_mules {
+        ui.add_space(SPACE_S);
+        ui.label(
+            RichText::new(t("insight.economy_gap.mule_footnote", lang))
+                .small()
+                .italics()
+                .color(Color32::from_gray(160)),
+        );
+    }
+
     ui.add_space(SPACE_M);
+}
+
+/// Formata `{effective} (+N MULE)` quando há mules ativos, só
+/// `{effective}` caso contrário.
+fn format_worker_cell(effective: i32, mules: i32, lang: crate::locale::Language) -> String {
+    if mules <= 0 {
+        return effective.to_string();
+    }
+    tf(
+        "insight.economy_gap.cell_with_mules",
+        lang,
+        &[
+            ("workers", &effective.to_string()),
+            ("mules", &mules.to_string()),
+        ],
+    )
 }
 
 fn delta_style(delta: i32) -> (Color32, String) {

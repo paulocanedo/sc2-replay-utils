@@ -372,10 +372,12 @@ insight.inject_efficiency.summary_line = {actual} injects across {bases} base(s)
 insight.inject_efficiency.none = No inject commands recorded.
 
 insight.economy_gap.title = Economy gap
-insight.economy_gap.help = Worker count compared to your opponent at the three early/mid-game checkpoints where the economic curve decides the rest of the match. Green means you were ahead; orange means behind. 1v1 only.
-insight.economy_gap.header = Workers you vs opponent
+insight.economy_gap.help = Effective worker count compared to your opponent at the three early/mid-game checkpoints where the economic curve decides the rest of the match. Green means you were ahead; orange means behind. Active MULEs on either side are counted as 3.5 workers each (typical effective yield over a MULE's 64-second lifespan, rounded to the nearest worker). 1v1 only.
+insight.economy_gap.header = Workers (effective) you vs opponent
 insight.economy_gap.line = {minute} min: {pov} vs {opp}
 insight.economy_gap.beyond_end_line = {minute} min: — (game ended earlier)
+insight.economy_gap.cell_with_mules = {workers} (+{mules} MULE)
+insight.economy_gap.mule_footnote = Each active MULE counts as 3.5 workers.
 
 insight.turning_point.title = Turning point
 insight.turning_point.help = The loop where the opponent overtook your army value after you had been ahead — usually the fight where the match got away from you. The "Open in Timeline" button jumps the Timeline tab to that exact moment so you can review the engagement.
@@ -385,6 +387,25 @@ insight.turning_point.held_advantage = Your army was never overtaken (peak lead:
 insight.turning_point.turned_at = Overtaken at
 insight.turning_point.context_line = Peak lead was {peak_diff} at {peak_mm}:{peak_ss}.
 insight.turning_point.open_in_timeline = Open in Timeline
+
+insight.base_timings.title = Base timings (mirror)
+insight.base_timings.help = When you and your opponent finished your 2nd, 3rd and 4th bases. Mirror-only — in non-mirror matchups the economic curves are too different for the comparison to carry signal. Green delta means you were earlier (ahead); orange means later (behind).
+insight.base_timings.header = You vs opponent
+insight.base_timings.line = {ordinal}th base: {pov} vs {opp}
+
+insight.tech_timings.title = Tech timings (mirror)
+insight.tech_timings.help = When you and your opponent reached key tech milestones (structures and upgrades that define each race's mid-game). Mirror-only — comparing milestones across races is apples-to-oranges. A "—" means the milestone was never reached.
+insight.tech_timings.header = You vs opponent
+insight.tech_timings.line = {label}: {pov} vs {opp}
+insight.tech_timings.tr.factory = Factory
+insight.tech_timings.tr.stimpack = Stimpack
+insight.tech_timings.tr.starport = Starport
+insight.tech_timings.pr.cyber = Cybernetics Core
+insight.tech_timings.pr.warpgate = Warp Gate
+insight.tech_timings.pr.twilight = Twilight Council
+insight.tech_timings.zr.lair = Lair
+insight.tech_timings.zr.roach_warren = Roach Warren
+insight.tech_timings.zr.hive = Hive
 
 # Short month abbreviations for the compact date format in the top bar.
 month.01 = jan

@@ -369,10 +369,12 @@ insight.inject_efficiency.summary_line = {actual} injects em {bases} base(s) —
 insight.inject_efficiency.none = Nenhum comando de inject registrado.
 
 insight.economy_gap.title = Gap de economia
-insight.economy_gap.help = Número de workers comparado ao adversário nos três checkpoints early/mid-game onde a curva econômica define o resto da partida. Verde = você estava na frente; laranja = atrás. Só 1v1.
-insight.economy_gap.header = Workers: você vs adversário
+insight.economy_gap.help = Workers efetivos comparados ao adversário nos três checkpoints early/mid-game onde a curva econômica define o resto da partida. Verde = você estava na frente; laranja = atrás. MULEs ativos dos dois lados contam como 3.5 workers cada (rendimento efetivo típico na vida útil de 64s do MULE, arredondado pro worker mais próximo). Só 1v1.
+insight.economy_gap.header = Workers (efetivo): você vs adversário
 insight.economy_gap.line = {minute} min: {pov} vs {opp}
 insight.economy_gap.beyond_end_line = {minute} min: — (jogo terminou antes)
+insight.economy_gap.cell_with_mules = {workers} (+{mules} MULE)
+insight.economy_gap.mule_footnote = Cada MULE ativo conta como 3.5 workers.
 
 insight.turning_point.title = Turning point
 insight.turning_point.help = O loop em que o adversário ultrapassou seu army value depois de você ter estado à frente — geralmente o combate em que a partida saiu das suas mãos. O botão "Abrir no Timeline" leva a aba Timeline exatamente pra esse momento pra você revisar o engajamento.
@@ -382,6 +384,25 @@ insight.turning_point.held_advantage = Sua army nunca foi ultrapassada (pico de 
 insight.turning_point.turned_at = Ultrapassado aos
 insight.turning_point.context_line = Pico de vantagem foi {peak_diff} aos {peak_mm}:{peak_ss}.
 insight.turning_point.open_in_timeline = Abrir no Timeline
+
+insight.base_timings.title = Timing de bases (mirror)
+insight.base_timings.help = Quando você e o adversário terminaram a 2ª, 3ª e 4ª base. Só mirror — em matchups não-mirror as curvas econômicas são muito diferentes pra comparação carregar sinal. Delta verde = você foi mais cedo (vantagem); laranja = mais tarde (atrás).
+insight.base_timings.header = Você vs adversário
+insight.base_timings.line = {ordinal}ª base: {pov} vs {opp}
+
+insight.tech_timings.title = Timing de tech (mirror)
+insight.tech_timings.help = Quando você e o adversário bateram os milestones-chave de tech (estruturas e pesquisas que definem o mid-game de cada raça). Só mirror — comparar milestones entre raças é maçã-com-laranja. "—" significa que o milestone nunca foi alcançado.
+insight.tech_timings.header = Você vs adversário
+insight.tech_timings.line = {label}: {pov} vs {opp}
+insight.tech_timings.tr.factory = Factory
+insight.tech_timings.tr.stimpack = Stimpack
+insight.tech_timings.tr.starport = Starport
+insight.tech_timings.pr.cyber = Cybernetics Core
+insight.tech_timings.pr.warpgate = Warp Gate
+insight.tech_timings.pr.twilight = Twilight Council
+insight.tech_timings.zr.lair = Lair
+insight.tech_timings.zr.roach_warren = Roach Warren
+insight.tech_timings.zr.hive = Hive
 
 # Abreviações de mês usadas no formato curto da barra superior.
 month.01 = jan
