@@ -19,7 +19,9 @@ mod types;
 mod tests;
 
 pub use types::{EfficiencySample, EfficiencyTarget, PlayerEfficiencySeries, ProductionEfficiencySeries};
-pub(crate) use types::{is_warp_gate_unit, WARP_GATE_CYCLE_LOOPS, WARP_GATE_RESEARCH};
+pub(crate) use types::WARP_GATE_RESEARCH;
+#[cfg(test)]
+pub(crate) use types::{is_warp_gate_unit, WARP_GATE_CYCLE_LOOPS};
 
 use crate::replay::ReplayTimeline;
 use models::*;
