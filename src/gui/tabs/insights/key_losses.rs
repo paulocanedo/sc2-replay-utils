@@ -12,8 +12,9 @@ use crate::locale::{localize, t, tf};
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 use crate::tokens::{size_subtitle, SPACE_M, SPACE_S};
 
+use crate::loss_analysis::{player_losses, DeathEvent};
+
 use super::card::insight_card;
-use super::loss_analysis::{player_losses, DeathEvent};
 
 /// Quantas perdas mostrar no topo da lista.
 const TOP_N: usize = 5;

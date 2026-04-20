@@ -350,6 +350,12 @@ insight.army_trades.header = Biggest losing fights
 insight.army_trades.line = {mm}:{ss} — lost {lost}, killed {killed}
 insight.army_trades.no_trades = No losing trades detected.
 
+insight.army_prod_by_battle.title = Army production efficiency by fight
+insight.army_prod_by_battle.help = Percentage of time your army-producing structures were busy between the first three major fights. Each major fight closes the current window and resets the count — segment 1 covers from when your first producer is ready up to the first fight, segment 2 from there to the second fight, and so on. Barracks/Factory/Starport are excluded while they're building an add-on; Gateway is excluded while morphing into Warp Gate. Supply-capped periods count as 100%. Same fight threshold as Army Trades (≥300 resources, 15s gap). Zerg players aren't covered yet — the producer model differs.
+insight.army_prod_by_battle.header = Between-fight production windows
+insight.army_prod_by_battle.segment_line = Window {index} ({start_mm}:{start_ss} → {end_mm}:{end_ss}):
+insight.army_prod_by_battle.no_battles = Not enough data — no major fights or no army producers yet.
+
 insight.key_losses.title = Key losses
 insight.key_losses.help = The most expensive individual units and structures you lost during the match. Surfaces the one-off disasters — a Battlecruiser picked off, a Nexus sniped — that a trade summary tends to hide. Losses below 100 resources are filtered as noise.
 insight.key_losses.header = Most expensive losses
