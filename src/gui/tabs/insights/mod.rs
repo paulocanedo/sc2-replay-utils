@@ -1,9 +1,9 @@
-// Aba Descobertas — cards com insights automáticos sobre o replay
+// Aba Insights — cards com insights automáticos sobre o replay
 // carregado, do ponto de vista de um jogador escolhido.
 //
 // POV padrão: primeiro jogador cujo nickname bate com
 // `AppConfig.user_nicknames`; se nenhum bater, cai em 0. O usuário pode
-// trocar no ComboBox do topo pra ver as descobertas do adversário.
+// trocar no ComboBox do topo pra ver os insights do adversário.
 
 pub mod card;
 pub mod worker_potential;
@@ -37,14 +37,14 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, pov: &mut Op
     let selected = pov.unwrap_or(0);
 
     ui.horizontal(|ui| {
-        ui.label(t("discoveries.pov_label", lang));
+        ui.label(t("insights.pov_label", lang));
         let selected_name = loaded
             .timeline
             .players
             .get(selected)
             .map(|p| p.name.clone())
             .unwrap_or_default();
-        egui::ComboBox::from_id_salt("discoveries_pov")
+        egui::ComboBox::from_id_salt("insights_pov")
             .selected_text(selected_name)
             .show_ui(ui, |ui| {
                 for (idx, p) in loaded.timeline.players.iter().enumerate() {

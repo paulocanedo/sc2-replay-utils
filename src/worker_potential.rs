@@ -1,4 +1,4 @@
-//! Discovery: quantos workers o jogador **produziu** vs quantos
+//! Insight: quantos workers o jogador **produziu** vs quantos
 //! **poderia ter produzido** até um instante X do jogo. A ideia é
 //! expor lapsos de macro ("esqueci de clicar o Nexus"), não perdas
 //! em combate — por isso ambos os lados da comparação ignoram mortes.

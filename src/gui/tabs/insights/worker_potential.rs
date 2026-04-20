@@ -1,4 +1,4 @@
-// Card de descoberta: potencial de produção de workers até o minuto X.
+// Card de insight: potencial de produção de workers até o minuto X.
 //
 // Calcula quantos workers o jogador poderia ter em X minutos respeitando
 // timing de bases, saturação e chronos gastos em probes (Protoss) ou
@@ -12,11 +12,11 @@ use crate::replay_state::LoadedReplay;
 use crate::tokens::{size_subtitle, SPACE_M, SPACE_S, SPACE_XL};
 use crate::worker_potential::{self, LimitingFactor, WorkerPotential};
 
-use super::card::discovery_card;
+use super::card::insight_card;
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: usize) {
     let lang = config.language;
-    let minutes = config.discovery_worker_minutes.max(1);
+    let minutes = config.insight_worker_minutes.max(1);
     // Game-clock minute → loops. `loops_per_second` depende da
     // game speed (22.4 em Faster, 16 em Normal, etc.) — usar constante
     // 960 quebrava todo replay competitivo.
@@ -47,13 +47,13 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: 
     );
 
     let title = tf(
-        "discovery.worker_potential.title",
+        "insight.worker_potential.title",
         lang,
         &[("minutes", &minutes.to_string())],
     );
-    let help_text = t("discovery.worker_potential.help", lang).to_string();
+    let help_text = t("insight.worker_potential.help", lang).to_string();
 
-    discovery_card(
+    insight_card(
         ui,
         config,
         "worker_potential",
@@ -71,7 +71,7 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(
-                RichText::new(t("discovery.worker_potential.produced", lang))
+                RichText::new(t("insight.worker_potential.produced", lang))
                     .size(size * 0.85),
             );
             ui.label(RichText::new(wp.produced.to_string()).size(size * 1.4).strong());
@@ -79,7 +79,7 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
         ui.add_space(SPACE_XL);
         ui.vertical(|ui| {
             ui.label(
-                RichText::new(t("discovery.worker_potential.potential", lang))
+                RichText::new(t("insight.worker_potential.potential", lang))
                     .size(size * 0.85),
             );
             ui.label(RichText::new(wp.potential.to_string()).size(size * 1.4).strong());
@@ -94,7 +94,7 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
         };
         ui.vertical(|ui| {
             ui.label(
-                RichText::new(t("discovery.worker_potential.gap_label", lang))
+                RichText::new(t("insight.worker_potential.gap_label", lang))
                     .size(size * 0.85),
             );
             ui.label(
@@ -109,10 +109,10 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
     ui.add_space(SPACE_S);
 
     let key = match wp.limited_by {
-        LimitingFactor::Bases => "discovery.worker_potential.limited_by_bases",
-        LimitingFactor::ChronoBudget => "discovery.worker_potential.limited_by_chrono_budget",
-        LimitingFactor::LarvaSupply80 => "discovery.worker_potential.limited_by_larva80",
-        LimitingFactor::NoLimit => "discovery.worker_potential.limited_by_none",
+        LimitingFactor::Bases => "insight.worker_potential.limited_by_bases",
+        LimitingFactor::ChronoBudget => "insight.worker_potential.limited_by_chrono_budget",
+        LimitingFactor::LarvaSupply80 => "insight.worker_potential.limited_by_larva80",
+        LimitingFactor::NoLimit => "insight.worker_potential.limited_by_none",
     };
     ui.label(RichText::new(t(key, lang)).italics());
 
@@ -120,7 +120,7 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
         ui.add_space(SPACE_S);
         ui.label(
             RichText::new(tf(
-                "discovery.worker_potential.clamped_caveat",
+                "insight.worker_potential.clamped_caveat",
                 lang,
                 &[("minutes", &minutes.to_string())],
             ))

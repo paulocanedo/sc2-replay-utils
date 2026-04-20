@@ -1,4 +1,4 @@
-// Componente genérico de card de descoberta.
+// Componente genérico de card de insight.
 //
 // Todo card compartilha a mesma casca: título + botão (?) que abre um
 // popup com a explicação, e um `body` livre pra cada card renderizar
@@ -17,7 +17,7 @@ use crate::tokens::{
 /// - `id_salt` identifica o popup de ajuda (precisa ser estável por
 ///   card para o estado persistir entre frames).
 /// - `help_text` suporta múltiplas linhas — use `\n` na string.
-pub fn discovery_card(
+pub fn insight_card(
     ui: &mut Ui,
     config: &AppConfig,
     _id_salt: &str,
