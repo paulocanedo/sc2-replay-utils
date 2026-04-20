@@ -13,7 +13,6 @@ use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
 use crate::library::{self, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
-use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
 use crate::watcher::ReplayWatcher;
@@ -62,8 +61,6 @@ pub struct AppState {
     pub timeline_tab_loop: u32,
     /// Opções do plot principal de army (métrica, grouping, checkboxes).
     pub charts_army_opts: tabs::charts::ArmyChartOptions,
-    /// Alvo do novo gráfico de eficiência de produção (workers x army).
-    pub charts_efficiency_target: EfficiencyTarget,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
@@ -108,7 +105,6 @@ impl AppState {
             library_sidebar_open: true,
             timeline_tab_loop: 0,
             charts_army_opts: tabs::charts::ArmyChartOptions::default(),
-            charts_efficiency_target: EfficiencyTarget::Workers,
             show_about: false,
             timeline_show_heatmap: false,
             timeline_show_creep: true,
