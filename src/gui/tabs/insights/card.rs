@@ -9,7 +9,8 @@ use egui::{Frame, Id, Margin, RichText, Ui};
 
 use crate::config::AppConfig;
 use crate::tokens::{
-    size_subtitle, CARD_INNER_MX, CARD_INNER_MY, RADIUS_CARD, SPACE_M, SPACE_S, STROKE_HAIRLINE,
+    size_subtitle, CARD_INNER_MX, CARD_INNER_MY, RADIUS_CARD, SHADOW_CARD, SPACE_M, SPACE_S,
+    STROKE_HAIRLINE,
 };
 
 // Key used by `grid.rs` to pass a per-row target inner height so cards
@@ -35,8 +36,10 @@ pub fn insight_card(
         .ctx()
         .data(|d| d.get_temp::<f32>(Id::new(MIN_INNER_H_KEY)).unwrap_or(0.0));
     Frame::new()
+        .fill(ui.visuals().widgets.noninteractive.bg_fill)
         .stroke(egui::Stroke::new(STROKE_HAIRLINE, stroke_color))
         .corner_radius(RADIUS_CARD)
+        .shadow(SHADOW_CARD)
         .inner_margin(Margin::symmetric(CARD_INNER_MX, CARD_INNER_MY))
         .show(ui, |ui| {
             if min_inner_h > 0.0 {

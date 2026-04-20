@@ -61,6 +61,26 @@ pub const CARD_FILL: Color32 = SURFACE_RAISED;
 pub const BORDER: Color32 = Color32::from_gray(50);
 pub const BORDER_STRONG: Color32 = Color32::from_gray(70);
 
+// ── Interaction states ───────────────────────────────────────────────
+//
+// Hover/active fills for `WidgetVisuals`. These are flat colors (not
+// alpha overlays) because egui blits them directly onto the widget's
+// bg_fill. Values are a couple of shades brighter than `SURFACE_RAISED`
+// so buttons read as responsive without washing out the surface.
+
+pub const HOVER_FILL: Color32 = Color32::from_gray(42);
+pub const ACTIVE_FILL: Color32 = Color32::from_gray(54);
+
+/// Primary UI chrome accent. Deliberately teal-leaning so it doesn't
+/// collide with the P2 slot blue `(75, 120, 185)` used in
+/// `player_slot_color`. Used for focus rings, hyperlinks, selection
+/// strokes — never for player/race identity.
+pub const FOCUS_RING: Color32 = Color32::from_rgb(100, 180, 190);
+
+/// Selection fill (text highlight, selected rows). Dimmed variant of
+/// `FOCUS_RING` so the foreground stays readable.
+pub const SELECTION_BG: Color32 = Color32::from_rgb(40, 80, 90);
+
 // ── Labels ───────────────────────────────────────────────────────────
 
 pub const LABEL_DIM: Color32 = Color32::from_gray(130);
