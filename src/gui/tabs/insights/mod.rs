@@ -5,8 +5,14 @@
 // `AppConfig.user_nicknames`; se nenhum bater, cai em 0. O usuário pode
 // trocar no ComboBox do topo pra ver os insights do adversário.
 
+pub mod army_trades;
 pub mod card;
+pub mod chrono_distribution;
+pub mod inject_efficiency;
+pub mod key_losses;
+pub mod loss_analysis;
 pub mod production_idle;
+pub mod resources_unspent;
 pub mod supply_block;
 pub mod util;
 pub mod worker_potential;
@@ -66,5 +72,10 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, pov: &mut Op
             worker_potential::show(ui, loaded, config, selected);
             supply_block::show(ui, loaded, config, selected);
             production_idle::show(ui, loaded, config, selected);
+            resources_unspent::show(ui, loaded, config, selected);
+            chrono_distribution::show(ui, loaded, config, selected);
+            inject_efficiency::show(ui, loaded, config, selected);
+            army_trades::show(ui, loaded, config, selected);
+            key_losses::show(ui, loaded, config, selected);
         });
 }

@@ -336,6 +336,41 @@ insight.production_idle.no_gaps = Production ran non-stop.
 insight.production_idle.no_data = Production data unavailable.
 insight.production_idle.zerg_na = Zerg production follows the larva-bandwidth model — see the Inject Efficiency card (coming soon).
 
+insight.resources_unspent.title = Resources floating
+insight.resources_unspent.help = Average bank of minerals and gas across the match. High averages mean you're not spending fast enough — production idle, tech stalled, or not enough producers for your income. Naturally rises late game when the economy saturates, so high values are most diagnostic before minute 10.
+insight.resources_unspent.avg_minerals = Avg minerals
+insight.resources_unspent.avg_gas = Avg gas
+insight.resources_unspent.peak_line = Peak: {max_min} minerals / {max_gas} gas
+insight.resources_unspent.no_data = Resource data unavailable.
+
+insight.army_trades.title = Worst army trades
+insight.army_trades.help = Engagements where you lost more resource value than you destroyed. Deaths that happen within 15 seconds of each other are grouped as the same fight. Only units/workers count — structures lost are covered by Key Losses. Small skirmishes (<300 total) are filtered as noise.
+insight.army_trades.header = Biggest losing fights
+insight.army_trades.line = {mm}:{ss} — lost {lost}, killed {killed}
+insight.army_trades.no_trades = No losing trades detected.
+
+insight.key_losses.title = Key losses
+insight.key_losses.help = The most expensive individual units and structures you lost during the match. Surfaces the one-off disasters — a Battlecruiser picked off, a Nexus sniped — that a trade summary tends to hide. Losses below 100 resources are filtered as noise.
+insight.key_losses.header = Most expensive losses
+insight.key_losses.line = {unit} — {minerals}m/{vespene}g at {mm}:{ss}
+insight.key_losses.no_losses = No significant losses — you held on to your army.
+
+insight.chrono_distribution.title = Chrono Boost distribution
+insight.chrono_distribution.help = Where your Chrono Boosts went during the match — split between economy (workers), army (units from production buildings) and tech (upgrades, research). Protoss-only. There's no universally correct split; the card surfaces the balance so you can check whether it matches your game plan.
+insight.chrono_distribution.total = Total chronos
+insight.chrono_distribution.eco = Eco (workers)
+insight.chrono_distribution.army = Army
+insight.chrono_distribution.tech = Tech
+insight.chrono_distribution.structure = Structure
+insight.chrono_distribution.category_line = {label}: {count} ({pct}%)
+insight.chrono_distribution.none = No Chrono Boosts used this match.
+
+insight.inject_efficiency.title = Inject efficiency (until minute {minutes})
+insight.inject_efficiency.help = Percentage of the ideal 40-second inject cycle you hit across all Hatcheries, Lairs and Hives, measured from the first inject on each base until minute {minutes}. 100% means every base was injected every 40s. Dropping below ~70% usually means you're losing larva because queens are sitting idle. Zerg-only. The cutoff focuses on the window where missed injects hurt the most — each lost inject in this phase is ~3 drones/lings that never show up during the macro build-up.
+insight.inject_efficiency.efficiency = Efficiency
+insight.inject_efficiency.summary_line = {actual} injects across {bases} base(s) — ideal was ~{ideal}
+insight.inject_efficiency.none = No inject commands recorded.
+
 # Short month abbreviations for the compact date format in the top bar.
 month.01 = jan
 month.02 = feb
