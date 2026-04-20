@@ -92,12 +92,17 @@ impl AppState {
                             &mut self.charts_efficiency_target,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
-                        Tab::Insights => tabs::insights::show(
-                            ui,
-                            loaded,
-                            &self.config,
-                            &mut self.insights_pov,
-                        ),
+                        Tab::Insights => {
+                            if let Some(target) = tabs::insights::show(
+                                ui,
+                                loaded,
+                                &self.config,
+                                &mut self.insights_pov,
+                            ) {
+                                self.timeline_tab_loop = target;
+                                self.active_tab = Tab::Timeline;
+                            }
+                        }
                     },
                 },
                 Screen::Rename => {

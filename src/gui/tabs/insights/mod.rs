@@ -5,7 +5,20 @@
 // `AppConfig.user_nicknames`; se nenhum bater, cai em 0. O usuário pode
 // trocar no ComboBox do topo pra ver os insights do adversário.
 
+pub mod army_trades;
+pub mod base_timings;
 pub mod card;
+pub mod chrono_distribution;
+pub mod economy_gap;
+pub mod inject_efficiency;
+pub mod key_losses;
+pub mod loss_analysis;
+pub mod production_idle;
+pub mod resources_unspent;
+pub mod supply_block;
+pub mod tech_timings;
+pub mod turning_point;
+pub mod util;
 pub mod worker_potential;
 
 use egui::{ScrollArea, Ui};
@@ -15,7 +28,15 @@ use crate::locale::t;
 use crate::replay_state::LoadedReplay;
 use crate::tokens::SPACE_M;
 
-pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, pov: &mut Option<usize>) {
+/// Retorna `Some(target_loop)` quando algum card pediu seek pra aba
+/// Timeline (hoje, apenas o card Turning Point). Caller (central.rs)
+/// aplica: `timeline_tab_loop = target` + `active_tab = Tab::Timeline`.
+pub fn show(
+    ui: &mut Ui,
+    loaded: &LoadedReplay,
+    config: &AppConfig,
+    pov: &mut Option<usize>,
+) -> Option<u32> {
     let lang = config.language;
 
     // Lazy-init do POV no primeiro render pós-load: resolve pelo
@@ -57,9 +78,24 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, pov: &mut Op
     });
     ui.add_space(SPACE_M);
 
+    let mut seek_request: Option<u32> = None;
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             worker_potential::show(ui, loaded, config, selected);
+            supply_block::show(ui, loaded, config, selected);
+            production_idle::show(ui, loaded, config, selected);
+            resources_unspent::show(ui, loaded, config, selected);
+            economy_gap::show(ui, loaded, config, selected);
+            base_timings::show(ui, loaded, config, selected);
+            tech_timings::show(ui, loaded, config, selected);
+            chrono_distribution::show(ui, loaded, config, selected);
+            inject_efficiency::show(ui, loaded, config, selected);
+            army_trades::show(ui, loaded, config, selected);
+            key_losses::show(ui, loaded, config, selected);
+            if let Some(target) = turning_point::show(ui, loaded, config, selected) {
+                seek_request = Some(target);
+            }
         });
+    seek_request
 }

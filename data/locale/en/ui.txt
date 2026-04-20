@@ -320,6 +320,94 @@ insight.worker_potential.limited_by_larva80 = Limited by the 80% drone/larva rul
 insight.worker_potential.limited_by_none = Production ran at full capacity
 insight.worker_potential.clamped_caveat = The replay ended before minute {minutes}.
 
+insight.supply_block.title = Supply Blocks
+insight.supply_block.help = Surfaces the biggest supply-block windows — long enough to actually freeze production and cost you units. The total sums every block detected; the list only shows meaningful windows (≥3s), since sub-3-second microblocks are detector noise and don't carry real impact.
+insight.supply_block.total_label = Total blocked
+insight.supply_block.top_header = Biggest supply blocks
+insight.supply_block.block_line = {duration} at {mm}:{ss} (supply {supply})
+insight.supply_block.no_significant = No significant supply blocks — clean macro.
+
+insight.production_idle.title = Worker production idle time (until minute {minutes})
+insight.production_idle.help = How often your worker-producing structures (Command Centers, Nexuses) were idle during the first {minutes} minutes. 100% means every base was always producing a worker. Drops below ~90% usually mean you missed a worker cycle during combat or a tech transition. After minute {minutes} the economy is saturated, so the metric stops being diagnostic.
+insight.production_idle.efficiency = Efficiency
+insight.production_idle.total_idle = Total idle
+insight.production_idle.worst_line = Worst gap: {duration} at {mm}:{ss} ({slots} idle slot(s))
+insight.production_idle.no_gaps = Production ran non-stop.
+insight.production_idle.no_data = Production data unavailable.
+insight.production_idle.zerg_na = Zerg production follows the larva-bandwidth model — see the Inject Efficiency card (coming soon).
+insight.production_idle.clamped_caveat = The replay ended before minute {minutes} — the analysis was clamped to the actual game end.
+
+insight.resources_unspent.title = Resources floating
+insight.resources_unspent.help = Average bank of minerals and gas across the match. High averages mean you're not spending fast enough — production idle, tech stalled, or not enough producers for your income. Naturally rises late game when the economy saturates, so high values are most diagnostic before minute 10.
+insight.resources_unspent.avg_minerals = Avg minerals
+insight.resources_unspent.avg_gas = Avg gas
+insight.resources_unspent.peak_line = Peak: {max_min} minerals / {max_gas} gas
+insight.resources_unspent.no_data = Resource data unavailable.
+
+insight.army_trades.title = Worst army trades
+insight.army_trades.help = Engagements where you lost more resource value than you destroyed. Deaths that happen within 15 seconds of each other are grouped as the same fight. Only units/workers count — structures lost are covered by Key Losses. Small skirmishes (<300 total) are filtered as noise.
+insight.army_trades.header = Biggest losing fights
+insight.army_trades.line = {mm}:{ss} — lost {lost}, killed {killed}
+insight.army_trades.no_trades = No losing trades detected.
+
+insight.key_losses.title = Key losses
+insight.key_losses.help = The most expensive individual units and structures you lost during the match. Surfaces the one-off disasters — a Battlecruiser picked off, a Nexus sniped — that a trade summary tends to hide. Losses below 100 resources are filtered as noise.
+insight.key_losses.header = Most expensive losses
+insight.key_losses.line = {unit} — {minerals}m/{vespene}g at {mm}:{ss}
+insight.key_losses.no_losses = No significant losses — you held on to your army.
+
+insight.chrono_distribution.title = Chrono Boost distribution
+insight.chrono_distribution.help = Where your Chrono Boosts went during the match — split between economy (workers), army (units from production buildings) and tech (upgrades, research). Protoss-only. There's no universally correct split; the card surfaces the balance so you can check whether it matches your game plan.
+insight.chrono_distribution.total = Total chronos
+insight.chrono_distribution.eco = Eco (workers)
+insight.chrono_distribution.army = Army
+insight.chrono_distribution.tech = Tech
+insight.chrono_distribution.structure = Structure
+insight.chrono_distribution.category_line = {label}: {count} ({pct}%)
+insight.chrono_distribution.none = No Chrono Boosts used this match.
+
+insight.inject_efficiency.title = Inject efficiency (until minute {minutes})
+insight.inject_efficiency.help = Percentage of the ideal 40-second inject cycle you hit across all Hatcheries, Lairs and Hives, measured from the first inject on each base until minute {minutes}. 100% means every base was injected every 40s. Dropping below ~70% usually means you're losing larva because queens are sitting idle. Zerg-only. The cutoff focuses on the window where missed injects hurt the most — each lost inject in this phase is ~3 drones/lings that never show up during the macro build-up.
+insight.inject_efficiency.efficiency = Efficiency
+insight.inject_efficiency.summary_line = {actual} injects across {bases} base(s) — ideal was ~{ideal}
+insight.inject_efficiency.none = No inject commands recorded.
+
+insight.economy_gap.title = Economy gap
+insight.economy_gap.help = Effective worker count compared to your opponent at the three early/mid-game checkpoints where the economic curve decides the rest of the match. Green means you were ahead; orange means behind. Active MULEs on either side are counted as 3.5 workers each (typical effective yield over a MULE's 64-second lifespan, rounded to the nearest worker). 1v1 only.
+insight.economy_gap.header = Workers (effective) you vs opponent
+insight.economy_gap.line = {minute} min: {pov} vs {opp}
+insight.economy_gap.beyond_end_line = {minute} min: — (game ended earlier)
+insight.economy_gap.cell_with_mules = {workers} (+{mules} MULE)
+insight.economy_gap.mule_footnote = Each active MULE counts as 3.5 workers.
+
+insight.turning_point.title = Turning point
+insight.turning_point.help = The loop where the opponent overtook your army value after you had been ahead — usually the fight where the match got away from you. The "Open in Timeline" button jumps the Timeline tab to that exact moment so you can review the engagement.
+insight.turning_point.insufficient_data = Not enough army data to compute a turning point.
+insight.turning_point.never_ahead = You were never ahead in army value — the game wasn't decided by a single turning point.
+insight.turning_point.held_advantage = Your army was never overtaken (peak lead: {peak}). The match may have been decided by something other than army value — harass, tech, base trade, etc.
+insight.turning_point.turned_at = Overtaken at
+insight.turning_point.context_line = Peak lead was {peak_diff} at {peak_mm}:{peak_ss}.
+insight.turning_point.open_in_timeline = Open in Timeline
+
+insight.base_timings.title = Base timings (mirror)
+insight.base_timings.help = When you and your opponent finished your 2nd, 3rd and 4th bases. Mirror-only — in non-mirror matchups the economic curves are too different for the comparison to carry signal. Green delta means you were earlier (ahead); orange means later (behind).
+insight.base_timings.header = You vs opponent
+insight.base_timings.line = {ordinal}th base: {pov} vs {opp}
+
+insight.tech_timings.title = Tech timings (mirror)
+insight.tech_timings.help = When you and your opponent reached key tech milestones (structures and upgrades that define each race's mid-game). Mirror-only — comparing milestones across races is apples-to-oranges. A "—" means the milestone was never reached.
+insight.tech_timings.header = You vs opponent
+insight.tech_timings.line = {label}: {pov} vs {opp}
+insight.tech_timings.tr.factory = Factory
+insight.tech_timings.tr.stimpack = Stimpack
+insight.tech_timings.tr.starport = Starport
+insight.tech_timings.pr.cyber = Cybernetics Core
+insight.tech_timings.pr.warpgate = Warp Gate
+insight.tech_timings.pr.twilight = Twilight Council
+insight.tech_timings.zr.lair = Lair
+insight.tech_timings.zr.roach_warren = Roach Warren
+insight.tech_timings.zr.hive = Hive
+
 # Short month abbreviations for the compact date format in the top bar.
 month.01 = jan
 month.02 = feb

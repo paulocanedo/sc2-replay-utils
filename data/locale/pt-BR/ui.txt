@@ -317,6 +317,94 @@ insight.worker_potential.limited_by_larva80 = Limitado pela regra de 80% drones/
 insight.worker_potential.limited_by_none = Produção rodou na capacidade máxima
 insight.worker_potential.clamped_caveat = O replay terminou antes do minuto {minutes}.
 
+insight.supply_block.title = Supply Blocks
+insight.supply_block.help = Expõe as maiores janelas de supply block — longas o suficiente pra congelar a produção e custar unidades. O total soma todos os blocos detectados; a lista mostra apenas janelas relevantes (≥3s), já que microblocos de menos de 3s são ruído do detector e não carregam impacto real.
+insight.supply_block.total_label = Total bloqueado
+insight.supply_block.top_header = Maiores supply blocks
+insight.supply_block.block_line = {duration} aos {mm}:{ss} (supply {supply})
+insight.supply_block.no_significant = Nenhum supply block relevante — macro limpa.
+
+insight.production_idle.title = Tempo ocioso da produção de workers (até o minuto {minutes})
+insight.production_idle.help = Com que frequência seus produtores de worker (Command Centers, Nexus) ficaram ociosos nos primeiros {minutes} minutos. 100% significa que toda base produziu worker o tempo todo. Abaixo de ~90% costuma indicar ciclos de worker perdidos em combate ou transições de tech. Depois do minuto {minutes} a economia satura e a métrica perde valor diagnóstico.
+insight.production_idle.efficiency = Eficiência
+insight.production_idle.total_idle = Ocioso total
+insight.production_idle.worst_line = Pior gap: {duration} aos {mm}:{ss} ({slots} slot(s) ociosos)
+insight.production_idle.no_gaps = Produção rodou sem interrupção.
+insight.production_idle.no_data = Dados de produção indisponíveis.
+insight.production_idle.zerg_na = A produção Zerg segue o modelo de larva-bandwidth — veja o card de Inject Efficiency (em breve).
+insight.production_idle.clamped_caveat = O replay terminou antes do minuto {minutes} — a análise foi cortada no fim real da partida.
+
+insight.resources_unspent.title = Recursos flutuando
+insight.resources_unspent.help = Média de minerals e gás no banco ao longo da partida. Valores altos indicam que você não está gastando rápido o bastante — produção ociosa, tech parada ou poucos produtores pra sua renda. Naturalmente sobe no late game quando a economia satura, então valores altos são mais diagnósticos antes do minuto 10.
+insight.resources_unspent.avg_minerals = Média minerals
+insight.resources_unspent.avg_gas = Média gás
+insight.resources_unspent.peak_line = Pico: {max_min} minerals / {max_gas} gás
+insight.resources_unspent.no_data = Dados de recursos indisponíveis.
+
+insight.army_trades.title = Piores trades de army
+insight.army_trades.help = Engajamentos em que você perdeu mais valor em recursos do que destruiu. Mortes que ocorrem em até 15 segundos umas das outras são agrupadas como o mesmo combate. Apenas units/workers contam — prédios perdidos estão no card Key Losses. Escaramuças pequenas (<300 total) são filtradas como ruído.
+insight.army_trades.header = Maiores combates perdidos
+insight.army_trades.line = {mm}:{ss} — perdeu {lost}, matou {killed}
+insight.army_trades.no_trades = Nenhum trade negativo detectado.
+
+insight.key_losses.title = Perdas principais
+insight.key_losses.help = As unidades e estruturas individuais mais caras que você perdeu na partida. Expõe os desastres pontuais — um Battlecruiser picado, um Nexus sniped — que um resumo de trade tende a esconder. Perdas abaixo de 100 recursos são filtradas como ruído.
+insight.key_losses.header = Perdas mais caras
+insight.key_losses.line = {unit} — {minerals}m/{vespene}g aos {mm}:{ss}
+insight.key_losses.no_losses = Nenhuma perda relevante — você segurou sua army.
+
+insight.chrono_distribution.title = Distribuição de Chrono Boost
+insight.chrono_distribution.help = Pra onde seus Chrono Boosts foram na partida — dividido entre economia (workers), army (unidades de produção) e tech (upgrades, research). Só Protoss. Não existe divisão universalmente correta; o card expõe o balanço pra você verificar se bate com seu game plan.
+insight.chrono_distribution.total = Total de chronos
+insight.chrono_distribution.eco = Eco (workers)
+insight.chrono_distribution.army = Army
+insight.chrono_distribution.tech = Tech
+insight.chrono_distribution.structure = Estrutura
+insight.chrono_distribution.category_line = {label}: {count} ({pct}%)
+insight.chrono_distribution.none = Nenhum Chrono Boost usado na partida.
+
+insight.inject_efficiency.title = Eficiência de Inject (até o minuto {minutes})
+insight.inject_efficiency.help = Percentual do ciclo ideal de 40s de inject que você acertou em todas as Hatcheries, Lairs e Hives, medido do primeiro inject em cada base até o minuto {minutes}. 100% significa que toda base foi injetada a cada 40s. Cair abaixo de ~70% costuma indicar que você está perdendo larva porque queens estão paradas. Só Zerg. O corte foca na janela em que inject perdido dói mais — cada inject faltando nessa fase é ~3 drones/lings que não aparecem durante a subida de macro.
+insight.inject_efficiency.efficiency = Eficiência
+insight.inject_efficiency.summary_line = {actual} injects em {bases} base(s) — ideal era ~{ideal}
+insight.inject_efficiency.none = Nenhum comando de inject registrado.
+
+insight.economy_gap.title = Gap de economia
+insight.economy_gap.help = Workers efetivos comparados ao adversário nos três checkpoints early/mid-game onde a curva econômica define o resto da partida. Verde = você estava na frente; laranja = atrás. MULEs ativos dos dois lados contam como 3.5 workers cada (rendimento efetivo típico na vida útil de 64s do MULE, arredondado pro worker mais próximo). Só 1v1.
+insight.economy_gap.header = Workers (efetivo): você vs adversário
+insight.economy_gap.line = {minute} min: {pov} vs {opp}
+insight.economy_gap.beyond_end_line = {minute} min: — (jogo terminou antes)
+insight.economy_gap.cell_with_mules = {workers} (+{mules} MULE)
+insight.economy_gap.mule_footnote = Cada MULE ativo conta como 3.5 workers.
+
+insight.turning_point.title = Turning point
+insight.turning_point.help = O loop em que o adversário ultrapassou seu army value depois de você ter estado à frente — geralmente o combate em que a partida saiu das suas mãos. O botão "Abrir no Timeline" leva a aba Timeline exatamente pra esse momento pra você revisar o engajamento.
+insight.turning_point.insufficient_data = Dados de army insuficientes pra computar um turning point.
+insight.turning_point.never_ahead = Você nunca esteve à frente em army value — a partida não foi decidida por um turning point único.
+insight.turning_point.held_advantage = Sua army nunca foi ultrapassada (pico de vantagem: {peak}). A partida pode ter sido decidida por outro fator — harass, tech, base trade, etc.
+insight.turning_point.turned_at = Ultrapassado aos
+insight.turning_point.context_line = Pico de vantagem foi {peak_diff} aos {peak_mm}:{peak_ss}.
+insight.turning_point.open_in_timeline = Abrir no Timeline
+
+insight.base_timings.title = Timing de bases (mirror)
+insight.base_timings.help = Quando você e o adversário terminaram a 2ª, 3ª e 4ª base. Só mirror — em matchups não-mirror as curvas econômicas são muito diferentes pra comparação carregar sinal. Delta verde = você foi mais cedo (vantagem); laranja = mais tarde (atrás).
+insight.base_timings.header = Você vs adversário
+insight.base_timings.line = {ordinal}ª base: {pov} vs {opp}
+
+insight.tech_timings.title = Timing de tech (mirror)
+insight.tech_timings.help = Quando você e o adversário bateram os milestones-chave de tech (estruturas e pesquisas que definem o mid-game de cada raça). Só mirror — comparar milestones entre raças é maçã-com-laranja. "—" significa que o milestone nunca foi alcançado.
+insight.tech_timings.header = Você vs adversário
+insight.tech_timings.line = {label}: {pov} vs {opp}
+insight.tech_timings.tr.factory = Factory
+insight.tech_timings.tr.stimpack = Stimpack
+insight.tech_timings.tr.starport = Starport
+insight.tech_timings.pr.cyber = Cybernetics Core
+insight.tech_timings.pr.warpgate = Warp Gate
+insight.tech_timings.pr.twilight = Twilight Council
+insight.tech_timings.zr.lair = Lair
+insight.tech_timings.zr.roach_warren = Roach Warren
+insight.tech_timings.zr.hive = Hive
+
 # Abreviações de mês usadas no formato curto da barra superior.
 month.01 = jan
 month.02 = fev
