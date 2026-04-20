@@ -2,6 +2,9 @@
 // é o mais rico: back + mapa + matchup + popover de detalhes + chips de
 // jogadores + atalhos (abrir/rename) + a tab bar logo abaixo.
 
+// See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
+#![allow(deprecated)]
+
 use std::path::PathBuf;
 
 use egui::{Color32, Panel, RichText};
@@ -21,7 +24,7 @@ use crate::widgets::{icon_button, labeled_value};
 use super::state::{AppState, Screen};
 
 impl AppState {
-    pub(super) fn show_library_topbar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
         let mut pick_dir: Option<PathBuf> = None;
@@ -38,7 +41,7 @@ impl AppState {
                     .fill(SURFACE_ALT)
                     .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
             )
-            .show_inside(ui, |ui| {
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(t("library.title", lang))
@@ -123,7 +126,7 @@ impl AppState {
         }
     }
 
-    pub(super) fn show_rename_topbar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn show_rename_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         Panel::top("rename_bar")
             .frame(
@@ -131,7 +134,7 @@ impl AppState {
                     .fill(SURFACE_ALT)
                     .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
             )
-            .show_inside(ui, |ui| {
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if icon_button(ui, "←", t("topbar.back_tooltip", lang)).clicked() {
                         self.screen = Screen::Library;
@@ -146,7 +149,7 @@ impl AppState {
             });
     }
 
-    pub(super) fn show_analysis_topbar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut back_clicked = false;
         let mut open_clicked = false;
@@ -162,7 +165,7 @@ impl AppState {
                         .fill(SURFACE_ALT)
                         .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
                 )
-                .show_inside(ui, |ui| {
+                .show(ctx, |ui| {
                     analysis_topbar(
                         ui,
                         loaded,
@@ -193,7 +196,7 @@ impl AppState {
             self.screen = Screen::Rename;
         }
 
-        Panel::top("tabs").show_inside(ui, |ui| {
+        Panel::top("tabs").show(ctx, |ui| {
             ui.add_space(SPACE_S);
             ui.horizontal(|ui| {
                 for tab in Tab::ALL {

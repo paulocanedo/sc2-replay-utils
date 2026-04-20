@@ -228,10 +228,19 @@ pub fn show(
     }
 
     // ── Lista virtualizada ───────────────────────────────────────────
+    // `max_height` is a belt-and-suspenders bound: with `auto_shrink=false`
+    // the ScrollArea tries to fill all available space, and historically we
+    // saw it grow past the bottom `Panel::bottom` strip on the first frame
+    // (before `PanelState` caches the status bar height). Capping at the
+    // current `ui.available_height()` guarantees the list never paints on
+    // top of the status bar, regardless of what egui's panel sizer does
+    // that frame.
     let row_h = row_height(ui);
+    let max_scroll_h = ui.available_height().max(0.0);
     ScrollArea::vertical()
         .id_salt("library_list")
         .auto_shrink([false, false])
+        .max_height(max_scroll_h)
         .show_rows(ui, row_h, shown, |ui, row_range| {
             for virtual_idx in row_range {
                 let idx = visible[virtual_idx];

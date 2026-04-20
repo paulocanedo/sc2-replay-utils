@@ -155,6 +155,17 @@ library.entry.parsing = reading metadata…
 library.entry.unsupported = ⚠ unsupported: {reason}
 library.entry.failed = failed: {err}
 library.entry.open = open
+# Strategic opening label shown in the library entry row. The classifier
+# in build_order/opening.rs produces English-only strings by design
+# (names like "Hatch First", "3 Rax", "Gate Expand" are used universally
+# even by non-English speakers). These three keys cover the generic
+# fallback paths — "Too short" for replays that end before the opening
+# window, "Standard opening" when no heuristic matches and the supply
+# signature is also empty, and the em-dash placeholder when the build
+# order couldn't be extracted at all.
+library.opening.standard = Standard opening
+library.opening.unknown = —
+library.opening.early_end = Too short
 library.hero.total = TOTAL
 library.hero.winrate = WINRATE
 library.hero.mmr = MMR

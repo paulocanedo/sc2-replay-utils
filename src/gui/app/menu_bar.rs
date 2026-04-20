@@ -1,6 +1,9 @@
 // Barra de menu no topo da janela (sempre visível). Em um único lugar
 // expõe abrir/carregar replay, alternar tela, abrir settings e about.
 
+// See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
+#![allow(deprecated)]
+
 use egui::{Context, Panel};
 
 use crate::locale::t;
@@ -8,9 +11,9 @@ use crate::locale::t;
 use super::state::{AppState, Screen};
 
 impl AppState {
-    pub(super) fn show_menu_bar(&mut self, ctx: &Context, ui: &mut egui::Ui) {
+    pub(super) fn show_menu_bar(&mut self, ctx: &Context) {
         let lang = self.config.language;
-        Panel::top("menubar").show_inside(ui, |ui| {
+        Panel::top("menubar").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(t("menu.file", lang), |ui| {
                     if ui.button(t("menu.file.open", lang)).clicked() {

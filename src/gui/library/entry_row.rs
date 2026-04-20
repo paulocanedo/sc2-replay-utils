@@ -82,12 +82,19 @@ pub(super) fn get_map(entry: &LibraryEntry) -> &str {
 // ── UI components ────────────────────────────────────────────────────
 
 /// Altura de cada linha da lista virtualizada.
+///
+/// Composição da zona esquerda (fonte única de verdade para manter a
+/// lista em sincronia com o render):
+/// - 1× Body (título "vs")
+/// - 3× Small (🗺/⏱, MMR, opening label)
+/// - 3× gap entre elas
+/// Qualquer mudança aqui precisa casar com `render_parsed`.
 pub(super) fn row_height(ui: &Ui) -> f32 {
     use egui::TextStyle;
     let body = ui.text_style_height(&TextStyle::Body);
     let small = ui.text_style_height(&TextStyle::Small);
     let gap = ui.spacing().item_spacing.y;
-    body + small * 2.0 + gap * 2.0 + FRAME_CHROME_V
+    body + small * 3.0 + gap * 3.0 + FRAME_CHROME_V
 }
 
 const FRAME_CHROME_V: f32 = 13.0;
@@ -276,7 +283,16 @@ fn render_parsed(
             .max_rect(left_rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
         |ui| {
-            ui.set_clip_rect(left_rect);
+            // `shrink_clip_rect` (intersect) — NOT `set_clip_rect` (replace).
+            // `left_rect` is derived from `allocate_exact_size`, which doesn't
+            // bounds-check against the parent ui's clip. For the last visible
+            // row in a ScrollArea, `left_rect` can spill below the
+            // ScrollArea's `content_clip_rect`. A `set_clip_rect(left_rect)`
+            // call would REPLACE the narrower scroll clip with this broader
+            // rect — letting the row's name/map/MMR text bleed into whatever
+            // is rendered below the ScrollArea (in our case, the bottom
+            // status bar). Intersecting preserves the scroll-area clip.
+            ui.shrink_clip_rect(left_rect);
             ui.label(RichText::new(&vs_label).strong().color(if is_current {
                 SELECTED_LABEL
             } else {
@@ -287,6 +303,7 @@ fn render_parsed(
             );
             let mmr_color = if has_user { LABEL_SOFT } else { LABEL_DIM };
             ui.small(RichText::new(mmr_line).color(mmr_color));
+            ui.small(RichText::new(opening_line_text(meta, user_idx)).color(LABEL_DIM));
         },
     );
 
@@ -317,6 +334,35 @@ fn render_parsed(
             ui.small(RichText::new(&short_date).color(LABEL_DIM));
         },
     );
+}
+
+/// Linha compacta com a abertura de cada jogador:
+///   "PlayerA: 14 Pool — Speedling · PlayerB: 1 Rax FE — Stim Timing"
+/// Quando há usuário identificado, ele vem primeiro. Jogadores sem
+/// `opening` (falha de extração) recebem "—" para manter o formato.
+fn opening_line_text(meta: &ParsedMeta, user_idx: Option<usize>) -> String {
+    if meta.players.len() != 2 {
+        return meta
+            .players
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.opening.as_deref().unwrap_or("—")))
+            .collect::<Vec<_>>()
+            .join(" · ");
+    }
+    let (first, second) = match user_idx {
+        Some(0) => (0, 1),
+        Some(1) => (1, 0),
+        _ => (0, 1),
+    };
+    let a = &meta.players[first];
+    let b = &meta.players[second];
+    format!(
+        "{}: {} · {}: {}",
+        a.name,
+        a.opening.as_deref().unwrap_or("—"),
+        b.name,
+        b.opening.as_deref().unwrap_or("—"),
+    )
 }
 
 fn mmr_line_text(meta: &ParsedMeta, user_idx: Option<usize>) -> String {

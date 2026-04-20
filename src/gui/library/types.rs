@@ -19,6 +19,18 @@ pub struct PlayerMeta {
     pub race: String,
     pub mmr: Option<i32>,
     pub result: String,
+    /// Rótulo estratégico de abertura (ex: "Hatch First — Ling/Queen",
+    /// "1 Rax FE — Stim Timing", "Gate Expand — Stalker/Sentry").
+    /// String já formatada para display — a lógica de classificação
+    /// vive em `crate::build_order::classify_opening` e roda em background
+    /// no pool de enriquecimento do scanner, com o resultado persistido
+    /// no cache bincode.
+    ///
+    /// `None` significa "ainda não calculado" (transiente) ou "não foi
+    /// possível extrair o build order" (raro). A UI renderiza `None`
+    /// como "—" via `library.opening.unknown`; o pool de enriquecimento
+    /// acaba preenchendo em seguida e o cache passa a servir o rótulo.
+    pub opening: Option<String>,
 }
 
 #[derive(Clone)]

@@ -2,16 +2,19 @@
 // replay atualmente carregado (ou estado da biblioteca), indica se o
 // watcher está ativo e renderiza toasts transitórios.
 
+// See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
+#![allow(deprecated)]
+
 use egui::{Color32, Panel, RichText};
 
 use crate::colors::LABEL_DIM;
 use crate::locale::{t, tf};
-use crate::tokens::{SPACE_M, SPACE_XS};
+use crate::tokens::{SPACE_M, SPACE_XS, STATUSBAR_HEIGHT};
 
 use super::state::{AppState, Screen};
 
 impl AppState {
-    pub(super) fn show_status_bar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn show_status_bar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
 
         // Snapshot dos campos antes do closure para evitar conflitos de
@@ -27,7 +30,30 @@ impl AppState {
         let library_pending = self.library.pending_count();
         let library_scanning = self.library.scanning;
 
-        Panel::bottom("status_bar").show_inside(ui, |ui| {
+        // `exact_size` pins the reserved height so that `Panel::bottom` always
+        // carves out the same strip on every frame. Without it egui falls
+        // back to `spacing.interact_size.y + margin` on the first frame (no
+        // `PanelState` cached yet), which means the very first render can
+        // under-reserve and let the virtualized replay list below it paint
+        // over the bar. `STATUSBAR_HEIGHT` is the design-token value the
+        // bar is drawn at (≈22 px, covers `SPACE_XS*2 + small text line`).
+        //
+        // `.show(ctx, ...)` (not `show_inside`) is load-bearing: it calls
+        // `pass_state.allocate_bottom_panel(rect)` so the subsequent
+        // `CentralPanel::show(ctx, ...)` sees the shrunken `available_rect`.
+        // With `show_inside` on a top-level ui, only the parent ui's cursor
+        // is updated — the ctx-level allocation is skipped, and in some
+        // configurations the CentralPanel ends up using a rect that still
+        // includes the bottom strip, letting its ScrollArea paint over us.
+        Panel::bottom("status_bar")
+            .resizable(false)
+            .exact_size(STATUSBAR_HEIGHT)
+            .frame(
+                egui::Frame::new()
+                    .fill(Color32::from_gray(18))
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
+            )
+            .show(ctx, |ui| {
             ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
                 match screen {

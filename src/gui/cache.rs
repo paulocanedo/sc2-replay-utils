@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::library::{MetaState, ParsedMeta, PlayerMeta};
 
-const CACHE_VERSION: u32 = 2;
+// CACHE_VERSION bump 2→3: adicionamos o rótulo de abertura
+// (`CachedPlayerMeta.opening`) e o scanner agora parseia ~5 min de
+// game loops em vez de só metadados para extrair o build order inicial.
+// O formato binário mudou, então cache antigos são descartados no load.
+const CACHE_VERSION: u32 = 3;
 const CACHE_FILE: &str = "library_meta.bin";
 
 // ── Tipos serializáveis (desacoplados dos tipos da UI) ───────────────
@@ -53,6 +57,8 @@ struct CachedPlayerMeta {
     race: String,
     mmr: Option<i32>,
     result: String,
+    /// Rótulo de abertura já formatado (ver `PlayerMeta::opening`).
+    opening: Option<String>,
 }
 
 // ── Conversões ───────────────────────────────────────────────────────
@@ -82,6 +88,7 @@ fn to_cached_meta(meta: &ParsedMeta) -> CachedParsedMeta {
                 race: p.race.clone(),
                 mmr: p.mmr,
                 result: p.result.clone(),
+                opening: p.opening.clone(),
             })
             .collect(),
     }
@@ -101,6 +108,7 @@ fn from_cached_meta(c: CachedParsedMeta) -> ParsedMeta {
                 race: p.race,
                 mmr: p.mmr,
                 result: p.result,
+                opening: p.opening,
             })
             .collect(),
     }

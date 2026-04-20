@@ -28,9 +28,11 @@
 //   - `types`    — structs/enum de saída + `format_time`.
 //   - `extract`  — `extract_build_order` + lógica de `build_player_entries`.
 //   - `classify` — `EntryKind` + `classify_entry`.
+//   - `opening`  — rótulo estratégico de abertura (Hatch First, 3 Rax, FFE…).
 
 mod classify;
 mod extract;
+mod opening;
 mod types;
 
 #[cfg(test)]
@@ -38,6 +40,14 @@ mod tests;
 
 pub use classify::{classify_entry, EntryKind};
 pub use extract::extract_build_order;
+pub use opening::classify_opening;
+// `OpeningLabel` e `Confidence` são parte da API pública do classificador
+// (retornados por `classify_opening`) mas, no build atual, o scanner
+// consome apenas a string final via `to_display_string()`. Mantemos
+// re-exportados para consumers futuros sem quebrar a convenção de
+// silenciar o warning de unused.
+#[allow(unused_imports)]
+pub use opening::{Confidence, OpeningLabel};
 // `BuildOrderEntry` é consumido apenas por `#[cfg(test)]` em `gui/salt.rs`,
 // então em builds non-test o import parece não-usado. Silenciamos pra
 // manter a API pública estável.
