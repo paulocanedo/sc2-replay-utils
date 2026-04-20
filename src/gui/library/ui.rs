@@ -8,12 +8,11 @@ use crate::config::AppConfig;
 use crate::locale::{t, tf};
 use crate::tokens::SPACE_S;
 
-use super::date::{matches_date_range, today_str};
+use super::date::today_str;
 use super::entry_row::*;
-use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder};
+use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder, matches_filter};
 use super::hero::{self, HeroAction};
 use super::scanner::ReplayLibrary;
-use super::types::MetaState;
 
 /// Ação solicitada pelo usuário ao interagir com o painel.
 pub enum LibraryAction {
@@ -108,9 +107,7 @@ pub fn show(
     }
 
     // ── Filtragem ────────────────────────────────────────────────────
-    let needle = filter.search.trim().to_ascii_lowercase();
-    let search_active = !needle.is_empty();
-    let any_filter_active = search_active
+    let any_filter_active = !filter.search.trim().is_empty()
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
         || filter.date_range != DateRange::All;
@@ -121,52 +118,7 @@ pub fn show(
         .entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| match &e.meta {
-            MetaState::Parsed(meta) => {
-                if search_active {
-                    let name_match = meta
-                        .players
-                        .iter()
-                        .any(|p| p.name.to_ascii_lowercase().contains(&needle));
-                    let map_match = meta.map.to_ascii_lowercase().contains(&needle);
-                    let mc = matchup_code(meta, config);
-                    let matchup_match = mc.to_ascii_lowercase().contains(&needle);
-                    if !(name_match || map_match || matchup_match) {
-                        return false;
-                    }
-                }
-                if let Some(race_ch) = filter.race {
-                    let user = find_user_player(meta, config);
-                    let matches = user
-                        .map_or(false, |p| race_letter(&p.race) == race_ch);
-                    if !matches {
-                        return false;
-                    }
-                }
-                match filter.outcome {
-                    OutcomeFilter::All => {}
-                    OutcomeFilter::Wins => {
-                        let won = find_user_player(meta, config)
-                            .map_or(false, |p| p.result == "Win");
-                        if !won {
-                            return false;
-                        }
-                    }
-                    OutcomeFilter::Losses => {
-                        let lost = find_user_player(meta, config)
-                            .map_or(false, |p| p.result == "Loss");
-                        if !lost {
-                            return false;
-                        }
-                    }
-                }
-                if !matches_date_range(&meta.datetime, filter.date_range, &today) {
-                    return false;
-                }
-                true
-            }
-            _ => !any_filter_active,
-        })
+        .filter(|(_, e)| matches_filter(e, filter, config, &today))
         .map(|(i, _)| i)
         .collect();
 
