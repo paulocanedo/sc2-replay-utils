@@ -10,6 +10,7 @@ pub mod base_timings;
 pub mod card;
 pub mod chrono_distribution;
 pub mod economy_gap;
+pub mod grid;
 pub mod inject_efficiency;
 pub mod key_losses;
 pub mod loss_analysis;
@@ -82,18 +83,7 @@ pub fn show(
     ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            worker_potential::show(ui, loaded, config, selected);
-            supply_block::show(ui, loaded, config, selected);
-            production_idle::show(ui, loaded, config, selected);
-            resources_unspent::show(ui, loaded, config, selected);
-            economy_gap::show(ui, loaded, config, selected);
-            base_timings::show(ui, loaded, config, selected);
-            tech_timings::show(ui, loaded, config, selected);
-            chrono_distribution::show(ui, loaded, config, selected);
-            inject_efficiency::show(ui, loaded, config, selected);
-            army_trades::show(ui, loaded, config, selected);
-            key_losses::show(ui, loaded, config, selected);
-            if let Some(target) = turning_point::show(ui, loaded, config, selected) {
+            if let Some(target) = grid::render_masonry(ui, loaded, config, selected) {
                 seek_request = Some(target);
             }
         });

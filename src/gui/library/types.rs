@@ -3,6 +3,8 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use crate::replay::ReplayTimeline;
+
 /// Metadados mínimos exibidos na biblioteca.
 #[derive(Clone)]
 pub struct ParsedMeta {
@@ -11,6 +13,35 @@ pub struct ParsedMeta {
     pub duration_seconds: u32,
     pub game_loops: u32,
     pub players: Vec<PlayerMeta>,
+}
+
+impl ParsedMeta {
+    /// Deriva `ParsedMeta` de um `ReplayTimeline` já parseado, sem abrir
+    /// o `.SC2Replay` de novo. Mesma transformação que
+    /// `scanner::parse_meta` faz — sourced do stream canônico em vez de
+    /// re-parsear. Retorna `None` se não for 1v1.
+    pub fn from_timeline(timeline: &ReplayTimeline) -> Option<Self> {
+        if timeline.players.len() != 2 {
+            return None;
+        }
+        Some(Self {
+            map: timeline.map.clone(),
+            datetime: timeline.datetime.clone(),
+            duration_seconds: timeline.duration_seconds,
+            game_loops: timeline.game_loops,
+            players: timeline
+                .players
+                .iter()
+                .map(|p| PlayerMeta {
+                    name: p.name.clone(),
+                    race: p.race.clone(),
+                    mmr: p.mmr,
+                    result: p.result.clone().unwrap_or_default(),
+                    opening: None,
+                })
+                .collect(),
+        })
+    }
 }
 
 #[derive(Clone)]
