@@ -262,13 +262,10 @@ charts.tooltip.supply_line = Supply: {used}/{made}
 timeline.toggle.heatmap = Heatmap
 timeline.toggle.creep = Creep
 timeline.toggle.map = Map
-timeline.stats.supply = {used}/{cap} supply
-timeline.stats.minerals = {val} min
-timeline.stats.gas = {val} gas
-timeline.stats.workers = {val} wks
-timeline.stats.army = {val} army
-timeline.stats.bldg_focus_none = — bldg focus
-timeline.stats.bldg_focus = {pct}% bldg focus
+timeline.stats.bldg_focus_none = — foco prédios
+timeline.stats.bldg_focus = {pct}% foco prédios
+timeline.stats.idle = ⏱ {secs}s ocioso
+timeline.stats.blocks = ⚠ {count} blocks · {secs}s
 
 # ── Tela Renomear ───────────────────────────────────────────────────────────
 rename.heading = Renomear Replays em Lote
