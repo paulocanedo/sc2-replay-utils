@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn datetime_is_local_not_utc_plus_offset() {
+    // `examples/replay1.SC2Replay` foi gravado em UTC-3 (time_local_offset
+    // = -108_000_000_000 FILETIME units). O UTC do replay cai em
+    // 2025-10-11 00:52:16, então o horário LOCAL correto é
+    // 2025-10-10 21:52:16. Se `transform_to_naivetime` voltar a
+    // subtrair o offset, o teste pega o valor errado
+    // (03:52 em 2025-10-11, 6h no futuro).
+    let t = load();
+    assert_eq!(t.datetime, "2025-10-10T21:52:16");
+}
+
+#[test]
 fn timeline_loads() {
     let t = load();
     assert_eq!(t.players.len(), 2);

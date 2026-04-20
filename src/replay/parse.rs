@@ -35,7 +35,14 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         return Err("menos de 2 jogadores".to_string());
     }
 
-    let datetime = s2protocol::transform_to_naivetime(details.time_utc, details.time_local_offset)
+    // Blizzard grava `time_local_offset` em unidades FILETIME como
+    // `local - UTC` (negativo para oeste de Greenwich — um replay
+    // gravado em São Paulo tem offset = -3h). `transform_to_naivetime`
+    // do s2protocol SUBTRAI o offset em vez de somá-lo, então o valor
+    // exibido fica a 2×offset de distância do horário local correto
+    // (6h no futuro, no caso BR). Negamos o offset na entrada para
+    // cancelar a subtração interna e obter de fato o horário local.
+    let datetime = s2protocol::transform_to_naivetime(details.time_utc, -details.time_local_offset)
         .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S").to_string())
         .unwrap_or_else(|| "0000-00-00T00:00:00".to_string());
 
