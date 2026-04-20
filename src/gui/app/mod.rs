@@ -1,6 +1,21 @@
 // Módulo raiz do `app`: plumbing dos submódulos + `impl eframe::App` que
 // orquestra o frame.
 //
+// NOTE on `.show(ctx, ...)` vs `.show_inside(ui, ...)`:
+// egui 0.34 deprecates the `.show(ctx, ...)` path in favor of
+// `.show_inside(ui, ...)`, but **only** the former calls
+// `pass_state.allocate_*_panel(...)`, which is what shrinks
+// `ctx.available_rect()` so the next panel sees the reservation. With
+// eframe's new `fn ui(&mut self, ui: &mut Ui, ...)` signature, the root
+// `ui` happens to be a fresh background-layer Ui whose cursor cooperates
+// with `show_inside`'s cursor-mutation in isolation — but the central
+// panel's ScrollArea was still painting over the bottom status bar in
+// practice. Migrating the four top-level panels (menu, topbar, status,
+// central) to `.show(ctx, ...)` fixes the overlap reliably. We accept
+// the deprecation warnings in the affected modules via
+// `#[allow(deprecated)]`; the path is still fully supported by egui
+// (deprecation is advisory, not removal).
+//
 // A UI alterna entre três telas mutuamente exclusivas:
 // - `Screen::Library`: a biblioteca de replays ocupa toda a janela.
 // - `Screen::Analysis`: replay bar + tab bar + central panel + painel
@@ -80,18 +95,31 @@ impl eframe::App for AppState {
             self.screen = Screen::Library;
         }
 
-        self.show_menu_bar(&ctx, ui);
+        // Top-level panels: use `.show(ctx, ...)` so each call updates the
+        // ctx's pass_state.available_rect — otherwise sibling panels don't
+        // know about each other's reservations and the CentralPanel can
+        // grow past a bottom panel's top edge, letting its ScrollArea
+        // paint over the status bar.
+        //
+        // The eframe-provided `ui` above is only used for modals / ctx
+        // extraction; we deliberately do NOT nest panels inside it.
+        self.show_menu_bar(&ctx);
 
         match self.screen {
-            Screen::Library => self.show_library_topbar(ui),
-            Screen::Rename => self.show_rename_topbar(ui),
-            Screen::Analysis => self.show_analysis_topbar(ui),
+            Screen::Library => self.show_library_topbar(&ctx),
+            Screen::Rename => self.show_rename_topbar(&ctx),
+            Screen::Analysis => self.show_analysis_topbar(&ctx),
         }
 
-        self.show_status_bar(ui);
+        self.show_status_bar(&ctx);
 
-        let action = self.show_central(ui);
+        let action = self.show_central(&ctx);
         self.handle_library_action(action);
+
+        // Silence unused-var warning: `ui` is intentionally not used for
+        // panel nesting (see note above). We keep it in the trait
+        // signature for future modal-on-ui needs.
+        let _ = ui;
 
         // Mantém repaint enquanto a biblioteca estiver parseando em background.
         library::keep_alive(&ctx, &self.library);

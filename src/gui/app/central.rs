@@ -2,6 +2,12 @@
 // BuildOrder / Charts / Chat) ou tela de rename. Também consume a
 // `LibraryAction` devolvida pela biblioteca após o render.
 
+// See `app/mod.rs` for why we use deprecated `CentralPanel::show(ctx, ...)`.
+// Note: only the outer `CentralPanel::show(ctx, ...)` is deprecated;
+// the inner `Panel::left(...).show_inside(ui, ...)` for the filter
+// sidebar is the correct API and is NOT deprecated.
+#![allow(deprecated)]
+
 use egui::{Color32, RichText};
 
 use crate::library::{self, LibraryAction};
@@ -12,10 +18,10 @@ use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
 use super::state::{AppState, Screen};
 
 impl AppState {
-    pub(super) fn show_central(&mut self, ui: &mut egui::Ui) -> LibraryAction {
+    pub(super) fn show_central(&mut self, ctx: &egui::Context) -> LibraryAction {
         let lang = self.config.language;
         let mut library_action = LibraryAction::None;
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(err) = self.load_error.clone() {
                 egui::Frame::new()
                     .fill(Color32::from_rgb(60, 20, 20))

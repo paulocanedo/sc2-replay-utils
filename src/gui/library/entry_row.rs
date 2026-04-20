@@ -283,7 +283,16 @@ fn render_parsed(
             .max_rect(left_rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
         |ui| {
-            ui.set_clip_rect(left_rect);
+            // `shrink_clip_rect` (intersect) — NOT `set_clip_rect` (replace).
+            // `left_rect` is derived from `allocate_exact_size`, which doesn't
+            // bounds-check against the parent ui's clip. For the last visible
+            // row in a ScrollArea, `left_rect` can spill below the
+            // ScrollArea's `content_clip_rect`. A `set_clip_rect(left_rect)`
+            // call would REPLACE the narrower scroll clip with this broader
+            // rect — letting the row's name/map/MMR text bleed into whatever
+            // is rendered below the ScrollArea (in our case, the bottom
+            // status bar). Intersecting preserves the scroll-area clip.
+            ui.shrink_clip_rect(left_rect);
             ui.label(RichText::new(&vs_label).strong().color(if is_current {
                 SELECTED_LABEL
             } else {
