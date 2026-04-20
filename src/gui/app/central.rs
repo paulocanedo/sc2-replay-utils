@@ -86,11 +86,11 @@ impl AppState {
                             &mut self.charts_efficiency_target,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
-                        Tab::Discoveries => tabs::discoveries::show(
+                        Tab::Insights => tabs::insights::show(
                             ui,
                             loaded,
                             &self.config,
-                            &mut self.discoveries_pov,
+                            &mut self.insights_pov,
                         ),
                     },
                 },
