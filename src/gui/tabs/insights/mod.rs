@@ -6,6 +6,9 @@
 // trocar no ComboBox do topo pra ver os insights do adversário.
 
 pub mod card;
+pub mod production_idle;
+pub mod supply_block;
+pub mod util;
 pub mod worker_potential;
 
 use egui::{ScrollArea, Ui};
@@ -61,5 +64,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, pov: &mut Op
         .auto_shrink([false, false])
         .show(ui, |ui| {
             worker_potential::show(ui, loaded, config, selected);
+            supply_block::show(ui, loaded, config, selected);
+            production_idle::show(ui, loaded, config, selected);
         });
 }

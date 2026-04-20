@@ -317,6 +317,22 @@ insight.worker_potential.limited_by_larva80 = Limitado pela regra de 80% drones/
 insight.worker_potential.limited_by_none = Produção rodou na capacidade máxima
 insight.worker_potential.clamped_caveat = O replay terminou antes do minuto {minutes}.
 
+insight.supply_block.title = Supply Blocks
+insight.supply_block.help = Expõe as maiores janelas de supply block — longas o suficiente pra congelar a produção e custar unidades. O total soma todos os blocos detectados; a lista mostra apenas janelas relevantes (≥3s), já que microblocos de menos de 3s são ruído do detector e não carregam impacto real.
+insight.supply_block.total_label = Total bloqueado
+insight.supply_block.top_header = Maiores supply blocks
+insight.supply_block.block_line = {duration} aos {mm}:{ss} (supply {supply})
+insight.supply_block.no_significant = Nenhum supply block relevante — macro limpa.
+
+insight.production_idle.title = Tempo ocioso da produção de workers (até o minuto {minutes})
+insight.production_idle.help = Com que frequência seus produtores de worker (Command Centers, Nexus) ficaram ociosos nos primeiros {minutes} minutos. 100% significa que toda base produziu worker o tempo todo. Abaixo de ~90% costuma indicar ciclos de worker perdidos em combate ou transições de tech. Depois do minuto {minutes} a economia satura e a métrica perde valor diagnóstico.
+insight.production_idle.efficiency = Eficiência
+insight.production_idle.total_idle = Ocioso total
+insight.production_idle.worst_line = Pior gap: {duration} aos {mm}:{ss} ({slots} slot(s) ociosos)
+insight.production_idle.no_gaps = Produção rodou sem interrupção.
+insight.production_idle.no_data = Dados de produção indisponíveis.
+insight.production_idle.zerg_na = A produção Zerg segue o modelo de larva-bandwidth — veja o card de Inject Efficiency (em breve).
+
 # Abreviações de mês usadas no formato curto da barra superior.
 month.01 = jan
 month.02 = fev

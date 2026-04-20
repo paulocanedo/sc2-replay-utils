@@ -320,6 +320,22 @@ insight.worker_potential.limited_by_larva80 = Limited by the 80% drone/larva rul
 insight.worker_potential.limited_by_none = Production ran at full capacity
 insight.worker_potential.clamped_caveat = The replay ended before minute {minutes}.
 
+insight.supply_block.title = Supply Blocks
+insight.supply_block.help = Surfaces the biggest supply-block windows — long enough to actually freeze production and cost you units. The total sums every block detected; the list only shows meaningful windows (≥3s), since sub-3-second microblocks are detector noise and don't carry real impact.
+insight.supply_block.total_label = Total blocked
+insight.supply_block.top_header = Biggest supply blocks
+insight.supply_block.block_line = {duration} at {mm}:{ss} (supply {supply})
+insight.supply_block.no_significant = No significant supply blocks — clean macro.
+
+insight.production_idle.title = Worker production idle time (until minute {minutes})
+insight.production_idle.help = How often your worker-producing structures (Command Centers, Nexuses) were idle during the first {minutes} minutes. 100% means every base was always producing a worker. Drops below ~90% usually mean you missed a worker cycle during combat or a tech transition. After minute {minutes} the economy is saturated, so the metric stops being diagnostic.
+insight.production_idle.efficiency = Efficiency
+insight.production_idle.total_idle = Total idle
+insight.production_idle.worst_line = Worst gap: {duration} at {mm}:{ss} ({slots} idle slot(s))
+insight.production_idle.no_gaps = Production ran non-stop.
+insight.production_idle.no_data = Production data unavailable.
+insight.production_idle.zerg_na = Zerg production follows the larva-bandwidth model — see the Inject Efficiency card (coming soon).
+
 # Short month abbreviations for the compact date format in the top bar.
 month.01 = jan
 month.02 = feb

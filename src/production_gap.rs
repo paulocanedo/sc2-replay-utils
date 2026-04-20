@@ -132,7 +132,7 @@ impl EvKind {
     }
 }
 
-fn compute_idle_periods(
+pub fn compute_idle_periods(
     worker_births: &[u32],
     capacity_events: &[(u32, i32)],
     game_end: u32,
