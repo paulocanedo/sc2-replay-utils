@@ -332,6 +332,7 @@ insight.production_idle.worst_line = Pior gap: {duration} aos {mm}:{ss} ({slots}
 insight.production_idle.no_gaps = Produção rodou sem interrupção.
 insight.production_idle.no_data = Dados de produção indisponíveis.
 insight.production_idle.zerg_na = A produção Zerg segue o modelo de larva-bandwidth — veja o card de Inject Efficiency (em breve).
+insight.production_idle.clamped_caveat = O replay terminou antes do minuto {minutes} — a análise foi cortada no fim real da partida.
 
 insight.resources_unspent.title = Recursos flutuando
 insight.resources_unspent.help = Média de minerals e gás no banco ao longo da partida. Valores altos indicam que você não está gastando rápido o bastante — produção ociosa, tech parada ou poucos produtores pra sua renda. Naturalmente sobe no late game quando a economia satura, então valores altos são mais diagnósticos antes do minuto 10.

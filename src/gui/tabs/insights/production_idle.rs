@@ -25,7 +25,13 @@ const CUTOFF_MINUTES: u32 = 7;
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: usize) {
     let lang = config.language;
     let lps = loaded.timeline.loops_per_second.max(0.0001);
-    let until_loop = ((CUTOFF_MINUTES as f64) * 60.0 * lps).round() as u32;
+    let cutoff_loop = ((CUTOFF_MINUTES as f64) * 60.0 * lps).round() as u32;
+    // Clamp pela duração real: replays que terminam antes do cutoff
+    // não devem contar o tempo pós-partida como ociosidade (jogo
+    // acabou, nada pra produzir).
+    let game_end = loaded.timeline.game_loops;
+    let effective_end = cutoff_loop.min(game_end);
+    let clamped = game_end < cutoff_loop;
 
     let title = tf(
         "insight.production_idle.title",
@@ -56,7 +62,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: 
         let (entries, total_idle_loops, efficiency_pct) = compute_idle_periods(
             &player.worker_births,
             &player.worker_capacity,
-            until_loop,
+            effective_end,
         );
         render_body(
             ui,
@@ -66,6 +72,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig, player_idx: 
             total_idle_loops,
             efficiency_pct,
             lps,
+            clamped,
         );
     });
 }
@@ -78,6 +85,7 @@ fn render_body(
     total_idle_loops: u32,
     efficiency_pct: f64,
     lps: f64,
+    clamped: bool,
 ) {
     let lang = config.language;
     let size = size_subtitle(config);
@@ -143,6 +151,20 @@ fn render_body(
                     .color(Color32::from_rgb(110, 190, 120)),
             );
         }
+    }
+
+    if clamped {
+        ui.add_space(SPACE_S);
+        ui.label(
+            RichText::new(tf(
+                "insight.production_idle.clamped_caveat",
+                lang,
+                &[("minutes", &CUTOFF_MINUTES.to_string())],
+            ))
+            .small()
+            .italics()
+            .color(Color32::from_gray(160)),
+        );
     }
 
     ui.add_space(SPACE_M);
