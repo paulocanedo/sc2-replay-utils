@@ -3,18 +3,28 @@
 // painéis em `menu_bar`, `topbar`, `status_bar`, `central` e `modals`
 // são `impl` separados sobre `AppState` espalhados pelos submódulos.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use egui::Context;
 
+use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
-use crate::library::{self, ReplayLibrary};
+use crate::library::{self, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
 use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
 use crate::watcher::ReplayWatcher;
+
+/// Janela (em segundos) suficiente para o classificador de abertura
+/// produzir um rótulo estável. Alinhada com `T_FOLLOW_UP_END_SECS` em
+/// `build_order::opening` e com `ENRICHMENT_PARSE_SECONDS` no scanner
+/// da biblioteca — se o parse do `LoadedReplay` cobriu ao menos isto,
+/// podemos ingerir a abertura direto, sem disparar o pool de
+/// enriquecimento pra parsear o mesmo arquivo de novo.
+const OPENING_CLASSIFICATION_WINDOW_SECS: u32 = 300;
 
 use super::apply_style;
 
@@ -196,14 +206,30 @@ impl AppState {
         let Some(w) = self.watcher.as_ref() else { return };
         if let Some(path) = w.poll_latest() {
             let lang = self.config.language;
+            let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+
             if self.config.auto_load_on_new_replay {
                 self.load_path(path.clone());
+                // load_path pode ter falhado (replay corrompido, não-1v1…).
+                // Só derivamos meta quando o LoadedReplay atual é
+                // exatamente este path — caso contrário caímos no
+                // ingest_pending para que o pool da biblioteca tente.
+                let derived = self
+                    .loaded
+                    .as_ref()
+                    .filter(|l| l.path == path)
+                    .and_then(|l| build_ingest_meta(l, self.config.default_max_time));
+                match derived {
+                    Some(meta) => self.library.ingest_parsed(path.clone(), mtime, meta),
+                    None => self.library.ingest_pending(path.clone(), mtime),
+                }
                 self.set_toast(tf(
                     "toast.new_replay_loaded",
                     lang,
                     &[("file", &file_name(&path))],
                 ));
             } else {
+                self.library.ingest_pending(path.clone(), mtime);
                 self.set_toast(tf(
                     "toast.new_replay_available",
                     lang,
@@ -228,4 +254,29 @@ fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.display().to_string())
+}
+
+/// Deriva `ParsedMeta` de um `LoadedReplay` pronto. Preenche `opening`
+/// diretamente do `build_order` já extraído quando o parse cobriu a
+/// janela completa de classificação (`OPENING_CLASSIFICATION_WINDOW_SECS`),
+/// caso contrário deixa `None` para que o pool de enriquecimento da
+/// biblioteca complete depois parseando só os 5 min necessários.
+fn build_ingest_meta(loaded: &LoadedReplay, default_max_time: u32) -> Option<ParsedMeta> {
+    let mut meta = ParsedMeta::from_timeline(&loaded.timeline)?;
+    let cover_window = default_max_time == 0
+        || default_max_time >= OPENING_CLASSIFICATION_WINDOW_SECS
+        || loaded.timeline.duration_seconds <= default_max_time;
+    if cover_window {
+        fill_openings_from_build_order(&mut meta, loaded.build_order.as_ref());
+    }
+    Some(meta)
+}
+
+fn fill_openings_from_build_order(meta: &mut ParsedMeta, bo: Option<&BuildOrderResult>) {
+    let Some(bo) = bo else { return };
+    for (i, p) in bo.players.iter().enumerate() {
+        if let Some(pm) = meta.players.get_mut(i) {
+            pm.opening = Some(classify_opening(p, bo.loops_per_second).to_display_string());
+        }
+    }
 }

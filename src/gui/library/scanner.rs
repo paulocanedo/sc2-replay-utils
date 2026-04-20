@@ -287,6 +287,96 @@ impl ReplayLibrary {
             });
     }
 
+    /// Integra um replay recém-detectado (tipicamente via watcher) cuja
+    /// metadata já foi derivada de um `ReplayTimeline` carregado. Evita
+    /// re-parsear o MPQ — a metadata vem do mesmo stream canônico que a
+    /// tela de análise consome. Também grava no `cache` para que um
+    /// `refresh()` futuro trate o arquivo como cache hit.
+    ///
+    /// - Se `path` não está abaixo do `working_dir` atual, ignora.
+    /// - Se já existe entry com este `path`, atualiza em lugar (caso de
+    ///   sobrescrita do arquivo); senão insere no início (replay novo
+    ///   tem o maior mtime por definição).
+    pub fn ingest_parsed(
+        &mut self,
+        path: PathBuf,
+        mtime: Option<SystemTime>,
+        meta: ParsedMeta,
+    ) {
+        if !self.path_under_working_dir(&path) {
+            return;
+        }
+        let filename = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+
+        // Grava no cache cedo — se um refresh concorrente reencontrar o
+        // arquivo, vai bater como cache hit (mesmo mtime) e não re-parsear.
+        if let Some(mt) = mtime {
+            self.cache.insert(
+                path.clone(),
+                (mt, MetaState::Parsed(meta.clone())),
+            );
+            self.cache_dirty = true;
+        }
+
+        // Enfileira enriquecimento se algum jogador ainda está sem
+        // `opening` (idempotente via `enrichment_in_flight`).
+        self.enqueue_enrichment_if_needed(&path, &meta);
+
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.path == path) {
+            entry.mtime = mtime;
+            entry.filename = filename;
+            entry.meta = MetaState::Parsed(meta);
+        } else {
+            self.entries.insert(
+                0,
+                LibraryEntry {
+                    path,
+                    filename,
+                    mtime,
+                    meta: MetaState::Parsed(meta),
+                },
+            );
+        }
+        self.stats_dirty = true;
+    }
+
+    /// Variante sem metadata derivada — insere com `Pending` e despacha
+    /// para o pool de parse existente. Usada quando `auto_load` está
+    /// desligado ou quando o load da análise falhou.
+    pub fn ingest_pending(&mut self, path: PathBuf, mtime: Option<SystemTime>) {
+        if !self.path_under_working_dir(&path) {
+            return;
+        }
+        if self.entries.iter().any(|e| e.path == path) {
+            return;
+        }
+        let filename = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        self.entries.insert(
+            0,
+            LibraryEntry {
+                path: path.clone(),
+                filename,
+                mtime,
+                meta: MetaState::Pending,
+            },
+        );
+        self.stats_dirty = true;
+        self.spawn_parse_burst(vec![(path, mtime)]);
+    }
+
+    fn path_under_working_dir(&self, path: &Path) -> bool {
+        match &self.working_dir {
+            Some(dir) => path.starts_with(dir),
+            None => false,
+        }
+    }
+
     /// Sobe um pool efêmero de workers para processar `paths` e retorna
     /// imediatamente. Os workers encerram sozinhos quando a fila esvazia
     /// (drop do `tx_work` ao final desta função fecha o canal de entrada).
@@ -354,6 +444,13 @@ impl ReplayLibrary {
                 };
                 match msg {
                     ScanMessage::Found(result) => {
+                        // Dedup: o watcher pode ter ingerido este path
+                        // durante um refresh em curso (ver `ingest_*`).
+                        // Nesse caso a entry já está em `entries` — pular
+                        // evita duplicatas.
+                        if self.entries.iter().any(|e| e.path == result.path) {
+                            continue;
+                        }
                         let meta = match (self.cache.get(&result.path), result.mtime) {
                             (Some((cached_mtime, state)), Some(mt)) if *cached_mtime == mt => {
                                 state.clone()
