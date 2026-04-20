@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::balance_data::{build_time_loops, supply_cost_x10};
+use crate::balance_data::supply_cost_x10;
 use crate::production_efficiency::WARP_GATE_RESEARCH;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
 
@@ -90,9 +90,24 @@ pub fn extract_supply_blocks(
     enum Event {
         /// Atualiza o supply conhecido a partir do tracker.
         Snapshot { supply_used: i32, supply_made: i32 },
-        /// Início da produção de Unit/Worker (usado por
-        /// `ProductionAttempt` e `TotalSupplyCap`).
-        ProductionStart { cost_x10: u32 },
+        /// Início da produção de Unit/Worker.
+        ///
+        /// `reserve`:
+        /// - `true`  — reserva nova: incrementa `last_supply_used`
+        ///   virtualmente. Usado quando `Started` e `Finished` caem em
+        ///   loops distintos (caso normal: UnitInit no comando + UnitBorn
+        ///   ao nascer), OU para órfãos (sem Finished).
+        /// - `false` — supply já estava no snapshot anterior, NÃO
+        ///   incrementa virtual. Usado para same-loop pairs (caso típico
+        ///   de trains Terran e morphs que o tracker só vê pelo
+        ///   `UnitBorn`, sem `UnitInit` prévio — a unidade foi construída
+        ///   ao longo dos ~build_time loops anteriores e seu custo já
+        ///   aparece em todos os snapshots desse intervalo).
+        ///
+        /// O check de `ProductionAttempt` (supply disponível < custo)
+        /// roda nos dois casos, sempre no loop em que a unidade
+        /// efetivamente apareceu — é o sinal mais recente que temos.
+        ProductionStart { cost_x10: u32, reserve: bool },
         /// Conclusão de produção de Unit/Worker (usado por
         /// `CompletedSupplyCap` para incrementar supply concluído).
         ProductionFinish { cost_x10: u32 },
@@ -134,18 +149,19 @@ pub fn extract_supply_blocks(
     }
 
     // Pareia `ProductionStarted` com `ProductionFinished`/`ProductionCancelled`
-    // por tag. Quando a mesma tag recebe Started e Finished no mesmo loop
-    // (caso típico quando o tracker só vê a unidade pelo `UnitBorn` — sem
-    // `UnitInit` prévio), back-data o start pelo `build_time` da unidade.
+    // por tag. O único propósito do pareamento aqui é detectar same-loop
+    // pairs — quando Started e Finished caem no mesmo loop, a unidade não
+    // é uma reserva NOVA (o tracker só a viu agora pelo `UnitBorn`, mas
+    // seu supply já vinha sendo contado pelos snapshots ao longo dos
+    // últimos ~build_time loops). Para esses, emitimos `reserve=false`
+    // pra não duplicar o supply no virtual tracking — evita o falso
+    // positivo do Colossus no Tourmaline 11:29 sem mover o loop do Start
+    // (o que quebraria o check de ProductionAttempt, que depende do
+    // snapshot atual pra avaliar se o supply está apertado AGORA).
     //
-    // Por que back-data: sem ele, a produção apareceria como instantânea e
-    // o virtual-tracking de supply somaria o custo DEPOIS do snapshot que
-    // já contava essa unidade — drift que disparava supply blocks falsos
-    // (ex: Colossus no Tourmaline LE 21 em 11:29, construído há ~600 loops
-    // mas visto pelo tracker só em loop 15451). Com back-date, o Start
-    // acontece antes do snapshot, que resyncha o virtual no loop certo.
-    //
-    // Mesma lógica usada em `compute_series_army`.
+    // Trains Terran são o caso mais comum de same-loop: a maioria vem
+    // via `UnitBorn` sem `UnitInit` anterior (veja comentário em
+    // `compute_series_army` sobre `prev_lifecycle == None`).
     let mut open_starts: HashMap<i64, (u32, String)> = HashMap::new();
 
     for e in &player.entity_events {
@@ -159,14 +175,14 @@ pub fn extract_supply_blocks(
             }
             EntityEventKind::ProductionFinished if is_unit => {
                 let cost = supply_cost_x10(&e.entity_type, base_build);
-                if let Some((start_loop, entity_type)) = open_starts.remove(&e.tag) {
-                    let start_loop = if start_loop >= e.game_loop {
-                        let bt = build_time_loops(&entity_type, base_build);
-                        e.game_loop.saturating_sub(bt)
-                    } else {
-                        start_loop
-                    };
-                    merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
+                if let Some((start_loop, _entity_type)) = open_starts.remove(&e.tag) {
+                    // Same-loop pair → snapshot já tem o supply; reserve=false.
+                    // Pair normal (Start em loop anterior) → nova reserva; reserve=true.
+                    let reserve = start_loop < e.game_loop;
+                    merged.push((
+                        start_loop.min(e.game_loop),
+                        Event::ProductionStart { cost_x10: cost, reserve },
+                    ));
                 }
                 if cost > 0 {
                     merged.push((e.game_loop, Event::ProductionFinish { cost_x10: cost }));
@@ -174,14 +190,12 @@ pub fn extract_supply_blocks(
             }
             EntityEventKind::ProductionCancelled if is_unit => {
                 let cost = supply_cost_x10(&e.entity_type, base_build);
-                if let Some((start_loop, entity_type)) = open_starts.remove(&e.tag) {
-                    let start_loop = if start_loop >= e.game_loop {
-                        let bt = build_time_loops(&entity_type, base_build);
-                        e.game_loop.saturating_sub(bt)
-                    } else {
-                        start_loop
-                    };
-                    merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
+                if let Some((start_loop, _entity_type)) = open_starts.remove(&e.tag) {
+                    let reserve = start_loop < e.game_loop;
+                    merged.push((
+                        start_loop.min(e.game_loop),
+                        Event::ProductionStart { cost_x10: cost, reserve },
+                    ));
                 }
                 if cost > 0 {
                     merged.push((e.game_loop, Event::ProductionCancel { cost_x10: cost }));
@@ -209,13 +223,14 @@ pub fn extract_supply_blocks(
         }
     }
 
-    // Órfãos (Started sem Finished/Cancelled até o fim): emite o Start
-    // no loop original. O virtual-tracking reserva o supply e permanece
-    // reservado até o game_end — coerente com a semântica de bloco aberto
-    // ao longo do resto da partida caso a produção nunca complete.
+    // Órfãos (Started sem Finished/Cancelled até o fim): reserva nova
+    // que nunca concluiu — mantém `reserve=true` pro virtual tracking.
     for (_tag, (start_loop, entity_type)) in open_starts {
         let cost = supply_cost_x10(&entity_type, base_build);
-        merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
+        merged.push((
+            start_loop,
+            Event::ProductionStart { cost_x10: cost, reserve: true },
+        ));
     }
 
     for cmd in &player.production_cmds {
@@ -371,7 +386,7 @@ pub fn extract_supply_blocks(
                     block_supply = completed_supply_used;
                 }
             }
-            Event::ProductionStart { cost_x10 } => {
+            Event::ProductionStart { cost_x10, reserve } => {
                 total_supply_used += *cost_x10 as i32 / 10;
 
                 match ACTIVE_STRATEGY {
@@ -381,7 +396,12 @@ pub fn extract_supply_blocks(
                         // iniciar esta produção?". Uma produção com
                         // custo exatamente igual ao supply disponível
                         // (`avail == cost`) passa — é warpada/treinada
-                        // com sucesso.
+                        // com sucesso. Rodamos o check em AMBOS os casos
+                        // (reserve true/false) porque o snapshot atual
+                        // é o melhor proxy de "supply está apertado
+                        // agora?" — e mesmo same-loop pairs (UnitBorn
+                        // fallback) sinalizam que nesse instante o
+                        // jogador tem a próxima unidade contada.
                         if !in_block
                             && last_supply_made > 0
                             && last_supply_made < 200
@@ -394,13 +414,15 @@ pub fn extract_supply_blocks(
                             }
                         }
 
-                        // Virtual tracking: reserva o supply desta
-                        // produção para que eventos subsequentes entre
-                        // snapshots (warpgate-aware, outro
-                        // ProductionStart) vejam o estado correto. O
-                        // próximo snapshot resyncará com o valor do
-                        // tracker (que também inclui reservas).
-                        last_supply_used += *cost_x10 as i32 / 10;
+                        // Virtual tracking: só incrementa quando é
+                        // reserva nova (`reserve=true`). Same-loop pairs
+                        // (reserve=false) já têm o custo refletido nos
+                        // snapshots — incrementar aqui causa drift e
+                        // dispara warpgate-aware falsamente (regressão
+                        // do Colossus no Tourmaline 11:29).
+                        if *reserve {
+                            last_supply_used += *cost_x10 as i32 / 10;
+                        }
                     }
                     StartStrategy::TotalSupplyCap => {
                         if !in_block
@@ -766,15 +788,87 @@ mod tests {
         assert_eq!(blocks[0].end_loop, 600);
     }
 
-    // (h) Back-date de same-loop Start+Finish: regressão do falso
-    // positivo de 22s no Tourmaline LE (21) em 11:29. Um Colossus
-    // com Started e Finished no mesmo loop (tracker só viu pelo
-    // UnitBorn — sem UnitInit anterior) não deve disparar bloco,
-    // porque o snapshot anterior já contabilizou seu supply. Sem
-    // back-date, o virtual tracking somaria 6 de supply "fantasma"
-    // e o gatilho warpgate-aware dispararia com drift.
+    // (i) Trains Terran: UnitBorn sem UnitInit anterior → Started e
+    // Finished no mesmo loop. O bloco deve continuar sendo detectado
+    // no loop em que a unidade nasce, usando o supply do snapshot atual
+    // (13/15 → avail=2, Marauder custo=2, bloco dispara quando só resta
+    // supply pro próprio produtor). Regressão: a tentativa anterior de
+    // back-date tinha movido o check pra T-build_time, onde os
+    // snapshots ainda não incluíam a unidade, e nenhum bloco era
+    // detectado — dizimando as detecções para jogos de Terran.
     #[test]
-    fn same_loop_start_finish_is_back_dated() {
+    fn terran_same_loop_marauder_triggers_block() {
+        let mut p = mk_player();
+        p.race = "Terr".to_string();
+        // Snapshot em 1700: 13 usado / 15 feito — já inclui o Marauder
+        // em produção há ~30s (começou ~1030).
+        p.stats.push(snapshot(1700, 13, 15));
+        // Marauder aparece em 1800 via UnitBorn fallback — Started e
+        // Finished no mesmo loop. Check ProductionAttempt:
+        // avail_x10 = (15-13)*10 = 20, cost_x10 = 20 → 20 < 20 = false,
+        // MAS após o Marauder nascer o supply fica 15/15, o que
+        // significa que os próximos slots de Marauder estão capped.
+        // O check usa o snapshot ANTES da unidade (avail=2), então o
+        // ProductionAttempt não dispara. Vamos simular um segundo
+        // Marauder que tenta nascer quando supply já está apertado.
+        p.entity_events.push(entity_event(
+            1800,
+            999,
+            "Marauder",
+            EntityEventKind::ProductionStarted,
+            EntityCategory::Unit,
+        ));
+        p.entity_events.push(entity_event(
+            1800,
+            999,
+            "Marauder",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Unit,
+        ));
+        // Snapshot em 1900: 15 usado (o Marauder consumiu a fatia).
+        p.stats.push(snapshot(1900, 15, 15));
+        // Segundo Marauder tenta nascer em 2000: snapshot diz 15/15,
+        // avail=0 < cost=2 → BLOCO (via ProductionAttempt).
+        p.entity_events.push(entity_event(
+            2000,
+            1000,
+            "Marauder",
+            EntityEventKind::ProductionStarted,
+            EntityCategory::Unit,
+        ));
+        p.entity_events.push(entity_event(
+            2000,
+            1000,
+            "Marauder",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Unit,
+        ));
+        p.entity_events.push(entity_event(
+            2500,
+            1,
+            "SupplyDepot",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Structure,
+        ));
+        // base_build 94137 tem Marauder com supply_cost_x10=20.
+        let blocks = extract_supply_blocks(&p, 10_000, 94137);
+        assert_eq!(blocks.len(), 1, "Marauder em same-loop com supply capado deve disparar bloco");
+        assert_eq!(blocks[0].start_loop, 2000, "bloco inicia no UnitBorn do 2º Marauder");
+        assert_eq!(blocks[0].end_loop, 2500, "fecha quando Depot conclui");
+        assert_eq!(blocks[0].supply, 15);
+    }
+
+    // (h) Same-loop Start+Finish NÃO reserva supply virtual: regressão
+    // do falso positivo de 22s no Tourmaline LE (21) em 11:29. Um
+    // Colossus com Started e Finished no mesmo loop (tracker só viu
+    // pelo UnitBorn — sem UnitInit anterior) não deve disparar bloco,
+    // porque o snapshot anterior já contabilizou seu supply. Se o par
+    // fosse tratado como reservation (flag `reserve: true`), o virtual
+    // tracking somaria 6 de supply "fantasma" e o gatilho warpgate-aware
+    // dispararia com drift. A lógica atual marca same-loop pairs com
+    // `reserve: false` — o check ProductionAttempt roda, mas não soma.
+    #[test]
+    fn same_loop_start_finish_does_not_reserve() {
         let mut p = mk_player();
         p.upgrades.push(upgrade(40, WARP_GATE_RESEARCH));
         p.entity_events.push(entity_event(
@@ -788,9 +882,9 @@ mod tests {
         // pra um Colossus custo 6). O snapshot já inclui o Colossus
         // que está sendo construído há ~600 loops.
         p.stats.push(snapshot(1000, 188, 195));
-        // Colossus com Started e Finished no MESMO loop (1100). Sem
-        // back-date, o virtual somaria +6 → 194, avail=1<2 → bloco
-        // falso positivo warpgate-aware.
+        // Colossus com Started e Finished no MESMO loop (1100). Com
+        // reserve=false (same-loop pair), o virtual não soma e o
+        // gatilho warpgate-aware NÃO dispara (avail=7 ≥ 2).
         p.entity_events.push(entity_event(
             1100,
             999,
@@ -809,7 +903,7 @@ mod tests {
         let blocks = extract_supply_blocks(&p, 10_000, 80000);
         assert!(
             blocks.is_empty(),
-            "same-loop Start+Finish deve ser back-dated e não disparar bloco; blocos={:?}",
+            "same-loop Start+Finish deve ter reserve=false e não disparar bloco; blocos={:?}",
             blocks.iter().map(|b| (b.start_loop, b.end_loop)).collect::<Vec<_>>()
         );
     }
