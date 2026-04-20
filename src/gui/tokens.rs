@@ -51,8 +51,47 @@ pub fn size_title(cfg: &AppConfig) -> f32 {
 
 pub const RADIUS_CARD: f32 = 6.0;
 pub const RADIUS_CHIP: f32 = 10.0;
+pub const RADIUS_BUTTON: f32 = 4.0;
+pub const RADIUS_WINDOW: f32 = 8.0;
 pub const STROKE_HAIRLINE: f32 = 0.5;
 pub const STROKE_ACCENT: f32 = 1.0;
+
+/// Minimum chip height. Padronizes pill-shaped toggles so labels of
+/// different lengths don't make adjacent chips jump in height.
+pub const CHIP_MIN_HEIGHT: f32 = 22.0;
+
+// ── Shadows ──────────────────────────────────────────────────────────
+//
+// egui packs Shadow into 16 bits: offset is `[i8; 2]` and blur/spread
+// are `u8`. Keep values small — large shadows on every card kill the
+// "flat dark" aesthetic we're aiming for.
+
+/// Subtle shadow used by raised cards. One pixel down + soft blur is
+/// enough to read as "above the surface" without competing with content.
+pub const SHADOW_CARD: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 2],
+    blur: 8,
+    spread: 0,
+    color: egui::Color32::from_black_alpha(55),
+};
+
+/// Window-level shadow for modals / popups. Slightly more pronounced
+/// than `SHADOW_CARD` so floating surfaces clearly detach from the
+/// background.
+pub const SHADOW_WINDOW: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 6],
+    blur: 16,
+    spread: 0,
+    color: egui::Color32::from_black_alpha(72),
+};
+
+/// Popover shadow — between card and window.
+pub const SHADOW_POPUP: egui::epaint::Shadow = egui::epaint::Shadow {
+    offset: [0, 4],
+    blur: 10,
+    spread: 0,
+    color: egui::Color32::from_black_alpha(60),
+};
 
 // egui 0.32+ expects `i8` for inner margin components.
 pub const CARD_INNER_MX: i8 = 12;

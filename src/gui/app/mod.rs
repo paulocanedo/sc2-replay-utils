@@ -45,13 +45,22 @@ mod state;
 mod status_bar;
 mod topbar;
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use egui::Context;
+use egui::{Context, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke};
 
+use crate::colors::{
+    self, ACTIVE_FILL, BORDER, BORDER_STRONG, FOCUS_RING, HOVER_FILL, LABEL_SOFT, LABEL_STRONG,
+    SELECTION_BG, SURFACE, SURFACE_ALT, SURFACE_RAISED,
+};
 use crate::config::AppConfig;
 use crate::library;
 use crate::locale::{t, tf};
+use crate::tokens::{
+    RADIUS_BUTTON, RADIUS_WINDOW, SHADOW_POPUP, SHADOW_WINDOW, SPACE_M, SPACE_S, SPACE_XS,
+    STROKE_HAIRLINE,
+};
 use crate::ui_settings;
 
 pub use state::{AppState, Screen};
@@ -170,11 +179,16 @@ impl eframe::App for AppState {
 }
 
 pub fn apply_style(ctx: &Context, config: &AppConfig) {
-    ctx.set_visuals(if config.dark_mode {
+    let mut visuals = if config.dark_mode {
         egui::Visuals::dark()
     } else {
         egui::Visuals::light()
-    });
+    };
+    if config.dark_mode {
+        apply_dark_palette(&mut visuals);
+    }
+    ctx.set_visuals(visuals);
+
     let mut style = (*ctx.global_style()).clone();
     let base = config.font_size.clamp(8.0, 28.0);
     for (text_style, font_id) in style.text_styles.iter_mut() {
@@ -184,5 +198,113 @@ pub fn apply_style(ctx: &Context, config: &AppConfig) {
             _ => base,
         };
     }
+
+    // Spacing/rhythm: slightly more generous than egui defaults so the
+    // UI breathes. Button padding in particular pushes chip/button
+    // height above the default 18px so they align with label baselines.
+    style.spacing.item_spacing = egui::vec2(SPACE_M, SPACE_S);
+    style.spacing.button_padding = egui::vec2(SPACE_M, SPACE_XS);
+    style.spacing.menu_margin = egui::Margin::symmetric(SPACE_S as i8, SPACE_XS as i8);
+
     ctx.set_global_style(style);
+}
+
+/// Builds the dark palette used everywhere in the app. Pulls colours
+/// from `crate::colors` so the three-tier surface scale and the slot /
+/// race palettes share one source of truth.
+fn apply_dark_palette(v: &mut egui::Visuals) {
+    let r_button = CornerRadius::same(RADIUS_BUTTON as u8);
+
+    // ── Backgrounds ──────────────────────────────────────────────────
+    v.window_fill = SURFACE;
+    v.panel_fill = SURFACE;
+    v.faint_bg_color = SURFACE_ALT;
+    v.extreme_bg_color = egui::Color32::from_gray(14);
+    v.code_bg_color = SURFACE_ALT;
+
+    v.window_stroke = Stroke::new(STROKE_HAIRLINE, BORDER);
+    v.window_corner_radius = CornerRadius::same(RADIUS_WINDOW as u8);
+    v.menu_corner_radius = CornerRadius::same(RADIUS_BUTTON as u8);
+    v.window_shadow = SHADOW_WINDOW;
+    v.popup_shadow = SHADOW_POPUP;
+
+    // ── Widget states ────────────────────────────────────────────────
+    // `noninteractive` is used for labels/backgrounds — keep the stroke
+    // visible so `insight_card` still reads the hairline colour from
+    // `widgets.noninteractive.bg_stroke.color`.
+    v.widgets.noninteractive.bg_fill = SURFACE_RAISED;
+    v.widgets.noninteractive.weak_bg_fill = SURFACE_ALT;
+    v.widgets.noninteractive.bg_stroke = Stroke::new(STROKE_HAIRLINE, BORDER);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, LABEL_STRONG);
+    v.widgets.noninteractive.corner_radius = r_button;
+
+    v.widgets.inactive.bg_fill = egui::Color32::from_gray(33);
+    v.widgets.inactive.weak_bg_fill = egui::Color32::from_gray(28);
+    v.widgets.inactive.bg_stroke = Stroke::NONE;
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, LABEL_SOFT);
+    v.widgets.inactive.corner_radius = r_button;
+
+    v.widgets.hovered.bg_fill = HOVER_FILL;
+    v.widgets.hovered.weak_bg_fill = HOVER_FILL;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, BORDER_STRONG);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, egui::Color32::WHITE);
+    v.widgets.hovered.corner_radius = r_button;
+
+    v.widgets.active.bg_fill = ACTIVE_FILL;
+    v.widgets.active.weak_bg_fill = ACTIVE_FILL;
+    v.widgets.active.bg_stroke = Stroke::new(1.0, FOCUS_RING);
+    v.widgets.active.fg_stroke = Stroke::new(1.0, egui::Color32::WHITE);
+    v.widgets.active.corner_radius = r_button;
+
+    v.widgets.open.bg_fill = ACTIVE_FILL;
+    v.widgets.open.weak_bg_fill = HOVER_FILL;
+    v.widgets.open.bg_stroke = Stroke::new(1.0, BORDER_STRONG);
+    v.widgets.open.fg_stroke = Stroke::new(1.0, LABEL_STRONG);
+    v.widgets.open.corner_radius = r_button;
+
+    // ── Selection / focus ────────────────────────────────────────────
+    v.selection.bg_fill = SELECTION_BG;
+    v.selection.stroke = Stroke::new(1.0, FOCUS_RING);
+    v.hyperlink_color = FOCUS_RING;
+
+    // ── Semantic text colours ────────────────────────────────────────
+    v.warn_fg_color = colors::ACCENT_WARNING;
+    v.error_fg_color = colors::ACCENT_DANGER;
+
+    // Subtle: striped tables look nicer against SURFACE_ALT.
+    v.striped = true;
+    // Keep the fill that trails a slider knob coloured — matches
+    // FOCUS_RING so all "you can interact here" affordances read alike.
+    v.slider_trailing_fill = true;
+}
+
+/// Registers Inter (UI) and JetBrains Mono (monospace) as the primary
+/// fonts, keeping egui's default fallbacks for glyphs Inter/JB Mono
+/// don't cover (CJK, emoji). Called once from `AppState::new`.
+pub fn install_fonts(ctx: &Context) {
+    const INTER: &[u8] =
+        include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+    const JETBRAINS_MONO: &[u8] =
+        include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+
+    let mut fonts = FontDefinitions::default();
+
+    fonts
+        .font_data
+        .insert("Inter".to_owned(), Arc::new(FontData::from_static(INTER)));
+    fonts.font_data.insert(
+        "JetBrainsMono".to_owned(),
+        Arc::new(FontData::from_static(JETBRAINS_MONO)),
+    );
+
+    // Prepend our fonts to each family so Inter/JB Mono render first,
+    // with egui's defaults (Ubuntu-Light, Hack, Noto Emoji) as fallback.
+    if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
+        prop.insert(0, "Inter".to_owned());
+    }
+    if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
+        mono.insert(0, "JetBrainsMono".to_owned());
+    }
+
+    ctx.set_fonts(fonts);
 }
