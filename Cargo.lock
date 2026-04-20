@@ -3710,7 +3710,7 @@ dependencies = [
 
 [[package]]
 name = "sc2-replay-utils"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bitcode",
  "cargo_metadata",
