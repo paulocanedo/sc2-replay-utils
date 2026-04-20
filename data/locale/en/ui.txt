@@ -371,6 +371,21 @@ insight.inject_efficiency.efficiency = Efficiency
 insight.inject_efficiency.summary_line = {actual} injects across {bases} base(s) — ideal was ~{ideal}
 insight.inject_efficiency.none = No inject commands recorded.
 
+insight.economy_gap.title = Economy gap
+insight.economy_gap.help = Worker count compared to your opponent at the three early/mid-game checkpoints where the economic curve decides the rest of the match. Green means you were ahead; orange means behind. 1v1 only.
+insight.economy_gap.header = Workers you vs opponent
+insight.economy_gap.line = {minute} min: {pov} vs {opp}
+insight.economy_gap.beyond_end_line = {minute} min: — (game ended earlier)
+
+insight.turning_point.title = Turning point
+insight.turning_point.help = The loop where the opponent overtook your army value after you had been ahead — usually the fight where the match got away from you. The "Open in Timeline" button jumps the Timeline tab to that exact moment so you can review the engagement.
+insight.turning_point.insufficient_data = Not enough army data to compute a turning point.
+insight.turning_point.never_ahead = You were never ahead in army value — the game wasn't decided by a single turning point.
+insight.turning_point.held_advantage = Your army was never overtaken (peak lead: {peak}). The match may have been decided by something other than army value — harass, tech, base trade, etc.
+insight.turning_point.turned_at = Overtaken at
+insight.turning_point.context_line = Peak lead was {peak_diff} at {peak_mm}:{peak_ss}.
+insight.turning_point.open_in_timeline = Open in Timeline
+
 # Short month abbreviations for the compact date format in the top bar.
 month.01 = jan
 month.02 = feb
