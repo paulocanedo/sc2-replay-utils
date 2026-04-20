@@ -33,13 +33,13 @@ pub(super) const ARMY_SUPPLY_MAXED_THRESHOLD: i32 = 185;
 /// idle. Aproximação por constante única (sem discriminar por tipo
 /// de unidade) é deliberada — suficiente para o gráfico, refinação
 /// por unidade fica pendente.
-pub(super) const WARP_GATE_CYCLE_LOOPS: u32 = 560;
+pub(crate) const WARP_GATE_CYCLE_LOOPS: u32 = 560;
 
 /// Nome do upgrade que habilita o modo WarpGate. Após essa pesquisa
 /// completar, gateways morpham automaticamente para warpgates e as
 /// produções de unidades do roster abaixo passam a ser warp-ins em
 /// vez de trains convencionais.
-pub(super) const WARP_GATE_RESEARCH: &str = "WarpGateResearch";
+pub(crate) const WARP_GATE_RESEARCH: &str = "WarpGateResearch";
 
 /// Unidades que podem ser warpadas por uma WarpGate. Usado para
 /// identificar, dado um `ProductionStarted` posterior ao término de
@@ -54,7 +54,7 @@ const WARP_GATE_UNITS: &[&str] = &[
     "DarkTemplar",
 ];
 
-pub(super) fn is_warp_gate_unit(name: &str) -> bool {
+pub(crate) fn is_warp_gate_unit(name: &str) -> bool {
     WARP_GATE_UNITS.iter().any(|u| *u == name)
 }
 
