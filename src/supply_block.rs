@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::balance_data::supply_cost_x10;
+use crate::balance_data::{build_time_loops, supply_cost_x10};
 use crate::production_efficiency::WARP_GATE_RESEARCH;
 use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
 
@@ -133,18 +133,58 @@ pub fn extract_supply_blocks(
         ));
     }
 
+    // Pareia `ProductionStarted` com `ProductionFinished`/`ProductionCancelled`
+    // por tag. Quando a mesma tag recebe Started e Finished no mesmo loop
+    // (caso típico quando o tracker só vê a unidade pelo `UnitBorn` — sem
+    // `UnitInit` prévio), back-data o start pelo `build_time` da unidade.
+    //
+    // Por que back-data: sem ele, a produção apareceria como instantânea e
+    // o virtual-tracking de supply somaria o custo DEPOIS do snapshot que
+    // já contava essa unidade — drift que disparava supply blocks falsos
+    // (ex: Colossus no Tourmaline LE 21 em 11:29, construído há ~600 loops
+    // mas visto pelo tracker só em loop 15451). Com back-date, o Start
+    // acontece antes do snapshot, que resyncha o virtual no loop certo.
+    //
+    // Mesma lógica usada em `compute_series_army`.
+    let mut open_starts: HashMap<i64, (u32, String)> = HashMap::new();
+
     for e in &player.entity_events {
         let is_unit = matches!(e.category, EntityCategory::Unit | EntityCategory::Worker);
         let is_warpgate = matches!(e.category, EntityCategory::Structure) && e.entity_type == "WarpGate";
         match e.kind {
             EntityEventKind::ProductionStarted if is_unit => {
-                let cost = supply_cost_x10(&e.entity_type, base_build);
-                merged.push((e.game_loop, Event::ProductionStart { cost_x10: cost }));
+                open_starts
+                    .entry(e.tag)
+                    .or_insert_with(|| (e.game_loop, e.entity_type.clone()));
             }
             EntityEventKind::ProductionFinished if is_unit => {
                 let cost = supply_cost_x10(&e.entity_type, base_build);
+                if let Some((start_loop, entity_type)) = open_starts.remove(&e.tag) {
+                    let start_loop = if start_loop >= e.game_loop {
+                        let bt = build_time_loops(&entity_type, base_build);
+                        e.game_loop.saturating_sub(bt)
+                    } else {
+                        start_loop
+                    };
+                    merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
+                }
                 if cost > 0 {
                     merged.push((e.game_loop, Event::ProductionFinish { cost_x10: cost }));
+                }
+            }
+            EntityEventKind::ProductionCancelled if is_unit => {
+                let cost = supply_cost_x10(&e.entity_type, base_build);
+                if let Some((start_loop, entity_type)) = open_starts.remove(&e.tag) {
+                    let start_loop = if start_loop >= e.game_loop {
+                        let bt = build_time_loops(&entity_type, base_build);
+                        e.game_loop.saturating_sub(bt)
+                    } else {
+                        start_loop
+                    };
+                    merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
+                }
+                if cost > 0 {
+                    merged.push((e.game_loop, Event::ProductionCancel { cost_x10: cost }));
                 }
             }
             EntityEventKind::ProductionFinished if is_warpgate => {
@@ -165,14 +205,17 @@ pub fn extract_supply_blocks(
             EntityEventKind::Died if is_warpgate => {
                 merged.push((e.game_loop, Event::WarpGateDied { tag: e.tag }));
             }
-            EntityEventKind::ProductionCancelled if is_unit => {
-                let cost = supply_cost_x10(&e.entity_type, base_build);
-                if cost > 0 {
-                    merged.push((e.game_loop, Event::ProductionCancel { cost_x10: cost }));
-                }
-            }
             _ => {}
         }
+    }
+
+    // Órfãos (Started sem Finished/Cancelled até o fim): emite o Start
+    // no loop original. O virtual-tracking reserva o supply e permanece
+    // reservado até o game_end — coerente com a semântica de bloco aberto
+    // ao longo do resto da partida caso a produção nunca complete.
+    for (_tag, (start_loop, entity_type)) in open_starts {
+        let cost = supply_cost_x10(&entity_type, base_build);
+        merged.push((start_loop, Event::ProductionStart { cost_x10: cost }));
     }
 
     for cmd in &player.production_cmds {
@@ -240,6 +283,23 @@ pub fn extract_supply_blocks(
             } => {
                 last_supply_used = *supply_used;
                 last_supply_made = *supply_made;
+                // Safety net: virtual tracking pode ter drift acumulado
+                // (p.ex. se uma unidade morreu sem `Died` capturado e o
+                // bloco abriu por esse motivo). O snapshot é autoridade
+                // do tracker; se ele mostra supply livre, fechamos.
+                if in_block && supply_freed(
+                    last_supply_made,
+                    last_supply_used,
+                    completed_supply_used,
+                    total_supply_used,
+                ) {
+                    results.push(SupplyBlockEntry {
+                        start_loop: block_start_loop,
+                        end_loop: *loop_,
+                        supply: block_supply,
+                    });
+                    in_block = false;
+                }
             }
             Event::SupplyReady { amount } => {
                 last_supply_made = (last_supply_made + amount).min(200);
@@ -706,6 +766,54 @@ mod tests {
         assert_eq!(blocks[0].end_loop, 600);
     }
 
+    // (h) Back-date de same-loop Start+Finish: regressão do falso
+    // positivo de 22s no Tourmaline LE (21) em 11:29. Um Colossus
+    // com Started e Finished no mesmo loop (tracker só viu pelo
+    // UnitBorn — sem UnitInit anterior) não deve disparar bloco,
+    // porque o snapshot anterior já contabilizou seu supply. Sem
+    // back-date, o virtual tracking somaria 6 de supply "fantasma"
+    // e o gatilho warpgate-aware dispararia com drift.
+    #[test]
+    fn same_loop_start_finish_is_back_dated() {
+        let mut p = mk_player();
+        p.upgrades.push(upgrade(40, WARP_GATE_RESEARCH));
+        p.entity_events.push(entity_event(
+            50,
+            1,
+            "WarpGate",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Structure,
+        ));
+        // Snapshot em 1000: used=188, made=195 (avail=7 — fica de boa
+        // pra um Colossus custo 6). O snapshot já inclui o Colossus
+        // que está sendo construído há ~600 loops.
+        p.stats.push(snapshot(1000, 188, 195));
+        // Colossus com Started e Finished no MESMO loop (1100). Sem
+        // back-date, o virtual somaria +6 → 194, avail=1<2 → bloco
+        // falso positivo warpgate-aware.
+        p.entity_events.push(entity_event(
+            1100,
+            999,
+            "Colossus",
+            EntityEventKind::ProductionStarted,
+            EntityCategory::Unit,
+        ));
+        p.entity_events.push(entity_event(
+            1100,
+            999,
+            "Colossus",
+            EntityEventKind::ProductionFinished,
+            EntityCategory::Unit,
+        ));
+        p.stats.push(snapshot(1500, 190, 195));
+        let blocks = extract_supply_blocks(&p, 10_000, 80000);
+        assert!(
+            blocks.is_empty(),
+            "same-loop Start+Finish deve ser back-dated e não disparar bloco; blocos={:?}",
+            blocks.iter().map(|b| (b.start_loop, b.end_loop)).collect::<Vec<_>>()
+        );
+    }
+
     // Diagnóstico do replay Tourmaline LE (21) — dump da janela 5:10-5:16.
     // Rodar com: cargo test --release -- dump_tourmaline_supply_block --ignored --nocapture
     #[test]
@@ -721,8 +829,18 @@ mod tests {
 
         let lps = tl.loops_per_second;
         let loop_of = |s: f64| (s * lps).round() as u32;
-        let win_start = loop_of(305.0); // 5:05 (margem)
-        let win_end = loop_of(320.0); // 5:20 (margem)
+        // Janela padrão: 5:05-5:20 (cenário original). Pode ser
+        // sobrescrita via env `WIN="<start_s>,<end_s>"` — útil pra
+        // investigar outros blocos (p.ex. WIN="680,720" olha 11:20-12:00).
+        let (win_start, win_end) = std::env::var("WIN")
+            .ok()
+            .and_then(|v| {
+                let mut parts = v.split(',');
+                let s = parts.next()?.parse::<f64>().ok()?;
+                let e = parts.next()?.parse::<f64>().ok()?;
+                Some((loop_of(s), loop_of(e)))
+            })
+            .unwrap_or_else(|| (loop_of(305.0), loop_of(320.0)));
 
         eprintln!("== Replay: {} (loops/s = {}) ==", replay, lps);
         eprintln!("  game_loops={}, base_build={}", tl.game_loops, tl.base_build);
@@ -754,25 +872,25 @@ mod tests {
                 }
             }
 
-            eprintln!("  Entity events na janela (WarpGate/warpaveis):");
+            eprintln!("  Entity events na janela (Unit/Worker + Pylon/WarpGate):");
             for e in &p.entity_events {
                 if e.game_loop < win_start || e.game_loop > win_end {
                     continue;
                 }
-                let relevant = e.entity_type == "WarpGate"
-                    || e.entity_type == "Gateway"
-                    || e.entity_type == "Pylon"
-                    || is_warp_gate_unit(&e.entity_type);
+                let is_unit = matches!(e.category, EntityCategory::Unit | EntityCategory::Worker);
+                let relevant = is_unit || e.entity_type == "WarpGate" || e.entity_type == "Pylon";
                 if !relevant {
                     continue;
                 }
+                let cost = crate::balance_data::supply_cost_x10(&e.entity_type, tl.base_build);
                 eprintln!(
-                    "    loop={:>5} ({:>5.1}s) {:?} {} tag={}",
+                    "    loop={:>5} ({:>5.1}s) {:?} {} tag={} cost_x10={}",
                     e.game_loop,
                     e.game_loop as f64 / lps,
                     e.kind,
                     e.entity_type,
-                    e.tag
+                    e.tag,
+                    cost
                 );
             }
 
