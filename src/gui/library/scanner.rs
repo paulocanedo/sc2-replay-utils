@@ -36,6 +36,8 @@ use crate::build_order::{classify_opening, extract_build_order};
 use crate::config::AppConfig;
 use crate::replay::parse_replay;
 
+use super::date::today_str;
+use super::filter::{LibraryFilter, StatsFilterKey, matches_filter};
 use super::stats::{LibraryStats, compute_library_stats};
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
@@ -147,6 +149,10 @@ pub struct ReplayLibrary {
     cached_stats: Option<LibraryStats>,
     stats_dirty: bool,
     cached_nicknames: Vec<String>,
+    /// Snapshot of the filter used to compute `cached_stats`. Invalidates
+    /// the cache when the user toggles a filter in the sidebar so the
+    /// hero KPIs stay in sync with the visible list.
+    cached_filter_key: Option<StatsFilterKey>,
 }
 
 impl ReplayLibrary {
@@ -213,6 +219,7 @@ impl ReplayLibrary {
             cached_stats: None,
             stats_dirty: true,
             cached_nicknames: Vec::new(),
+            cached_filter_key: None,
         }
     }
 
@@ -615,17 +622,29 @@ impl ReplayLibrary {
     }
 
     /// Recomputes the derived stats cache if `entries` has mutated since
-    /// last call, or if the user's nickname list has changed. Cheap to
-    /// call on every frame: the fast path is a dirty-flag check and a
-    /// slice comparison of nicknames (typically ≤3 strings).
-    pub fn ensure_stats(&mut self, config: &AppConfig) {
+    /// last call, or if the user's nickname list / active library filter
+    /// has changed. Cheap to call on every frame: the fast path is a few
+    /// equality checks (dirty flag, nickname slice, filter key).
+    pub fn ensure_stats(&mut self, config: &AppConfig, filter: &LibraryFilter) {
+        let key = StatsFilterKey::from(filter);
         let nicknames_changed = self.cached_nicknames != config.user_nicknames;
-        if self.stats_dirty || self.cached_stats.is_none() || nicknames_changed {
-            self.cached_stats = Some(compute_library_stats(&self.entries, config));
+        let filter_changed = self.cached_filter_key.as_ref() != Some(&key);
+        if self.stats_dirty
+            || self.cached_stats.is_none()
+            || nicknames_changed
+            || filter_changed
+        {
+            let today = today_str();
+            let filtered = self
+                .entries
+                .iter()
+                .filter(|e| matches_filter(e, filter, config, &today));
+            self.cached_stats = Some(compute_library_stats(filtered, config));
             self.stats_dirty = false;
             if nicknames_changed {
                 self.cached_nicknames = config.user_nicknames.clone();
             }
+            self.cached_filter_key = Some(key);
         }
     }
 
