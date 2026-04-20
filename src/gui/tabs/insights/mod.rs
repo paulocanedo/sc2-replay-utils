@@ -13,7 +13,6 @@ pub mod chrono_distribution;
 pub mod economy_gap;
 pub mod grid;
 pub mod inject_efficiency;
-pub mod key_losses;
 pub mod production_idle;
 pub mod resources_unspent;
 pub mod supply_block;

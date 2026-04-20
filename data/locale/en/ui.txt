@@ -260,17 +260,6 @@ charts.tooltip.army_anon = Time: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTime: {mm}:{ss}\nCount: {value}
 charts.tooltip.count_anon = Time: {mm}:{ss}\nCount: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
-charts.efficiency.title = Production Efficiency
-charts.efficiency.no_data = Efficiency data unavailable.
-charts.axis.efficiency = efficiency (%)
-charts.tooltip.efficiency_named = {name}\nTime: {mm}:{ss}\nEfficiency: {pct}%
-charts.tooltip.efficiency_anon = Time: {mm}:{ss}\nEfficiency: {pct}%
-charts.card.supply_blocks = Supply Blocks
-charts.card.production_efficiency = Production Efficiency
-charts.card.efficiency.workers = Workers
-charts.card.efficiency.army = Army
-charts.card.empty = —
-charts.supply_block.summary = {count} ({secs}s)
 
 # ── Timeline tab ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
@@ -355,12 +344,6 @@ insight.army_prod_by_battle.help = Percentage of time your army-producing struct
 insight.army_prod_by_battle.header = Between-fight production windows
 insight.army_prod_by_battle.segment_line = Window {index} ({start_mm}:{start_ss} → {end_mm}:{end_ss}):
 insight.army_prod_by_battle.no_battles = Not enough data — no major fights or no army producers yet.
-
-insight.key_losses.title = Key losses
-insight.key_losses.help = The most expensive individual units and structures you lost during the match. Surfaces the one-off disasters — a Battlecruiser picked off, a Nexus sniped — that a trade summary tends to hide. Losses below 100 resources are filtered as noise.
-insight.key_losses.header = Most expensive losses
-insight.key_losses.line = {unit} — {minerals}m/{vespene}g at {mm}:{ss}
-insight.key_losses.no_losses = No significant losses — you held on to your army.
 
 insight.chrono_distribution.title = Chrono Boost distribution
 insight.chrono_distribution.help = Where your Chrono Boosts went during the match — split between economy (workers), army (units from production buildings) and tech (upgrades, research). Protoss-only. There's no universally correct split; the card surfaces the balance so you can check whether it matches your game plan.

@@ -257,17 +257,6 @@ charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
-charts.efficiency.title = Eficiência de Produção
-charts.efficiency.no_data = Dados de eficiência indisponíveis.
-charts.axis.efficiency = eficiência (%)
-charts.tooltip.efficiency_named = {name}\nTempo: {mm}:{ss}\nEficiência: {pct}%
-charts.tooltip.efficiency_anon = Tempo: {mm}:{ss}\nEficiência: {pct}%
-charts.card.supply_blocks = Supply Blocks
-charts.card.production_efficiency = Eficiência Produção
-charts.card.efficiency.workers = Workers
-charts.card.efficiency.army = Army
-charts.card.empty = —
-charts.supply_block.summary = {count} ({secs}s)
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
@@ -352,12 +341,6 @@ insight.army_prod_by_battle.help = Percentual de tempo em que seus prédios de p
 insight.army_prod_by_battle.header = Janelas de produção entre lutas
 insight.army_prod_by_battle.segment_line = Janela {index} ({start_mm}:{start_ss} → {end_mm}:{end_ss}):
 insight.army_prod_by_battle.no_battles = Sem dados suficientes — nenhuma grande luta ou producer de army ainda.
-
-insight.key_losses.title = Perdas principais
-insight.key_losses.help = As unidades e estruturas individuais mais caras que você perdeu na partida. Expõe os desastres pontuais — um Battlecruiser picado, um Nexus sniped — que um resumo de trade tende a esconder. Perdas abaixo de 100 recursos são filtradas como ruído.
-insight.key_losses.header = Perdas mais caras
-insight.key_losses.line = {unit} — {minerals}m/{vespene}g aos {mm}:{ss}
-insight.key_losses.no_losses = Nenhuma perda relevante — você segurou sua army.
 
 insight.chrono_distribution.title = Distribuição de Chrono Boost
 insight.chrono_distribution.help = Pra onde seus Chrono Boosts foram na partida — dividido entre economia (workers), army (unidades de produção) e tech (upgrades, research). Só Protoss. Não existe divisão universalmente correta; o card expõe o balanço pra você verificar se bate com seu game plan.
