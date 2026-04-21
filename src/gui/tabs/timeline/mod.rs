@@ -134,14 +134,24 @@ pub fn show(
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            side_panel::player_side_panel(ui, loaded, 0, game_loop, config);
+            egui::ScrollArea::vertical()
+                .id_salt("timeline_p1_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    side_panel::player_side_panel(ui, loaded, 0, game_loop, config);
+                });
         });
 
     egui::Panel::right("timeline_p2")
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            side_panel::player_side_panel(ui, loaded, 1, game_loop, config);
+            egui::ScrollArea::vertical()
+                .id_salt("timeline_p2_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    side_panel::player_side_panel(ui, loaded, 1, game_loop, config);
+                });
         });
 
     egui::CentralPanel::default().show_inside(ui, |ui| {
