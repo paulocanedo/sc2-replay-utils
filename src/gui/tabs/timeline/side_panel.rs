@@ -286,7 +286,9 @@ fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) 
         .alive_count
         .iter()
         .filter_map(|(ty, _)| {
-            if is_structure_name(ty) {
+            // `Beacon*` são pings de minimapa (attack/defend/rally/custom),
+            // não unidades controláveis — filtramos como ruído.
+            if is_structure_name(ty) || ty.starts_with("Beacon") {
                 return None;
             }
             let count = p.alive_count_at(ty, game_loop);
