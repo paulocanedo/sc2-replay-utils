@@ -8,13 +8,17 @@
 
 use egui::{Color32, RichText, Sense, Stroke, StrokeKind, Ui};
 
-use crate::colors::{ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM, LABEL_DIMMER, LABEL_SOFT, LABEL_STRONG};
+use crate::colors::{
+    ACCENT_DANGER, ACCENT_SUCCESS, ACCENT_WARNING, FOCUS_RING, LABEL_DIM, LABEL_DIMMER, LABEL_SOFT,
+    LABEL_STRONG, race_color,
+};
 use crate::config::AppConfig;
-use crate::locale::t;
+use crate::locale::{t, tf};
 use crate::tokens::{CARD_INNER_MY, RADIUS_CARD, SPACE_M, size_caption, size_title};
 use crate::widgets::card;
 
-use super::stats::LibraryStats;
+use super::filter::DateRange;
+use super::stats::{LibraryStats, MMR_TREND_WINDOW};
 
 pub enum HeroAction {
     ClearFilters,
@@ -23,7 +27,12 @@ pub enum HeroAction {
     SetSearch(String),
 }
 
-pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<HeroAction> {
+pub fn show(
+    ui: &mut Ui,
+    stats: &LibraryStats,
+    config: &AppConfig,
+    date_range: DateRange,
+) -> Option<HeroAction> {
     let lang = config.language;
     let has_nicknames = !config.user_nicknames.is_empty();
     let mut action: Option<HeroAction> = None;
@@ -47,6 +56,11 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
         let avail = ui.available_width();
         let width = ((avail - gap * (n_cards as f32 - 1.0)) / n_cards as f32).max(120.0);
 
+        // TOTAL's subtitle mirrors the active date-range filter. Without
+        // it the card has no third line and sits shorter than the others
+        // (WINRATE/MMR/…), breaking the strip's vertical rhythm. Reusing
+        // the existing sidebar date labels keeps terminology consistent.
+        let total_sub = date_range_label(date_range, lang).to_lowercase();
         if kpi_card(
             ui,
             width,
@@ -54,8 +68,11 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
             content_h,
             t("library.hero.total", lang),
             &stats.total_parsed.to_string(),
+            Some(&total_sub),
             None,
             None,
+            None,
+            Some(FOCUS_RING),
             config,
         ) {
             action = Some(HeroAction::ClearFilters);
@@ -73,6 +90,7 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
                 stats.losses,
                 t("library.hero.losses_suffix", lang),
             );
+            let wr_accent = winrate_color(stats.winrate_global);
             if kpi_card(
                 ui,
                 width,
@@ -81,7 +99,10 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
                 t("library.hero.winrate", lang),
                 &wr_label,
                 Some(&wr_sub),
-                winrate_color(stats.winrate_global),
+                wr_accent,
+                None,
+                None,
+                wr_accent,
                 config,
             ) {
                 action = Some(HeroAction::FilterWins);
@@ -93,12 +114,44 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
             };
             // Use ASCII-safe prefixes — unicode arrows (↑ ↓ →) are missing
             // from egui's default fallback font on Windows and render as □.
-            let trend_text: Option<String> = match stats.mmr_trend_delta {
-                Some(d) if d > 0 => Some(format!("+{d}")),
-                Some(d) if d < 0 => Some(d.to_string()),
-                Some(_) => Some("0".into()),
-                None => None,
-            };
+            //
+            // The raw delta ("+74") is hard to read without its window.
+            // Compose a self-explanatory subtitle like "+74 · last 7 games"
+            // and tint it green/red so the direction reads at a glance.
+            let window_s = MMR_TREND_WINDOW.to_string();
+            let (trend_text, trend_color): (Option<String>, Option<Color32>) =
+                match stats.mmr_trend_delta {
+                    Some(d) if d > 0 => (
+                        Some(tf(
+                            "library.hero.mmr_trend_up",
+                            lang,
+                            &[("delta", &d.to_string()), ("window", &window_s)],
+                        )),
+                        Some(ACCENT_SUCCESS),
+                    ),
+                    Some(d) if d < 0 => (
+                        Some(tf(
+                            "library.hero.mmr_trend_down",
+                            lang,
+                            &[("delta", &d.to_string()), ("window", &window_s)],
+                        )),
+                        Some(ACCENT_DANGER),
+                    ),
+                    Some(_) => (
+                        Some(tf(
+                            "library.hero.mmr_trend_flat",
+                            lang,
+                            &[("window", &window_s)],
+                        )),
+                        None,
+                    ),
+                    None => (None, None),
+                };
+            let trend_tooltip = tf(
+                "library.hero.mmr_trend_tooltip",
+                lang,
+                &[("window", &window_s)],
+            );
             if kpi_card(
                 ui,
                 width,
@@ -108,6 +161,9 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
                 &mmr_label,
                 trend_text.as_deref(),
                 None,
+                trend_color,
+                Some(&trend_tooltip),
+                trend_color,
                 config,
             ) {
                 action = Some(HeroAction::SortByDateDesc);
@@ -121,6 +177,14 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
                     .find(|m| &m.code == code)
                     .map(|m| format!("{:.0}% · {} g", m.winrate() * 100.0, m.n))
             });
+            // Accent stripe = opponent race colour. `best_matchup` is
+            // "XvY" where X is the user's race and Y is the opponent —
+            // tint by the one that defines the matchup's identity.
+            let bm_accent = stats
+                .best_matchup
+                .as_ref()
+                .and_then(|c| c.chars().last())
+                .map(|c| race_color(&c.to_string()));
             if kpi_card(
                 ui,
                 width,
@@ -130,6 +194,9 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
                 &bm_code,
                 bm_sub.as_deref(),
                 None,
+                None,
+                None,
+                bm_accent,
                 config,
             ) && let Some(code) = stats.best_matchup.clone()
             {
@@ -150,6 +217,9 @@ pub fn show(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) -> Option<Her
             &top_map_label,
             top_map_sub.as_deref(),
             None,
+            None,
+            None,
+            Some(ACCENT_WARNING),
             config,
         ) && let Some((m, _)) = stats.top_maps.first()
         {
@@ -170,6 +240,9 @@ fn kpi_card(
     value: &str,
     subtitle: Option<&str>,
     value_color: Option<Color32>,
+    subtitle_color: Option<Color32>,
+    tooltip: Option<&str>,
+    accent: Option<Color32>,
     config: &AppConfig,
 ) -> bool {
     let resp = ui
@@ -177,29 +250,43 @@ fn kpi_card(
             egui::vec2(width, card_h),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                card(ui, None, |ui| {
+                card(ui, accent, |ui| {
                     // Lock the vertical flow to `content_h` so a card with
                     // no subtitle (TOTAL) doesn't shrink relative to a
                     // card with one (WINRATE/MMR/…). Keeps the strip on
                     // a single visual baseline.
+                    //
+                    // Labels use `.truncate()` so long values (e.g. the
+                    // map name "10000 Feet LE" in a narrow card) don't
+                    // wrap to a second line and make that one card taller
+                    // than the others.
                     ui.set_min_height(content_h);
-                    ui.label(
-                        RichText::new(title)
-                            .size(size_caption(config))
-                            .color(LABEL_DIMMER)
-                            .strong(),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(title)
+                                .size(size_caption(config))
+                                .color(LABEL_DIMMER)
+                                .strong(),
+                        )
+                        .truncate(),
                     );
-                    ui.label(
-                        RichText::new(value)
-                            .size(size_title(config))
-                            .color(value_color.unwrap_or(LABEL_STRONG))
-                            .strong(),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(value)
+                                .size(size_title(config))
+                                .color(value_color.unwrap_or(LABEL_STRONG))
+                                .strong(),
+                        )
+                        .truncate(),
                     );
                     if let Some(sub) = subtitle {
-                        ui.label(
-                            RichText::new(sub)
-                                .size(size_caption(config))
-                                .color(LABEL_DIM),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(sub)
+                                    .size(size_caption(config))
+                                    .color(subtitle_color.unwrap_or(LABEL_DIM)),
+                            )
+                            .truncate(),
                         );
                     }
                 })
@@ -218,6 +305,11 @@ fn kpi_card(
         );
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+    let resp = if let Some(tip) = tooltip {
+        resp.on_hover_text(tip)
+    } else {
+        resp
+    };
     resp.clicked()
 }
 
@@ -231,4 +323,13 @@ fn winrate_color(winrate: Option<f32>) -> Option<Color32> {
             ACCENT_DANGER
         }
     })
+}
+
+fn date_range_label(range: DateRange, lang: crate::locale::Language) -> &'static str {
+    match range {
+        DateRange::All => t("library.date.always_full", lang),
+        DateRange::Today => t("library.date.today_full", lang),
+        DateRange::ThisWeek => t("library.date.this_week", lang),
+        DateRange::ThisMonth => t("library.date.this_month", lang),
+    }
 }
