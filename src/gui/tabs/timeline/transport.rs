@@ -1,77 +1,170 @@
-//! Transport bar — slider de scrubbing em estilo "transport bar" de
-//! player de vídeo. O rail ocupa quase toda a largura disponível do
-//! bottom panel para permitir arrasto granular. Botões de step permitem
-//! avançar/retroceder 1 game loop (◂/▸) ou 1 segundo (|◂/▸|), com
-//! hold-to-repeat.
+//! Transport bar — controles de reprodução da timeline em estilo
+//! "transport bar" de player de vídeo. Contém, em ordem:
+//!   - Play/Pause (toggle; rewind ao clicar no fim do replay)
+//!   - Speed switch (gira em 1× → 2× → 4× → 8× → 1×)
+//!   - Slider de scrubbing ocupando o restante da largura
+//!
+//! Playback: quando `playing` é `true`, o wrapper da aba chama
+//! [`advance_playback`] antes do render, que avança `current_loop`
+//! proporcionalmente a `speed × loops_per_second × dt`, acumulando
+//! resíduo fracionário entre frames (senão a 60fps/1× `round` trunca
+//! para 0 e o tempo nunca andaria). Pausa automaticamente ao atingir
+//! o final do replay.
 
-use egui::{Slider, Ui};
+use egui::{Button, Color32, Id, Response, RichText, Slider, Ui};
 
+use crate::colors::FOCUS_RING;
 use crate::replay::ReplayTimeline;
+use crate::tokens::{RADIUS_BUTTON, SPACE_S};
 
-/// Delay antes de iniciar o repeat ao manter um botão pressionado.
-const HOLD_INITIAL_DELAY: f32 = 0.30;
-/// Intervalo entre steps durante hold-to-repeat (~15 steps/s).
-const HOLD_REPEAT_INTERVAL: f32 = 0.066;
+/// Velocidades suportadas pelo botão de speed. Ciclamos nessa ordem ao
+/// clicar; também é o conjunto de valores válidos de
+/// `AppState.timeline_playback_speed`.
+const SPEEDS: [u8; 4] = [1, 2, 4, 8];
+
+/// Largura fixa para o botão de play/pause e de velocidade, de modo que
+/// o layout não "pule" quando o rótulo muda (▶ ↔ ⏸ / "1×" ↔ "8×").
+const CTRL_BUTTON_WIDTH: f32 = 36.0;
+
+/// Chave do acumulador fracionário de playback no `egui::Memory`. Como
+/// existe apenas uma timeline ativa por vez, um ID global basta — o
+/// valor é zerado ao pausar ou pelo `reset_playback_accumulator`.
+const PLAYBACK_ACCUM_ID: &str = "timeline_playback_accum";
 
 pub(super) fn transport_slider(
     ui: &mut Ui,
-    tl: &ReplayTimeline,
+    _tl: &ReplayTimeline,
     current_loop: &mut u32,
     max_loop: u32,
+    playing: &mut bool,
+    speed: &mut u8,
 ) {
-    let one_second = tl.loops_per_second.round() as i64;
-
     ui.horizontal(|ui| {
-        step_button(ui, "|◂", current_loop, -one_second, max_loop);
-        step_button(ui, "◂", current_loop, -1, max_loop);
-        step_button(ui, "▸", current_loop, 1, max_loop);
-        step_button(ui, "▸|", current_loop, one_second, max_loop);
-        ui.add_space(4.0);
+        play_pause_button(ui, playing, current_loop, max_loop);
+        speed_button(ui, speed, *playing);
+        ui.add_space(SPACE_S);
         let slider_w = (ui.available_width() - 12.0).max(160.0);
         ui.spacing_mut().slider_width = slider_w;
-        ui.add(
+        let slider_resp = ui.add(
             Slider::new(current_loop, 0..=max_loop)
                 .integer()
                 .show_value(false),
         );
+        // Scrubbing manual descarta o resíduo fracionário do playback
+        // para não "saltar" um frame extra quando o usuário solta o
+        // mouse.
+        if slider_resp.dragged() {
+            reset_playback_accumulator(ui.ctx());
+        }
     });
 }
 
-/// Botão de step com hold-to-repeat. Um clique aplica `delta` uma vez;
-/// manter pressionado repete após um delay inicial.
-fn step_button(ui: &mut Ui, label: &str, current_loop: &mut u32, delta: i64, max_loop: u32) {
-    let btn = ui.button(label);
-    if btn.clicked() {
-        apply_delta(current_loop, delta, max_loop);
+/// Avança `current_loop` com base no tempo decorrido (`dt`), respeitando
+/// `speed`. Pausa ao atingir `max_loop`.
+///
+/// Usa um acumulador fracionário em `egui::Memory`: a 60fps com
+/// `loops_per_second ≈ 22.4` e speed=1, o avanço por frame é ~0.37 — se
+/// convertêssemos direto para `u32`, o tempo nunca andaria. Acumulamos
+/// a parte fracionária entre frames e avançamos o loop só quando passa
+/// de 1.
+pub(super) fn advance_playback(
+    tl: &ReplayTimeline,
+    current_loop: &mut u32,
+    max_loop: u32,
+    playing: &mut bool,
+    speed: u8,
+    dt: f32,
+    ctx: &egui::Context,
+) {
+    if !*playing {
+        reset_playback_accumulator(ctx);
+        return;
     }
-    if btn.is_pointer_button_down_on() {
-        ui.ctx().request_repaint();
-        let held = btn.interact_pointer_pos().map_or(0.0, |_| {
-            ui.input(|i| i.pointer.press_start_time().map_or(0.0, |t| i.time - t))
-        });
-        if held > HOLD_INITIAL_DELAY as f64 {
-            let dt = ui.input(|i| i.unstable_dt);
-            // Accumulate fractional steps via the response's ID-based memory.
-            let accum = ui.memory_mut(|mem| {
-                let a = mem.data.get_temp_mut_or_default::<f32>(btn.id);
-                *a += dt;
-                *a
-            });
-            if accum >= HOLD_REPEAT_INTERVAL {
-                let steps = (accum / HOLD_REPEAT_INTERVAL) as i64;
-                apply_delta(current_loop, delta * steps, max_loop);
-                ui.memory_mut(|mem| {
-                    let a = mem.data.get_temp_mut_or_default::<f32>(btn.id);
-                    *a -= steps as f32 * HOLD_REPEAT_INTERVAL;
-                });
-            }
-        }
+    if *current_loop >= max_loop {
+        *playing = false;
+        *current_loop = max_loop;
+        reset_playback_accumulator(ctx);
+        return;
+    }
+
+    let advance = tl.loops_per_second as f32 * speed as f32 * dt;
+    let id = Id::new(PLAYBACK_ACCUM_ID);
+    let accum: f32 = ctx.memory(|m| m.data.get_temp(id).unwrap_or(0.0));
+    let total = accum + advance;
+    let whole = total.floor();
+    let remainder = total - whole;
+    ctx.memory_mut(|m| m.data.insert_temp(id, remainder));
+
+    let whole = whole as i64;
+    if whole <= 0 {
+        return;
+    }
+    let next = *current_loop as i64 + whole;
+    if next >= max_loop as i64 {
+        *current_loop = max_loop;
+        *playing = false;
+        reset_playback_accumulator(ctx);
     } else {
-        // Reset accumulator when button is released.
-        ui.memory_mut(|mem| mem.data.remove::<f32>(btn.id));
+        *current_loop = next as u32;
     }
 }
 
-fn apply_delta(current_loop: &mut u32, delta: i64, max_loop: u32) {
-    *current_loop = (*current_loop as i64 + delta).clamp(0, max_loop as i64) as u32;
+fn reset_playback_accumulator(ctx: &egui::Context) {
+    let id = Id::new(PLAYBACK_ACCUM_ID);
+    ctx.memory_mut(|m| m.data.insert_temp(id, 0.0_f32));
+}
+
+fn play_pause_button(ui: &mut Ui, playing: &mut bool, current_loop: &mut u32, max_loop: u32) {
+    let (glyph, hover) = if *playing {
+        ("⏸", "Pause")
+    } else {
+        ("▶", "Play")
+    };
+    let resp = ctrl_button(ui, glyph, *playing);
+    if resp.on_hover_text(hover).clicked() {
+        // Clicar em Play no fim do replay reinicia do zero (comportamento
+        // de replay de video player). Caso contrário, apenas alterna.
+        if !*playing && *current_loop >= max_loop {
+            *current_loop = 0;
+        }
+        *playing = !*playing;
+    }
+}
+
+fn speed_button(ui: &mut Ui, speed: &mut u8, playing: bool) {
+    // Quando playing=false, o botão fica "atenuado" visualmente para
+    // reforçar que a velocidade só tem efeito durante reprodução.
+    let resp = ctrl_button(ui, &format!("{}×", speed), playing);
+    if resp.on_hover_text("Playback speed").clicked() {
+        *speed = next_speed(*speed);
+    }
+}
+
+fn next_speed(current: u8) -> u8 {
+    let idx = SPEEDS.iter().position(|&s| s == current).unwrap_or(0);
+    SPEEDS[(idx + 1) % SPEEDS.len()]
+}
+
+/// Botão pill com aparência consistente para os controles de transport
+/// (play/pause e velocidade). `highlighted` pinta o fundo com o accent
+/// para indicar estado ativo (reproduzindo).
+fn ctrl_button(ui: &mut Ui, label: &str, highlighted: bool) -> Response {
+    let (fill, text) = if highlighted {
+        (
+            Color32::from_rgb(
+                FOCUS_RING.r() / 2 + 20,
+                FOCUS_RING.g() / 2 + 20,
+                FOCUS_RING.b() / 2 + 20,
+            ),
+            Color32::WHITE,
+        )
+    } else {
+        (Color32::from_gray(40), Color32::from_gray(210))
+    };
+    ui.add(
+        Button::new(RichText::new(label).color(text).monospace())
+            .fill(fill)
+            .corner_radius(RADIUS_BUTTON)
+            .min_size(egui::vec2(CTRL_BUTTON_WIDTH, 0.0)),
+    )
 }

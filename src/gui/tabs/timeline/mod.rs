@@ -73,6 +73,8 @@ pub fn show(
     loaded: &LoadedReplay,
     config: &AppConfig,
     current_loop: &mut u32,
+    playing: &mut bool,
+    playback_speed: &mut u8,
     show_heatmap: &mut bool,
     show_creep: &mut bool,
     show_map: &mut bool,
@@ -82,6 +84,16 @@ pub fn show(
     let max_loop = tl.game_loops.max(1);
     if *current_loop > max_loop {
         *current_loop = max_loop;
+    }
+    // Avança o tempo antes de renderizar o frame; também pausa
+    // automaticamente ao atingir o fim. Quando `*playing` é false,
+    // `advance_playback` é no-op (exceto por resetar o acumulador
+    // fracionário).
+    let dt = ui.input(|i| i.unstable_dt);
+    let ctx = ui.ctx().clone();
+    transport::advance_playback(tl, current_loop, max_loop, playing, *playback_speed, dt, &ctx);
+    if *playing {
+        ctx.request_repaint();
     }
     let game_loop = *current_loop;
     let side_w = side_panel_width(ui);
@@ -114,7 +126,7 @@ pub fn show(
         .resizable(false)
         .show_inside(ui, |ui| {
             ui.add_space(2.0);
-            transport::transport_slider(ui, tl, current_loop, max_loop);
+            transport::transport_slider(ui, tl, current_loop, max_loop, playing, playback_speed);
             ui.add_space(2.0);
         });
 

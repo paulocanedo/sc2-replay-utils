@@ -59,6 +59,14 @@ pub struct AppState {
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
     pub timeline_tab_loop: u32,
+    /// Playback state da aba Timeline. `true` = auto-advance do
+    /// `timeline_tab_loop` em tempo real, multiplicado por
+    /// `timeline_playback_speed`. Clicar no slider não pausa — o usuário
+    /// pode scrubar com playback ativo.
+    pub timeline_playing: bool,
+    /// Multiplicador de velocidade do playback. Gira entre 1× → 2× → 4× →
+    /// 8× → 1× ao clicar no botão de velocidade.
+    pub timeline_playback_speed: u8,
     /// Opções do plot principal de army (métrica, grouping, checkboxes).
     pub charts_army_opts: tabs::charts::ArmyChartOptions,
     pub show_about: bool,
@@ -105,6 +113,8 @@ impl AppState {
             library_filter,
             library_sidebar_open: true,
             timeline_tab_loop: 0,
+            timeline_playing: false,
+            timeline_playback_speed: 1,
             charts_army_opts: tabs::charts::ArmyChartOptions::default(),
             show_about: false,
             timeline_show_heatmap: false,
@@ -164,6 +174,10 @@ impl AppState {
                 // Reset do scrubbing da aba Timeline: replay novo
                 // sempre começa em t=0.
                 self.timeline_tab_loop = 0;
+                // Pausa ao trocar de replay — evita "perseguir" a
+                // transição com playback ligado do replay anterior.
+                self.timeline_playing = false;
+                self.timeline_playback_speed = 1;
                 // Reset do POV da aba Insights: novo replay
                 // re-resolve o default via user_nicknames.
                 self.insights_pov = None;
