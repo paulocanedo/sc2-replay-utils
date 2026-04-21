@@ -34,8 +34,8 @@ use egui::{Color32, TextStyle, Ui};
 
 use crate::config::AppConfig;
 use crate::locale::t;
-use crate::replay_state::{fmt_time, LoadedReplay};
-use crate::tokens::{SPACE_L, SPACE_XS};
+use crate::replay_state::LoadedReplay;
+use crate::tokens::SPACE_XS;
 use crate::widgets::toggle_chip_bool;
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
@@ -99,8 +99,8 @@ pub fn show(
     let side_w = side_panel_width(ui);
 
     // Layout em painéis (estilo egui_demo `panels.rs`):
-    // - Top: indicador de tempo + toggle de heatmap
-    // - Bottom: botões de step + slider de scrubbing
+    // - Top: toggles de overlays (heatmap/creep/map)
+    // - Bottom: indicador de tempo + botões de step + slider de scrubbing
     // - Left: stats do P1
     // - Right: stats do P2
     // - Central: minimapa
@@ -109,12 +109,6 @@ pub fn show(
         .show_inside(ui, |ui| {
             ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
-                ui.monospace(format!(
-                    "{} / {}",
-                    fmt_time(*current_loop, tl.loops_per_second),
-                    fmt_time(tl.game_loops, tl.loops_per_second),
-                ));
-                ui.add_space(SPACE_L);
                 toggle_chip_bool(ui, t("timeline.toggle.heatmap", lang), show_heatmap, None);
                 toggle_chip_bool(ui, t("timeline.toggle.creep", lang), show_creep, None);
                 toggle_chip_bool(ui, t("timeline.toggle.map", lang), show_map, None);
