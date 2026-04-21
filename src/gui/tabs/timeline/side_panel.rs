@@ -618,7 +618,13 @@ fn researches_block(
             // `Reward*` são achievements cosméticos (portrait, spray, voice
             // set) que entram na stream de upgrades mas não têm efeito de
             // jogo — poluiriam a lista sem valor tático.
-            u.game_loop <= game_loop
+            //
+            // `game_loop == 0` pega upgrades "de bootstrap": buffs de raça
+            // aplicados antes do jogo começar (spray pack, variações de
+            // mapa, flags internas). Não representam decisões de tech, só
+            // ruído no painel.
+            u.game_loop > 0
+                && u.game_loop <= game_loop
                 && !is_level_upgrade_name(&u.name)
                 && !u.name.starts_with("Reward")
         })
