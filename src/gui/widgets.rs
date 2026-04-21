@@ -8,10 +8,13 @@
 // beyond the string the caller already owns (egui's `RichText` takes
 // `impl Into<WidgetText>` so stringy callers don't pay double).
 
-use egui::{Align, Color32, InnerResponse, Layout, Margin, Response, RichText, Stroke, Ui};
+use egui::{
+    Align, Color32, FontId, InnerResponse, Layout, Margin, Response, RichText, Sense, Stroke, Ui,
+};
 
 use crate::colors::{
-    player_slot_color, BORDER, CARD_FILL, LABEL_DIM, LABEL_STRONG, USER_CHIP_BG, USER_CHIP_FG,
+    player_slot_color, ACCENT_DANGER, BORDER, CARD_FILL, LABEL_DIM, LABEL_STRONG, USER_CHIP_BG,
+    USER_CHIP_FG,
 };
 use crate::config::AppConfig;
 use crate::locale::{t, Language};
@@ -71,6 +74,82 @@ fn chip_fill(selected: bool, accent: Option<Color32>) -> Color32 {
             (c.b() as u16 / 3) as u8 + 20,
         ),
     }
+}
+
+// ── Removable chip ───────────────────────────────────────────────────
+//
+// Pill com label + ícone × à direita. Clique em qualquer parte retorna
+// `clicked()`. O × é desenhado com `line_segment` (não depende da fonte
+// conter o glyph ✕/✖, que falha em algumas famílias). No hover, o fundo
+// ganha um tint de perigo e o × fica vermelho vivo para sinalizar que a
+// ação é destrutiva (remover o filtro).
+
+pub fn removable_chip(ui: &mut Ui, label: &str, cfg: &AppConfig) -> Response {
+    let font = FontId::proportional(size_caption(cfg));
+    let text_color = Color32::WHITE;
+
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), font.clone(), text_color);
+
+    let pad_x = 10.0;
+    let gap = 6.0;
+    let icon_size: f32 = 9.0;
+    let height = CHIP_MIN_HEIGHT.max(galley.size().y + 6.0);
+    let width = pad_x + galley.size().x + gap + icon_size + pad_x;
+
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+
+    let hovered = response.hovered();
+
+    // Background
+    let base_fill = Color32::from_rgb(48, 56, 72);
+    let hover_fill = Color32::from_rgb(78, 50, 56);
+    let fill = if hovered { hover_fill } else { base_fill };
+    let stroke_col = if hovered {
+        ACCENT_DANGER
+    } else {
+        Color32::from_gray(70)
+    };
+    ui.painter().rect(
+        rect,
+        RADIUS_CHIP,
+        fill,
+        Stroke::new(1.0, stroke_col),
+        egui::StrokeKind::Inside,
+    );
+
+    // Label
+    let label_y = rect.center().y - galley.size().y / 2.0;
+    let label_pos = egui::pos2(rect.left() + pad_x, label_y);
+    ui.painter().galley(label_pos, galley, text_color);
+
+    // × icon (desenhado com duas linhas cruzadas)
+    let icon_center = egui::pos2(rect.right() - pad_x - icon_size / 2.0, rect.center().y);
+    let arm = icon_size * 0.5;
+    let icon_color = if hovered {
+        ACCENT_DANGER
+    } else {
+        Color32::from_gray(170)
+    };
+    let stroke = Stroke::new(1.6, icon_color);
+    ui.painter().line_segment(
+        [
+            icon_center + egui::vec2(-arm, -arm),
+            icon_center + egui::vec2(arm, arm),
+        ],
+        stroke,
+    );
+    ui.painter().line_segment(
+        [
+            icon_center + egui::vec2(-arm, arm),
+            icon_center + egui::vec2(arm, -arm),
+        ],
+        stroke,
+    );
+
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 // ── Card ─────────────────────────────────────────────────────────────

@@ -185,6 +185,15 @@ library.sidebar.insights_matchup = Winrate por matchup
 library.sidebar.insights_maps = Mapas mais jogados
 library.sidebar.toggle_tooltip = Mostrar/ocultar filtros
 library.filter.clear_all = Limpar filtros
+library.related.menu.title = Encontrar relacionados
+library.related.menu.vs_opponent = Jogos contra {name}
+library.related.menu.same_matchup = Mesmo matchup: {code}
+library.related.menu.same_map = Mesmo mapa: {map}
+library.related.menu.same_opening = Mesma abertura: {opening}
+library.related.chip.vs_opponent = vs {name}
+library.related.chip.matchup = {code}
+library.related.chip.map = Mapa: {map}
+library.related.chip.opening = Abertura: {opening}
 
 # ── Abas ────────────────────────────────────────────────────────────────────
 tab.timeline = Timeline
