@@ -285,6 +285,20 @@ timeline.stats.bldg_focus = {pct}% bldg focus
 timeline.stats.idle_worker = ⏱ {secs}s worker idle
 timeline.stats.idle_army = ⚔ {secs}s army idle
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
+timeline.tt.supply = Supply used / supply cap at this moment.
+timeline.tt.supply_blocked = Supply-blocked: used equals cap, can't train more units until you add supply.
+timeline.tt.minerals = Banked minerals. Right side shows income rate per minute.
+timeline.tt.vespene = Banked vespene gas. Right side shows income rate per minute.
+timeline.tt.workers = Active workers / production capacity (max your bases can train).
+timeline.tt.army_value = Total resource value of live army units (minerals + gas).
+timeline.tt.army_split = Army value split by mineral (m) and gas (g) spending.
+timeline.tt.atk_upgrade = Attack upgrade level.
+timeline.tt.arm_upgrade = Armor / shields upgrade level.
+timeline.tt.bldg_focus = Share of time your camera focused on structures (macro vigilance).
+timeline.tt.bldg_focus_none = No camera data yet for this moment.
+timeline.tt.idle_worker = Time worker production slots sat idle while capacity was free. Counts up to current slider position.
+timeline.tt.idle_army = Time army producers sat idle while capacity was free. Zerg: each Hatch/Lair/Hive counts as 1 larva-bandwidth slot. Counts up to current slider position.
+timeline.tt.blocks = Supply-blocked periods up to current time — total count and accumulated duration.
 
 # ── Rename screen ───────────────────────────────────────────────────────────
 rename.heading = Batch Rename Replays

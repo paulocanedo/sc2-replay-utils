@@ -60,13 +60,13 @@ pub(super) fn player_side_panel(
     match p.stats_at(game_loop) {
         Some(s) => {
             ui.add_space(SPACE_XS);
-            supply_bar(ui, s, slot_color);
+            supply_bar(ui, s, slot_color, lang);
             ui.add_space(SPACE_S);
-            economy_block(ui, p, s, game_loop, cfg);
+            economy_block(ui, p, s, game_loop, cfg, lang);
             ui.add_space(SPACE_S);
             ui.separator();
             ui.add_space(SPACE_XS);
-            army_block(ui, p, s, game_loop, slot_color, cfg);
+            army_block(ui, p, s, game_loop, slot_color, cfg, lang);
         }
         None => {
             ui.add_space(SPACE_S);
@@ -101,7 +101,7 @@ fn header(ui: &mut Ui, p: &PlayerTimeline, idx: usize, cfg: &AppConfig, lang: La
 
 // ── Supply bar ─────────────────────────────────────────────────────────
 
-fn supply_bar(ui: &mut Ui, s: &StatsSnapshot, slot_color: Color32) {
+fn supply_bar(ui: &mut Ui, s: &StatsSnapshot, slot_color: Color32, lang: Language) {
     let cap = s.supply_made.min(200);
     let frac = if cap > 0 {
         (s.supply_used as f32 / cap as f32).clamp(0.0, 1.0)
@@ -115,11 +115,17 @@ fn supply_bar(ui: &mut Ui, s: &StatsSnapshot, slot_color: Color32) {
     } else {
         format!("{}/{}", s.supply_used, cap)
     };
+    let tt_key = if blocked {
+        "timeline.tt.supply_blocked"
+    } else {
+        "timeline.tt.supply"
+    };
     ui.add(
         ProgressBar::new(frac)
             .fill(bar_color)
             .text(RichText::new(label).small().strong()),
-    );
+    )
+    .on_hover_text(tf(tt_key, lang, &[]));
 }
 
 // ── Economy block ──────────────────────────────────────────────────────
@@ -130,10 +136,11 @@ fn economy_block(
     s: &StatsSnapshot,
     game_loop: u32,
     cfg: &AppConfig,
+    lang: Language,
 ) {
-    resource_row(ui, MINERAL_COLOR, s.minerals, s.minerals_rate, true, cfg);
-    resource_row(ui, GAS_COLOR, s.vespene, s.vespene_rate, false, cfg);
-    worker_row(ui, p, s, game_loop);
+    resource_row(ui, MINERAL_COLOR, s.minerals, s.minerals_rate, true, cfg, lang);
+    resource_row(ui, GAS_COLOR, s.vespene, s.vespene_rate, false, cfg, lang);
+    worker_row(ui, p, s, game_loop, lang);
 }
 
 fn resource_row(
@@ -143,7 +150,13 @@ fn resource_row(
     rate: i32,
     is_mineral: bool,
     cfg: &AppConfig,
+    lang: Language,
 ) {
+    let tt_key = if is_mineral {
+        "timeline.tt.minerals"
+    } else {
+        "timeline.tt.vespene"
+    };
     ui.horizontal(|ui| {
         let size = size_body(cfg);
         let (resp, painter) = ui.allocate_painter(vec2(size, size), Sense::hover());
@@ -160,10 +173,12 @@ fn resource_row(
                     .color(LABEL_DIM),
             );
         });
-    });
+    })
+    .response
+    .on_hover_text(tf(tt_key, lang, &[]));
 }
 
-fn worker_row(ui: &mut Ui, p: &PlayerTimeline, s: &StatsSnapshot, game_loop: u32) {
+fn worker_row(ui: &mut Ui, p: &PlayerTimeline, s: &StatsSnapshot, game_loop: u32, lang: Language) {
     let cap = p.worker_capacity_at(game_loop);
     ui.horizontal(|ui| {
         ui.monospace(format!("👷 {}/{}", s.workers, cap.max(s.workers)));
@@ -175,7 +190,9 @@ fn worker_row(ui: &mut Ui, p: &PlayerTimeline, s: &StatsSnapshot, game_loop: u32
             };
             draw_mini_bar(ui, 42.0, 4.0, frac, LABEL_SOFT);
         });
-    });
+    })
+    .response
+    .on_hover_text(tf("timeline.tt.workers", lang, &[]));
 }
 
 // ── Army block ─────────────────────────────────────────────────────────
@@ -187,6 +204,7 @@ fn army_block(
     game_loop: u32,
     slot_color: Color32,
     cfg: &AppConfig,
+    lang: Language,
 ) {
     let total = s.army_value_minerals + s.army_value_vespene;
     ui.label(
@@ -194,7 +212,8 @@ fn army_block(
             .size(size_subtitle(cfg))
             .strong()
             .color(slot_color),
-    );
+    )
+    .on_hover_text(tf("timeline.tt.army_value", lang, &[]));
     ui.label(
         RichText::new(format!(
             "m {} · g {}",
@@ -202,7 +221,8 @@ fn army_block(
         ))
         .size(size_caption(cfg))
         .color(LABEL_DIM),
-    );
+    )
+    .on_hover_text(tf("timeline.tt.army_split", lang, &[]));
 
     let atk = p.attack_level_at(game_loop);
     let arm = p.armor_level_at(game_loop);
@@ -210,10 +230,12 @@ fn army_block(
         ui.add_space(SPACE_XS);
         ui.horizontal(|ui| {
             if atk > 0 {
-                chip(ui, &format!("⚔+{atk}"), true, Some(slot_color));
+                chip(ui, &format!("⚔+{atk}"), true, Some(slot_color))
+                    .on_hover_text(tf("timeline.tt.atk_upgrade", lang, &[]));
             }
             if arm > 0 {
-                chip(ui, &format!("🛡+{arm}"), true, Some(slot_color));
+                chip(ui, &format!("🛡+{arm}"), true, Some(slot_color))
+                    .on_hover_text(tf("timeline.tt.arm_upgrade", lang, &[]));
             }
         });
     }
@@ -231,6 +253,11 @@ fn efficiency_block(
 ) {
     // Building focus — retained metric with inline mini-bar.
     let (att, tot) = structure_attention_at(p, game_loop);
+    let bldg_tt_key = if tot == 0 {
+        "timeline.tt.bldg_focus_none"
+    } else {
+        "timeline.tt.bldg_focus"
+    };
     ui.horizontal(|ui| {
         if tot == 0 {
             ui.label(
@@ -249,7 +276,9 @@ fn efficiency_block(
                 draw_mini_bar(ui, 32.0, 3.0, pct / 100.0, LABEL_DIM);
             });
         }
-    });
+    })
+    .response
+    .on_hover_text(tf(bldg_tt_key, lang, &[]));
 
     // Worker idle — T/P apenas; Zerg usa larva model (sem CC/Nexus cap).
     if !is_zerg_race(&p.race) {
@@ -265,7 +294,8 @@ fn efficiency_block(
                 ))
                 .small()
                 .color(LABEL_DIM),
-            );
+            )
+            .on_hover_text(tf("timeline.tt.idle_worker", lang, &[]));
         }
     }
 
@@ -282,7 +312,8 @@ fn efficiency_block(
             ))
             .small()
             .color(LABEL_DIM),
-        );
+        )
+        .on_hover_text(tf("timeline.tt.idle_army", lang, &[]));
     }
 
     // Supply block — acumulado até game_loop (contagem e tempo).
@@ -304,7 +335,8 @@ fn efficiency_block(
             ))
             .small()
             .color(ACCENT_WARNING),
-        );
+        )
+        .on_hover_text(tf("timeline.tt.blocks", lang, &[]));
     }
 }
 
