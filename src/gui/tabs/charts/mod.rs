@@ -47,6 +47,8 @@ pub struct ArmyChartOptions {
     pub group_by_type: bool,
     /// Jogador selecionado para o modo por-tipo. Ignorado em agregado.
     pub grouped_player: usize,
+    /// Mostrar o subgrid (marcas intermediárias entre os ticks rotulados).
+    pub show_minor_grid: bool,
 }
 
 impl Default for ArmyChartOptions {
@@ -57,6 +59,7 @@ impl Default for ArmyChartOptions {
             show_workers: false,
             group_by_type: false,
             grouped_player: 0,
+            show_minor_grid: true,
         }
     }
 }

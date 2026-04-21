@@ -1,15 +1,15 @@
 // Plot principal de army (valor/quantidade, agregado/por tipo).
 
-use egui::{Color32, RichText, Ui};
-use egui_plot::{GridMark, Legend, Line, Plot, PlotPoints, Polygon};
+use egui::{Color32, RichText, Ui, Vec2b};
+use egui_plot::{log_grid_spacer, GridMark, Legend, Line, Plot, PlotPoints, Polygon};
 
 use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::locale::{localize, t, tf, Language};
 use crate::replay::is_worker_name;
 use crate::replay_state::{loop_to_secs, LoadedReplay};
-use crate::tokens::SPACE_XL;
-use crate::widgets::toggle_chip_bool;
+use crate::tokens::SPACE_S;
+use crate::widgets::{chip, toggle_chip_bool};
 use crate::{army_value, balance_data};
 
 use super::classify::*;
@@ -20,6 +20,20 @@ pub(super) struct Series {
     pub color: Color32,
     pub width: f32,
     pub points: Vec<[f64; 2]>,
+}
+
+/// Quando `show_minor` é false, descarta todas as marcas exceto as do
+/// maior `step_size` — ou seja, mantém apenas as linhas principais (as
+/// que recebem rótulo no eixo) e esconde o subgrid.
+fn filter_grid(marks: Vec<GridMark>, show_minor: bool) -> Vec<GridMark> {
+    if show_minor {
+        return marks;
+    }
+    let max_step = marks
+        .iter()
+        .map(|m| m.step_size)
+        .fold(f64::NEG_INFINITY, f64::max);
+    marks.into_iter().filter(|m| m.step_size >= max_step).collect()
 }
 
 pub(super) fn army_value_plot(
@@ -34,53 +48,99 @@ pub(super) fn army_value_plot(
     ui.horizontal(|ui| {
         ui.heading(t("charts.army.title", lang));
     });
-    ui.horizontal_wrapped(|ui| {
-        ui.label(t("charts.army.metric", lang));
-        ui.radio_value(&mut opts.metric, ChartMetric::Value, t("charts.army.metric.value", lang));
-        ui.radio_value(&mut opts.metric, ChartMetric::Count, t("charts.army.metric.count", lang));
-        ui.add_space(SPACE_XL);
-        toggle_chip_bool(ui, t("charts.army.group_by_type", lang), &mut opts.group_by_type, None);
+    let reset_clicked = ui
+        .horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_S;
 
-        if opts.group_by_type {
-            ui.add_space(SPACE_XL);
-            ui.label(t("charts.army.player_label", lang));
-            let player_count = loaded.timeline.players.len();
-            if opts.grouped_player >= player_count && player_count > 0 {
-                opts.grouped_player = 0;
+            // ── Metric (mutex) ──────────────────────────
+            if chip(
+                ui,
+                t("charts.army.metric.value", lang),
+                opts.metric == ChartMetric::Value,
+                None,
+            )
+            .clicked()
+            {
+                opts.metric = ChartMetric::Value;
             }
-            let selected_name = loaded
-                .timeline
-                .players
-                .get(opts.grouped_player)
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
-            egui::ComboBox::from_id_salt("charts_grouped_player")
-                .selected_text(selected_name)
-                .show_ui(ui, |ui| {
-                    for (idx, p) in loaded.timeline.players.iter().enumerate() {
-                        ui.selectable_value(&mut opts.grouped_player, idx, &p.name);
-                    }
-                });
-        } else {
-            ui.add_space(SPACE_XL);
-            // No modo agregado, os chips Army/Workers controlam o que
-            // entra na soma. Impede desmarcar ambos simultaneamente.
-            let only_army = opts.show_army && !opts.show_workers;
-            let only_workers = !opts.show_army && opts.show_workers;
-            let army_label = t("charts.army.show", lang);
-            let workers_label = t("charts.workers.show", lang);
-            let army_resp = toggle_chip_bool(ui, army_label, &mut opts.show_army, None);
-            if only_army && !opts.show_army {
-                opts.show_army = true; // não permite desmarcar o último ativo
+            if chip(
+                ui,
+                t("charts.army.metric.count", lang),
+                opts.metric == ChartMetric::Count,
+                None,
+            )
+            .clicked()
+            {
+                opts.metric = ChartMetric::Count;
             }
-            let _ = army_resp;
-            let workers_resp = toggle_chip_bool(ui, workers_label, &mut opts.show_workers, None);
-            if only_workers && !opts.show_workers {
-                opts.show_workers = true;
+
+            ui.separator();
+
+            // ── Conteúdo ────────────────────────────────
+            toggle_chip_bool(
+                ui,
+                t("charts.army.group_by_type", lang),
+                &mut opts.group_by_type,
+                None,
+            );
+
+            if opts.group_by_type {
+                let player_count = loaded.timeline.players.len();
+                if opts.grouped_player >= player_count && player_count > 0 {
+                    opts.grouped_player = 0;
+                }
+                let selected_name = loaded
+                    .timeline
+                    .players
+                    .get(opts.grouped_player)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+                egui::ComboBox::from_id_salt("charts_grouped_player")
+                    .selected_text(selected_name)
+                    .show_ui(ui, |ui| {
+                        for (idx, p) in loaded.timeline.players.iter().enumerate() {
+                            ui.selectable_value(&mut opts.grouped_player, idx, &p.name);
+                        }
+                    });
+            } else {
+                // No modo agregado, os chips Army/Workers controlam o que
+                // entra na soma. Impede desmarcar ambos simultaneamente.
+                let only_army = opts.show_army && !opts.show_workers;
+                let only_workers = !opts.show_army && opts.show_workers;
+                let _ =
+                    toggle_chip_bool(ui, t("charts.army.show", lang), &mut opts.show_army, None);
+                if only_army && !opts.show_army {
+                    opts.show_army = true;
+                }
+                let _ = toggle_chip_bool(
+                    ui,
+                    t("charts.workers.show", lang),
+                    &mut opts.show_workers,
+                    None,
+                );
+                if only_workers && !opts.show_workers {
+                    opts.show_workers = true;
+                }
             }
-            let _ = workers_resp;
-        }
-    });
+
+            ui.separator();
+
+            // ── Exibição ────────────────────────────────
+            toggle_chip_bool(
+                ui,
+                t("charts.army.show_minor_grid", lang),
+                &mut opts.show_minor_grid,
+                None,
+            );
+
+            ui.separator();
+
+            // ── Ação ────────────────────────────────────
+            chip(ui, t("charts.army.reset_view", lang), false, None)
+                .on_hover_text(t("charts.army.reset_view.hint", lang))
+                .clicked()
+        })
+        .inner;
 
     let Some(army) = loaded.army.as_ref() else {
         ui.label(RichText::new(t("charts.army.no_data", lang)).italics());
@@ -176,10 +236,19 @@ pub(super) fn army_value_plot(
         opts.show_workers as u8,
         opts.grouped_player,
     );
+    let show_minor = opts.show_minor_grid;
+    let x_spacer = log_grid_spacer(10);
+    let y_spacer = log_grid_spacer(10);
+
     Plot::new(plot_id)
         .legend(Legend::default())
         .height(360.0)
+        .allow_drag(false)
+        .allow_scroll(false)
+        .allow_zoom(false)
         .allow_boxed_zoom(true)
+        .x_grid_spacer(move |input| filter_grid(x_spacer(input), show_minor))
+        .y_grid_spacer(move |input| filter_grid(y_spacer(input), show_minor))
         .x_axis_label(t("charts.axis.time", lang))
         .y_axis_label(y_label)
         .x_axis_formatter(|mark: GridMark, _range| {
@@ -269,6 +338,10 @@ pub(super) fn army_value_plot(
             text
         })
         .show(ui, |plot_ui| {
+            if reset_clicked {
+                plot_ui.set_auto_bounds(Vec2b::TRUE);
+            }
+
             // Pico global de Y, para dimensionar os retângulos de supply block.
             let y_max = series_list
                 .iter()
