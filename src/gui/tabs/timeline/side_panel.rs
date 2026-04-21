@@ -230,14 +230,25 @@ fn army_block(
             .color(slot_color),
     )
     .on_hover_text(tf("timeline.tt.army_value", lang, &[]));
-    ui.label(
-        RichText::new(format!(
-            "m {} · g {}",
-            s.army_value_minerals, s.army_value_vespene
-        ))
-        .size(size_caption(cfg))
-        .color(LABEL_DIM),
-    )
+    let caption = size_caption(cfg);
+    ui.horizontal(|ui| {
+        let (resp, painter) = ui.allocate_painter(vec2(caption, caption), Sense::hover());
+        paint_mineral_icon(&painter, resp.rect, MINERAL_COLOR);
+        ui.label(
+            RichText::new(s.army_value_minerals.to_string())
+                .size(caption)
+                .color(LABEL_DIM),
+        );
+        ui.label(RichText::new("·").size(caption).color(LABEL_DIM));
+        let (resp, painter) = ui.allocate_painter(vec2(caption, caption), Sense::hover());
+        paint_gas_icon(&painter, resp.rect, GAS_COLOR);
+        ui.label(
+            RichText::new(s.army_value_vespene.to_string())
+                .size(caption)
+                .color(LABEL_DIM),
+        );
+    })
+    .response
     .on_hover_text(tf("timeline.tt.army_split", lang, &[]));
 
     let atk = p.attack_level_at(game_loop);
