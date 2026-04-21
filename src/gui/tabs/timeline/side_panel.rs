@@ -18,7 +18,7 @@ use crate::colors::{
 };
 use crate::config::AppConfig;
 use crate::locale::{tf, Language};
-use crate::production_gap::PlayerProductionGap;
+use crate::production_gap::{compute_idle_periods, compute_idle_periods_ranges, is_zerg_race};
 use crate::replay::{PlayerTimeline, StatsSnapshot};
 use crate::replay_state::LoadedReplay;
 use crate::supply_block::SupplyBlockEntry;
@@ -46,8 +46,6 @@ pub(super) fn player_side_panel(
     let Some(p) = loaded.timeline.players.get(idx) else {
         return;
     };
-    let production: Option<&PlayerProductionGap> =
-        loaded.production.as_ref().and_then(|r| r.players.get(idx));
     let supply_blocks: &[SupplyBlockEntry] = loaded
         .supply_blocks_per_player
         .get(idx)
@@ -82,7 +80,7 @@ pub(super) fn player_side_panel(
     ui.add_space(SPACE_XS);
     ui.separator();
     ui.add_space(SPACE_XS);
-    efficiency_block(ui, p, game_loop, production, supply_blocks, loops_per_second, lang);
+    efficiency_block(ui, p, game_loop, supply_blocks, loops_per_second, lang);
 }
 
 // ── Header ─────────────────────────────────────────────────────────────
@@ -228,7 +226,6 @@ fn efficiency_block(
     ui: &mut Ui,
     p: &PlayerTimeline,
     game_loop: u32,
-    production: Option<&PlayerProductionGap>,
     supply_blocks: &[SupplyBlockEntry],
     loops_per_second: f64,
     lang: Language,
@@ -255,16 +252,32 @@ fn efficiency_block(
         }
     });
 
-    // Idle production time — Terran/Protoss only; Zerg uses larva model
-    // and the detector returns empty for them.
-    if let Some(prod) = production
-        && !prod.is_zerg
-        && prod.total_idle_loops > 0
-    {
-        let secs = (prod.total_idle_loops as f64 / loops_per_second).round() as u32;
+    // Worker idle — T/P apenas; Zerg usa larva model (sem CC/Nexus cap).
+    if !is_zerg_race(&p.race) {
+        let (_, worker_idle, _) =
+            compute_idle_periods(&p.worker_births, &p.worker_capacity, game_loop);
+        if worker_idle > 0 {
+            let secs = (worker_idle as f64 / loops_per_second).round() as u32;
+            ui.label(
+                RichText::new(tf(
+                    "timeline.stats.idle_worker",
+                    lang,
+                    &[("secs", &secs.to_string())],
+                ))
+                .small()
+                .color(LABEL_DIM),
+            );
+        }
+    }
+
+    // Army idle — todas as raças (Zerg usa slots de Hatchery/Lair/Hive).
+    let (_, army_idle, _) =
+        compute_idle_periods_ranges(&p.army_productions, &p.army_capacity, game_loop);
+    if army_idle > 0 {
+        let secs = (army_idle as f64 / loops_per_second).round() as u32;
         ui.label(
             RichText::new(tf(
-                "timeline.stats.idle",
+                "timeline.stats.idle_army",
                 lang,
                 &[("secs", &secs.to_string())],
             ))
@@ -273,21 +286,22 @@ fn efficiency_block(
         );
     }
 
-    // Supply block count — warning colour, only when > 0.
-    if !supply_blocks.is_empty() {
-        let total_loops: u32 = supply_blocks
+    // Supply block — acumulado até game_loop (contagem e tempo).
+    let (count, total_loops) =
+        supply_blocks
             .iter()
-            .map(|b| b.end_loop.saturating_sub(b.start_loop))
-            .sum();
+            .filter(|b| b.start_loop < game_loop)
+            .fold((0u32, 0u32), |(c, t), b| {
+                let end = b.end_loop.min(game_loop);
+                (c + 1, t + end.saturating_sub(b.start_loop))
+            });
+    if count > 0 {
         let secs = (total_loops as f64 / loops_per_second).round() as u32;
         ui.label(
             RichText::new(tf(
                 "timeline.stats.blocks",
                 lang,
-                &[
-                    ("count", &supply_blocks.len().to_string()),
-                    ("secs", &secs.to_string()),
-                ],
+                &[("count", &count.to_string()), ("secs", &secs.to_string())],
             ))
             .small()
             .color(ACCENT_WARNING),

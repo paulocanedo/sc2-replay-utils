@@ -363,10 +363,23 @@ pub struct PlayerTimeline {
     pub worker_births: Vec<u32>,
 
     /// Capacidade de produção de army (Barracks/Factory/Starport/
-    /// Gateway/WarpGate/RoboticsFacility/Stargate). Cada par é
-    /// `(game_loop, delta)`, ordenado. Derivado em `finalize.rs` a
-    /// partir de `entity_events` — análogo a `worker_capacity`.
+    /// Gateway/WarpGate/RoboticsFacility/Stargate + Hatchery/Lair/Hive
+    /// para Zerg, modelando 1 slot de larva bandwidth por hatch).
+    /// Cada par é `(game_loop, delta)`, ordenado. Derivado em
+    /// `finalize.rs` a partir de `entity_events` — análogo a
+    /// `worker_capacity`.
     pub army_capacity: Vec<(u32, i32)>,
+
+    /// Pares `(start_loop, end_loop)` de produções de unidades militares,
+    /// ordenados por `start_loop`. Usado por `compute_idle_periods_ranges`
+    /// para medir ociosidade de produtores army seguindo o slider.
+    ///
+    /// - Terran/Protoss: `ProductionStarted`→`Finished` de qualquer Unit
+    ///   (não worker, não larva-born), que efetivamente sai de uma
+    ///   estrutura em `is_army_producer`.
+    /// - Zerg: `ProductionStarted`→`Finished` de unidades em
+    ///   `is_larva_born_army` (Zergling/Roach/.../Overlord).
+    pub army_productions: Vec<(u32, u32)>,
 
     /// Soma cumulativa de `worker_capacity` pós-evento — mesma estrutura
     /// de `alive_count`. Derivado em `finalize.rs` a partir de

@@ -273,7 +273,8 @@ timeline.toggle.creep = Creep
 timeline.toggle.map = Map
 timeline.stats.bldg_focus_none = — bldg focus
 timeline.stats.bldg_focus = {pct}% bldg focus
-timeline.stats.idle = ⏱ {secs}s idle
+timeline.stats.idle_worker = ⏱ {secs}s worker idle
+timeline.stats.idle_army = ⚔ {secs}s army idle
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
 
 # ── Rename screen ───────────────────────────────────────────────────────────

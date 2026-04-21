@@ -270,7 +270,8 @@ timeline.toggle.creep = Creep
 timeline.toggle.map = Map
 timeline.stats.bldg_focus_none = — foco prédios
 timeline.stats.bldg_focus = {pct}% foco prédios
-timeline.stats.idle = ⏱ {secs}s ocioso
+timeline.stats.idle_worker = ⏱ {secs}s workers ociosos
+timeline.stats.idle_army = ⚔ {secs}s army ocioso
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
 
 # ── Tela Renomear ───────────────────────────────────────────────────────────

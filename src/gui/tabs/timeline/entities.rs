@@ -269,6 +269,7 @@ mod tests {
             worker_capacity: Vec::new(),
             worker_births: Vec::new(),
             army_capacity: Vec::new(),
+            army_productions: Vec::new(),
             worker_capacity_cumulative: Vec::new(),
             army_capacity_cumulative: Vec::new(),
             upgrade_cumulative: Vec::new(),
