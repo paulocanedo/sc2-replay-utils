@@ -7,7 +7,10 @@
 //!    workers com barra de capacidade.
 //! 4. Army — valor total + split mineral/gas + pips de attack/armor.
 //! 5. Composição — chips com abreviação de 3 letras por unidade viva.
-//! 6. Eficiência — building focus, idle time e supply block count.
+//! 6. Estruturas — chips com abreviação de 3 letras por estrutura viva.
+//! 7. Eficiência — building focus, idle time e supply block count.
+
+use std::collections::HashMap;
 
 use egui::{
     epaint::Shape, pos2, vec2, Align, Color32, Layout, ProgressBar, Rect, RichText, Sense, Stroke,
@@ -85,6 +88,11 @@ pub(super) fn player_side_panel(
     ui.separator();
     ui.add_space(SPACE_XS);
     units_block(ui, p, game_loop, lang);
+
+    ui.add_space(SPACE_XS);
+    ui.separator();
+    ui.add_space(SPACE_XS);
+    structures_block(ui, p, game_loop, lang);
 
     ui.add_space(SPACE_XS);
     ui.separator();
@@ -400,6 +408,185 @@ fn unit_abbrev(entity_type: &str) -> String {
         }
     }
     .to_string()
+}
+
+// ── Structures block ───────────────────────────────────────────────────
+//
+// Mesma mecânica do `units_block`: chips `ABR N` com abreviação de 3
+// letras por estrutura viva. Variantes `*Flying` / `SupplyDepotLowered`
+// são agregadas ao tipo canônico (mesmo edifício físico, estado
+// diferente) — soma os counts e mostra um único chip. `CreepTumor*` é
+// filtrado: aparecem às dezenas em lategame Zerg e sujariam a linha
+// inteira sem valor informativo.
+
+fn structures_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) {
+    let mut agg: HashMap<&'static str, i32> = HashMap::new();
+    for ty in p.alive_count.keys() {
+        if !is_structure_name(ty) || ty.starts_with("CreepTumor") {
+            continue;
+        }
+        let count = p.alive_count_at(ty, game_loop);
+        if count <= 0 {
+            continue;
+        }
+        *agg.entry(structure_canonical(ty)).or_insert(0) += count;
+    }
+    if agg.is_empty() {
+        ui.label(
+            RichText::new(tf("timeline.stats.structures_none", lang, &[]))
+                .small()
+                .color(LABEL_DIM),
+        );
+        return;
+    }
+    let mut entries: Vec<(&'static str, i32)> = agg.into_iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ui.horizontal_wrapped(|ui| {
+        for (canonical, count) in entries {
+            let label = format!("{} {}", structure_abbrev(canonical), count);
+            let tooltip = tf(
+                "timeline.tt.unit_chip",
+                lang,
+                &[
+                    ("name", localize(canonical, lang)),
+                    ("count", &count.to_string()),
+                ],
+            );
+            chip(ui, &label, false, None).on_hover_text(tooltip);
+        }
+    });
+}
+
+/// Colapsa variantes de estado (voando, abaixada) no tipo base. Um
+/// `CommandCenterFlying` é o mesmo edifício físico que um
+/// `CommandCenter` pousado — mostrar os dois como chips separados só
+/// polui o painel durante transições de relocação.
+fn structure_canonical(name: &str) -> &'static str {
+    match name {
+        "CommandCenter" | "CommandCenterFlying" => "CommandCenter",
+        "OrbitalCommand" | "OrbitalCommandFlying" => "OrbitalCommand",
+        "Barracks" | "BarracksFlying" => "Barracks",
+        "Factory" | "FactoryFlying" => "Factory",
+        "Starport" | "StarportFlying" => "Starport",
+        "SupplyDepot" | "SupplyDepotLowered" => "SupplyDepot",
+        "PlanetaryFortress" => "PlanetaryFortress",
+        "Refinery" => "Refinery",
+        "EngineeringBay" => "EngineeringBay",
+        "Armory" => "Armory",
+        "FusionCore" => "FusionCore",
+        "GhostAcademy" => "GhostAcademy",
+        "Bunker" => "Bunker",
+        "MissileTurret" => "MissileTurret",
+        "SensorTower" => "SensorTower",
+        "BarracksTechLab" => "BarracksTechLab",
+        "FactoryTechLab" => "FactoryTechLab",
+        "StarportTechLab" => "StarportTechLab",
+        "BarracksReactor" => "BarracksReactor",
+        "FactoryReactor" => "FactoryReactor",
+        "StarportReactor" => "StarportReactor",
+        "Hatchery" => "Hatchery",
+        "Lair" => "Lair",
+        "Hive" => "Hive",
+        "Extractor" => "Extractor",
+        "SpawningPool" => "SpawningPool",
+        "RoachWarren" => "RoachWarren",
+        "HydraliskDen" => "HydraliskDen",
+        "BanelingNest" => "BanelingNest",
+        "EvolutionChamber" => "EvolutionChamber",
+        "Spire" => "Spire",
+        "GreaterSpire" => "GreaterSpire",
+        "InfestationPit" => "InfestationPit",
+        "UltraliskCavern" => "UltraliskCavern",
+        "NydusNetwork" => "NydusNetwork",
+        "NydusCanal" => "NydusCanal",
+        "LurkerDen" => "LurkerDen",
+        "SpineCrawler" => "SpineCrawler",
+        "SporeCrawler" => "SporeCrawler",
+        "Nexus" => "Nexus",
+        "Pylon" => "Pylon",
+        "Assimilator" => "Assimilator",
+        "Gateway" => "Gateway",
+        "WarpGate" => "WarpGate",
+        "Forge" => "Forge",
+        "CyberneticsCore" => "CyberneticsCore",
+        "TwilightCouncil" => "TwilightCouncil",
+        "Stargate" => "Stargate",
+        "RoboticsFacility" => "RoboticsFacility",
+        "TemplarArchive" => "TemplarArchive",
+        "DarkShrine" => "DarkShrine",
+        "RoboticsBay" => "RoboticsBay",
+        "FleetBeacon" => "FleetBeacon",
+        "PhotonCannon" => "PhotonCannon",
+        "ShieldBattery" => "ShieldBattery",
+        _ => "",
+    }
+}
+
+/// Abreviação fixa de 3 letras (placeholder até sprites). Espelha o
+/// padrão de `unit_abbrev` — quando entrarem os ícones, a tabela vira
+/// lookup de sprite atlas.
+fn structure_abbrev(canonical: &str) -> &'static str {
+    match canonical {
+        // Terran
+        "CommandCenter" => "CC",
+        "OrbitalCommand" => "ORB",
+        "PlanetaryFortress" => "PF",
+        "SupplyDepot" => "SD",
+        "Refinery" => "REF",
+        "Barracks" => "BAR",
+        "Factory" => "FAC",
+        "Starport" => "STP",
+        "EngineeringBay" => "EB",
+        "Armory" => "ARM",
+        "FusionCore" => "FC",
+        "GhostAcademy" => "GA",
+        "Bunker" => "BNK",
+        "MissileTurret" => "MTR",
+        "SensorTower" => "SNT",
+        "BarracksTechLab" => "BTL",
+        "FactoryTechLab" => "FTL",
+        "StarportTechLab" => "STL",
+        "BarracksReactor" => "BRC",
+        "FactoryReactor" => "FRC",
+        "StarportReactor" => "SRC",
+        // Zerg
+        "Hatchery" => "HAT",
+        "Lair" => "LAI",
+        "Hive" => "HIV",
+        "Extractor" => "EXT",
+        "SpawningPool" => "SPL",
+        "RoachWarren" => "RW",
+        "HydraliskDen" => "HD",
+        "BanelingNest" => "BN",
+        "EvolutionChamber" => "EVO",
+        "Spire" => "SPI",
+        "GreaterSpire" => "GSP",
+        "InfestationPit" => "IP",
+        "UltraliskCavern" => "UC",
+        "NydusNetwork" => "NN",
+        "NydusCanal" => "NYD",
+        "LurkerDen" => "LD",
+        "SpineCrawler" => "SPC",
+        "SporeCrawler" => "SPO",
+        // Protoss
+        "Nexus" => "NEX",
+        "Pylon" => "PYL",
+        "Assimilator" => "ASM",
+        "Gateway" => "GW",
+        "WarpGate" => "WG",
+        "Forge" => "FRG",
+        "CyberneticsCore" => "CYB",
+        "TwilightCouncil" => "TC",
+        "Stargate" => "SG",
+        "RoboticsFacility" => "RF",
+        "TemplarArchive" => "TA",
+        "DarkShrine" => "DS",
+        "RoboticsBay" => "RB",
+        "FleetBeacon" => "FB",
+        "PhotonCannon" => "PC",
+        "ShieldBattery" => "SB",
+        _ => "STR",
+    }
 }
 
 // ── Efficiency block ───────────────────────────────────────────────────

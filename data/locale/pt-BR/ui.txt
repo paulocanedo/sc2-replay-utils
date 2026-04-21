@@ -283,6 +283,7 @@ timeline.stats.idle_worker = ⏱ {secs}s workers ociosos
 timeline.stats.idle_army = ⚔ {secs}s army ocioso
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
 timeline.stats.units_none = — sem unidades vivas
+timeline.stats.structures_none = — sem estruturas vivas
 timeline.tt.supply = Supply usado / cap de supply neste instante.
 timeline.tt.supply_blocked = Supply-blocked: usado igual ao cap, não dá pra treinar mais unidades até aumentar o supply.
 timeline.tt.minerals = Minerals em banco. À direita, taxa de renda por minuto.
