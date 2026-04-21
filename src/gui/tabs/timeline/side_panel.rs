@@ -29,6 +29,12 @@ use super::entities::structure_attention_at;
 const MINERAL_COLOR: Color32 = Color32::from_rgb(100, 180, 230);
 /// Cor do círculo de gas. Verde-claro próximo do geyser Vespene.
 const GAS_COLOR: Color32 = Color32::from_rgb(90, 200, 150);
+/// Workers por base em saturação ideal (≈ 3 por patch + 3 por geyser).
+const WORKERS_PER_BASE_IDEAL: i32 = 22;
+/// Teto do denominador de saturação. Acima disso, `👷 N/M` repete o
+/// numerador (barra cheia) pra não exibir razões tipo `90/80` que
+/// saturam visualmente mas não dizem nada acionável.
+const WORKER_SATURATION_CAP: i32 = 80;
 
 /// Renderiza o painel lateral de um jogador. Faz lookup de todos os
 /// dados derivados (`production`, `supply_blocks`) diretamente no
@@ -179,15 +185,25 @@ fn resource_row(
 }
 
 fn worker_row(ui: &mut Ui, p: &PlayerTimeline, s: &StatsSnapshot, game_loop: u32, lang: Language) {
-    let cap = p.worker_capacity_at(game_loop);
+    // `worker_capacity_at` devolve o número de town halls vivos (cada
+    // base = 1 slot de treinamento). Para exibição no painel, porém,
+    // queremos mostrar saturação (workers / ideal) e não slot count.
+    let bases = p.worker_capacity_at(game_loop);
+    let saturation = (bases * WORKERS_PER_BASE_IDEAL).min(WORKER_SATURATION_CAP);
+    let (denom, frac) = if s.workers > WORKER_SATURATION_CAP {
+        (s.workers, 1.0)
+    } else if saturation > 0 {
+        (
+            saturation,
+            (s.workers as f32 / saturation as f32).clamp(0.0, 1.0),
+        )
+    } else {
+        // Nenhuma base registrada ainda (fração inicial do replay).
+        (s.workers.max(1), 1.0)
+    };
     ui.horizontal(|ui| {
-        ui.monospace(format!("👷 {}/{}", s.workers, cap.max(s.workers)));
+        ui.monospace(format!("👷 {}/{}", s.workers, denom));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let frac = if cap > 0 {
-                (s.workers as f32 / cap as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
             draw_mini_bar(ui, 42.0, 4.0, frac, LABEL_SOFT);
         });
     })
