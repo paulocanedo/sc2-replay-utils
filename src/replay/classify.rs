@@ -100,9 +100,11 @@ pub fn is_structure_name(name: &str) -> bool {
         name,
         // Terran — base
         "CommandCenter" | "OrbitalCommand" | "PlanetaryFortress" |
+        "CommandCenterFlying" | "OrbitalCommandFlying" |
         "SupplyDepot" | "SupplyDepotLowered" | "Refinery" |
         // Terran — produção
         "Barracks" | "Factory" | "Starport" |
+        "BarracksFlying" | "FactoryFlying" | "StarportFlying" |
         // Terran — tecnologia
         "EngineeringBay" | "Armory" | "FusionCore" | "GhostAcademy" |
         // Terran — defesa
