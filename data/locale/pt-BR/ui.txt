@@ -282,6 +282,20 @@ timeline.stats.bldg_focus = {pct}% foco prédios
 timeline.stats.idle_worker = ⏱ {secs}s workers ociosos
 timeline.stats.idle_army = ⚔ {secs}s army ocioso
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
+timeline.tt.supply = Supply usado / cap de supply neste instante.
+timeline.tt.supply_blocked = Supply-blocked: usado igual ao cap, não dá pra treinar mais unidades até aumentar o supply.
+timeline.tt.minerals = Minerals em banco. À direita, taxa de renda por minuto.
+timeline.tt.vespene = Gas em banco. À direita, taxa de renda por minuto.
+timeline.tt.workers = Workers ativos / capacidade de produção (máximo que suas bases treinam).
+timeline.tt.army_value = Valor total em recursos das unidades army vivas (minerals + gas).
+timeline.tt.army_split = Valor do army separado por gasto em mineral (m) e gas (g).
+timeline.tt.atk_upgrade = Nível de upgrade de ataque.
+timeline.tt.arm_upgrade = Nível de upgrade de armadura / shields.
+timeline.tt.bldg_focus = Fração do tempo em que a câmera esteve em estruturas (vigilância de macro).
+timeline.tt.bldg_focus_none = Ainda sem dados de câmera para este instante.
+timeline.tt.idle_worker = Tempo em que slots de produção de workers ficaram ociosos com capacidade livre. Conta até a posição atual do slider.
+timeline.tt.idle_army = Tempo em que produtores army ficaram ociosos com capacidade livre. Zerg: cada Hatch/Lair/Hive conta como 1 slot de larva. Conta até a posição atual do slider.
+timeline.tt.blocks = Períodos supply-blocked até o instante atual — quantidade total e duração acumulada.
 
 # ── Tela Renomear ───────────────────────────────────────────────────────────
 rename.heading = Renomear Replays em Lote
