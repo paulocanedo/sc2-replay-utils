@@ -290,10 +290,11 @@ fn army_block(
 
 // ── Units block ────────────────────────────────────────────────────────
 //
-// Chips `ABR N` com uma abreviação de 3 letras por tipo de unidade
-// viva no instante. Placeholder até o sprite sheet entrar — o ABR vai
-// virar imagem, o N continua. Estruturas ficam de fora (já estão
-// implícitas em Supply/Economy/Army).
+// Chips por tipo de unidade viva. Quando há ícone disponível
+// (`assets/units/<race>/<Entity>.png`), renderiza `[icon] N` em vez de
+// `ABR N`. O fallback textual mantém o layout funcional pras raças sem
+// sprites ainda (todo Protoss, todo Zerg). Estruturas ficam de fora —
+// já estão implícitas em Supply/Economy/Army.
 
 fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) {
     let mut entries: Vec<(&str, i32)> = p
@@ -324,15 +325,85 @@ fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) 
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     ui.horizontal_wrapped(|ui| {
         for (ty, count) in entries {
-            let label = format!("{} {}", unit_abbrev(ty), count);
             let tooltip = tf(
                 "timeline.tt.unit_chip",
                 lang,
                 &[("name", localize(ty, lang)), ("count", &count.to_string())],
             );
-            chip(ui, &label, false, None).on_hover_text(tooltip);
+            if let Some(icon) = unit_icon(ty) {
+                icon_chip(ui, icon, count).on_hover_text(tooltip);
+            } else {
+                let label = format!("{} {}", unit_abbrev(ty), count);
+                chip(ui, &label, false, None).on_hover_text(tooltip);
+            }
         }
     });
+}
+
+/// Pill estilo `chip` com imagem + contagem. Usado quando há sprite
+/// disponível pra unidade — a imagem substitui a abreviação de 3
+/// letras, mantendo o número à direita pra leitura rápida.
+fn icon_chip(ui: &mut Ui, icon: egui::ImageSource<'static>, count: i32) -> egui::Response {
+    use egui::{Frame, Margin};
+    let fill = Color32::from_gray(40);
+    let text_color = Color32::from_gray(160);
+    let icon_size = egui::vec2(16.0, 16.0);
+    Frame::new()
+        .fill(fill)
+        .corner_radius(crate::tokens::RADIUS_CHIP)
+        .inner_margin(Margin::symmetric(6, 2))
+        .stroke(egui::Stroke::NONE)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.horizontal(|ui| {
+                ui.add(egui::Image::new(icon).fit_to_exact_size(icon_size));
+                ui.label(RichText::new(count.to_string()).small().color(text_color));
+            });
+        })
+        .response
+        .interact(Sense::hover())
+}
+
+/// Mapeia `entity_type` → ícone PNG embutido. Filenames casam exatamente
+/// com o nome canônico da unidade (ex.: `Marine.png`, `SiegeTank.png`).
+/// Variantes de estado (Sieged, Burrowed, Alternate…) colapsam na forma
+/// base — são o mesmo modelo visualmente. Retorna `None` pras raças
+/// ainda sem sprite (Protoss/Zerg) e pra entidades raras (Larva,
+/// Interceptor, Changeling…) — caller cai no fallback de abreviação.
+fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
+    use egui::include_image;
+    let src = match entity_type {
+        // Terran
+        "SCV" => include_image!("../../../../assets/units/terran/SCV.png"),
+        "Marine" => include_image!("../../../../assets/units/terran/Marine.png"),
+        "Marauder" => include_image!("../../../../assets/units/terran/Marauder.png"),
+        "Reaper" => include_image!("../../../../assets/units/terran/Reaper.png"),
+        "Ghost" | "GhostAlternate" => {
+            include_image!("../../../../assets/units/terran/Ghost.png")
+        }
+        "Hellion" => include_image!("../../../../assets/units/terran/Hellion.png"),
+        "HellionTank" => include_image!("../../../../assets/units/terran/HellionTank.png"),
+        "SiegeTank" | "SiegeTankSieged" => {
+            include_image!("../../../../assets/units/terran/SiegeTank.png")
+        }
+        "Cyclone" => include_image!("../../../../assets/units/terran/Cyclone.png"),
+        "WidowMine" | "WidowMineBurrowed" => {
+            include_image!("../../../../assets/units/terran/WidowMine.png")
+        }
+        "Thor" | "ThorAP" => include_image!("../../../../assets/units/terran/Thor.png"),
+        "VikingFighter" | "VikingAssault" => {
+            include_image!("../../../../assets/units/terran/VikingFighter.png")
+        }
+        "Medivac" => include_image!("../../../../assets/units/terran/Medivac.png"),
+        "Liberator" | "LiberatorAG" => {
+            include_image!("../../../../assets/units/terran/Liberator.png")
+        }
+        "Raven" => include_image!("../../../../assets/units/terran/Raven.png"),
+        "Banshee" => include_image!("../../../../assets/units/terran/Banshee.png"),
+        "Battlecruiser" => include_image!("../../../../assets/units/terran/Battlecruiser.png"),
+        _ => return None,
+    };
+    Some(src)
 }
 
 /// Abreviação fixa de 3 letras (placeholder até sprites). Unidades não

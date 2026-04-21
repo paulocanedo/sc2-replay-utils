@@ -10,7 +10,7 @@ serde_yml = "0.0"
 dirs = "6"
 eframe    = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui      = "0.34"
-egui_extras = { version = "0.34", default-features = false, features = ["svg"] }
+egui_extras = { version = "0.34", default-features = false, features = ["svg", "image"] }
 egui_plot = "0.35"
 rfd       = "0.17"
 notify    = "8"
