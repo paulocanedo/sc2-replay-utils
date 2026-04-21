@@ -6,7 +6,8 @@
 //! 3. Economia — minerals/gas (com ícones desenhados) + rates,
 //!    workers com barra de capacidade.
 //! 4. Army — valor total + split mineral/gas + pips de attack/armor.
-//! 5. Eficiência — building focus, idle time e supply block count.
+//! 5. Composição — chips com abreviação de 3 letras por unidade viva.
+//! 6. Eficiência — building focus, idle time e supply block count.
 
 use egui::{
     epaint::Shape, pos2, vec2, Align, Color32, Layout, ProgressBar, Rect, RichText, Sense, Stroke,
@@ -15,9 +16,9 @@ use egui::{
 
 use crate::colors::{player_slot_color_bright, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT};
 use crate::config::AppConfig;
-use crate::locale::{tf, Language};
+use crate::locale::{localize, tf, Language};
 use crate::production_gap::{compute_idle_periods, compute_idle_periods_ranges, is_zerg_race};
-use crate::replay::{PlayerTimeline, StatsSnapshot};
+use crate::replay::{is_structure_name, PlayerTimeline, StatsSnapshot};
 use crate::replay_state::LoadedReplay;
 use crate::supply_block::SupplyBlockEntry;
 use crate::tokens::{size_body, size_caption, size_subtitle, SPACE_S, SPACE_XS};
@@ -79,6 +80,11 @@ pub(super) fn player_side_panel(
             ui.weak("—");
         }
     }
+
+    ui.add_space(SPACE_XS);
+    ui.separator();
+    ui.add_space(SPACE_XS);
+    units_block(ui, p, game_loop, lang);
 
     ui.add_space(SPACE_XS);
     ui.separator();
@@ -266,6 +272,132 @@ fn army_block(
             }
         });
     }
+}
+
+// ── Units block ────────────────────────────────────────────────────────
+//
+// Chips `ABR N` com uma abreviação de 3 letras por tipo de unidade
+// viva no instante. Placeholder até o sprite sheet entrar — o ABR vai
+// virar imagem, o N continua. Estruturas ficam de fora (já estão
+// implícitas em Supply/Economy/Army).
+
+fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) {
+    let mut entries: Vec<(&str, i32)> = p
+        .alive_count
+        .iter()
+        .filter_map(|(ty, _)| {
+            if is_structure_name(ty) {
+                return None;
+            }
+            let count = p.alive_count_at(ty, game_loop);
+            if count > 0 {
+                Some((ty.as_str(), count))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if entries.is_empty() {
+        ui.label(
+            RichText::new(tf("timeline.stats.units_none", lang, &[]))
+                .small()
+                .color(LABEL_DIM),
+        );
+        return;
+    }
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ui.horizontal_wrapped(|ui| {
+        for (ty, count) in entries {
+            let label = format!("{} {}", unit_abbrev(ty), count);
+            let tooltip = tf(
+                "timeline.tt.unit_chip",
+                lang,
+                &[("name", localize(ty, lang)), ("count", &count.to_string())],
+            );
+            chip(ui, &label, false, None).on_hover_text(tooltip);
+        }
+    });
+}
+
+/// Abreviação fixa de 3 letras (placeholder até sprites). Unidades não
+/// mapeadas caem num fallback que pega os 3 primeiros chars do tipo em
+/// caixa alta — não bonito pra morphs raros, mas raramente aparece.
+fn unit_abbrev(entity_type: &str) -> String {
+    match entity_type {
+        // Terran
+        "SCV" => "SCV",
+        "MULE" => "MUL",
+        "Marine" => "MAR",
+        "Marauder" => "MAU",
+        "Reaper" => "REA",
+        "Ghost" | "GhostAlternate" => "GHO",
+        "Hellion" => "HEL",
+        "HellionTank" => "HBT",
+        "SiegeTank" | "SiegeTankSieged" => "TNK",
+        "Cyclone" => "CYC",
+        "WidowMine" | "WidowMineBurrowed" => "WMN",
+        "Thor" | "ThorAP" => "THR",
+        "VikingFighter" | "VikingAssault" => "VIK",
+        "Medivac" => "MDV",
+        "Liberator" | "LiberatorAG" => "LIB",
+        "Raven" => "RVN",
+        "Banshee" => "BSH",
+        "Battlecruiser" => "BC",
+        // Protoss
+        "Probe" => "PRB",
+        "Zealot" => "ZEA",
+        "Stalker" => "STK",
+        "Sentry" => "SEN",
+        "Adept" | "AdeptPhaseShift" => "ADP",
+        "HighTemplar" => "HT",
+        "DarkTemplar" => "DT",
+        "Immortal" => "IMM",
+        "Colossus" => "COL",
+        "Disruptor" | "DisruptorPhased" => "DIS",
+        "Archon" => "ARC",
+        "Observer" | "ObserverSiegeMode" => "OBS",
+        "WarpPrism" | "WarpPrismPhasing" => "PRI",
+        "Phoenix" => "PHX",
+        "VoidRay" => "VR",
+        "Oracle" => "ORA",
+        "Tempest" => "TMP",
+        "Carrier" => "CAR",
+        "Mothership" => "MS",
+        // Zerg
+        "Drone" => "DRO",
+        "Queen" => "QUE",
+        "Zergling" => "ZGL",
+        "Baneling" | "BanelingCocoon" => "BLN",
+        "Roach" | "RoachBurrowed" => "ROA",
+        "Ravager" | "RavagerCocoon" => "RAV",
+        "Hydralisk" | "HydraliskBurrowed" => "HYD",
+        "LurkerMP" | "LurkerMPBurrowed" | "LurkerMPEgg" => "LUR",
+        "Mutalisk" => "MUT",
+        "Corruptor" => "COR",
+        "BroodLord" | "BroodLordCocoon" => "BL",
+        "Infestor" | "InfestorBurrowed" => "INF",
+        "SwarmHostMP" | "SwarmHostBurrowedMP" => "SH",
+        "Viper" => "VIP",
+        "Ultralisk" | "UltraliskBurrowed" => "ULT",
+        "Overlord" | "OverlordTransport" => "OVL",
+        "Overseer" | "OverseerSiegeMode" => "OVS",
+        // Neutrals / shared spawns (raramente aparecem no painel)
+        "Larva" => "LAR",
+        "Interceptor" => "INT",
+        "AutoTurret" => "TUR",
+        "Locust" | "LocustMP" | "LocustMPFlying" => "LOC",
+        "Broodling" => "BRO",
+        "Changeling" | "ChangelingMarine" | "ChangelingZealot" | "ChangelingZergling" => "CHG",
+        other => {
+            return other
+                .chars()
+                .filter(|c| c.is_ascii_alphabetic())
+                .take(3)
+                .collect::<String>()
+                .to_uppercase();
+        }
+    }
+    .to_string()
 }
 
 // ── Efficiency block ───────────────────────────────────────────────────
