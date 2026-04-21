@@ -9,11 +9,12 @@ use std::collections::HashMap;
 
 use egui::{Color32, RichText, ScrollArea, Ui};
 
-use crate::colors::{player_slot_color_bright, USER_CHIP_BG, USER_CHIP_FG};
+use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tokens::{SPACE_M, SPACE_XXL};
+use crate::widgets::you_chip_label;
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let lang = config.language;
@@ -81,12 +82,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
                     // Chip "You" discreto só na linha do usuário.
                     if is_user {
-                        ui.label(
-                            RichText::new(format!("{} ", t("common.you_chip", lang)))
-                                .small()
-                                .color(USER_CHIP_FG)
-                                .background_color(USER_CHIP_BG),
-                        );
+                        ui.label(you_chip_label(config, lang));
                     }
                 });
             }

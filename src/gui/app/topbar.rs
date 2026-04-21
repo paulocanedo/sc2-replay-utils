@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use egui::{Color32, Panel, RichText};
 
 use crate::colors::{
-    player_slot_color, LABEL_DIM, LABEL_SOFT, SURFACE_ALT, USER_CHIP_BG, USER_CHIP_FG,
+    player_slot_color, player_slot_color_bright, LABEL_DIM, LABEL_SOFT, SURFACE_ALT,
 };
 use crate::config::AppConfig;
 use crate::locale::{t, tf, Language};
@@ -19,7 +19,7 @@ use crate::tabs::Tab;
 use crate::tokens::{
     size_body, size_caption, size_subtitle, SPACE_M, SPACE_S, SPACE_XS, TOPBAR_HEIGHT,
 };
-use crate::widgets::{icon_button, labeled_value};
+use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label};
 
 use super::state::{AppState, Screen};
 
@@ -322,8 +322,8 @@ fn player_chip_topbar(
     config: &AppConfig,
     lang: Language,
 ) {
-    let slot = player_slot_color(idx);
-    let race_letter = crate::utils::race_letter(&player.race);
+    let slot_stripe = player_slot_color(idx);
+    let name_color = player_slot_color_bright(idx);
     let mmr_text = match player.mmr {
         Some(v) => v.to_string(),
         None => "—".to_string(),
@@ -351,26 +351,15 @@ fn player_chip_topbar(
                     .color(LABEL_SOFT),
             );
             if is_user {
-                ui.label(
-                    RichText::new(t("common.you_chip", lang))
-                        .size(size_caption(config))
-                        .strong()
-                        .color(USER_CHIP_FG)
-                        .background_color(USER_CHIP_BG),
-                );
+                ui.label(you_chip_label(config, lang));
             }
             ui.label(
                 RichText::new(&player.name)
                     .size(size_caption(config))
                     .strong()
-                    .color(slot),
+                    .color(name_color),
             );
-            ui.label(
-                RichText::new(format!("({race_letter})"))
-                    .size(size_caption(config))
-                    .strong()
-                    .color(slot),
-            );
+            race_badge(ui, &player.race, config);
         });
     });
 
@@ -388,6 +377,6 @@ fn player_chip_topbar(
             ne: 0,
             se: 0,
         },
-        slot,
+        slot_stripe,
     );
 }
