@@ -95,6 +95,7 @@ impl AppState {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let config = AppConfig::load();
         install_fonts(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         apply_style(&cc.egui_ctx, &config);
 
         let library_filter = library::LibraryFilter::from_config(&config);
