@@ -188,6 +188,15 @@ library.sidebar.insights_matchup = Matchup winrate
 library.sidebar.insights_maps = Top maps
 library.sidebar.toggle_tooltip = Toggle filter sidebar
 library.filter.clear_all = Clear filters
+library.related.menu.title = Find related
+library.related.menu.vs_opponent = Games vs {name}
+library.related.menu.same_matchup = Same matchup: {code}
+library.related.menu.same_map = Same map: {map}
+library.related.menu.same_opening = Same opening: {opening}
+library.related.chip.vs_opponent = vs {name}
+library.related.chip.matchup = {code}
+library.related.chip.map = Map: {map}
+library.related.chip.opening = Opening: {opening}
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 tab.timeline = Timeline

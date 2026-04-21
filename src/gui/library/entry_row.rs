@@ -13,6 +13,25 @@ use crate::tokens::{size_body, size_caption, SPACE_S, SPACE_XS};
 
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
+/// O que aconteceu ao interagir com uma linha da biblioteca.
+///
+/// `Load` vem do clique primário (carrega o replay no painel de análise).
+/// `ApplyRelated` vem do menu de contexto (clique direito) e pede à
+/// camada superior para compor um filtro de "jogos relacionados".
+pub(super) enum RowOutcome {
+    None,
+    Load,
+    ApplyRelated(RelatedFilter),
+}
+
+/// Dimensão escolhida pelo usuário no menu "encontrar relacionados".
+pub(super) enum RelatedFilter {
+    Opponent(String),
+    Matchup(String),
+    Map(String),
+    Opening(String),
+}
+
 // ── Helpers de filtro/sort ────────────────────────────────────────────
 
 pub(super) fn find_user_player<'a>(meta: &'a ParsedMeta, config: &AppConfig) -> Option<&'a PlayerMeta> {
@@ -132,7 +151,7 @@ pub(super) fn entry_row(
     is_current: bool,
     config: &AppConfig,
     row_h: f32,
-) -> bool {
+) -> RowOutcome {
     let lang = config.language;
     let loadable = entry.meta.is_loadable();
     // "Selected" = azul aço apagado, padrão convencional de item ativo.
@@ -211,7 +230,85 @@ pub(super) fn entry_row(
         ui.painter().rect_filled(border_rect, 4.0, border_color);
     }
 
-    loadable && inner.response.interact(Sense::click()).clicked()
+    let row_resp = inner.response.interact(Sense::click());
+    let mut outcome = if loadable && row_resp.clicked() {
+        RowOutcome::Load
+    } else {
+        RowOutcome::None
+    };
+
+    // Menu de contexto: "encontrar relacionados". Só faz sentido em
+    // entradas 1v1 parseadas — `context_menu` é um no-op quando o
+    // closure não adiciona widgets, então apenas retornamos cedo.
+    if let MetaState::Parsed(meta) = &entry.meta {
+        if meta.players.len() == 2 {
+            row_resp.context_menu(|ui| {
+                let user_idx = find_user_index(meta, config);
+                ui.label(
+                    RichText::new(t("library.related.menu.title", lang))
+                        .small()
+                        .color(LABEL_DIM),
+                );
+
+                if let Some(ui_idx) = user_idx {
+                    let opp_name = meta.players[1 - ui_idx].name.clone();
+                    if ui
+                        .button(tf(
+                            "library.related.menu.vs_opponent",
+                            lang,
+                            &[("name", &opp_name)],
+                        ))
+                        .clicked()
+                    {
+                        outcome = RowOutcome::ApplyRelated(RelatedFilter::Opponent(opp_name));
+                        ui.close();
+                    }
+                }
+
+                let mc = matchup_code(meta, config);
+                if !mc.is_empty()
+                    && ui
+                        .button(tf(
+                            "library.related.menu.same_matchup",
+                            lang,
+                            &[("code", &mc)],
+                        ))
+                        .clicked()
+                {
+                    outcome = RowOutcome::ApplyRelated(RelatedFilter::Matchup(mc));
+                    ui.close();
+                }
+
+                if ui
+                    .button(tf(
+                        "library.related.menu.same_map",
+                        lang,
+                        &[("map", &meta.map)],
+                    ))
+                    .clicked()
+                {
+                    outcome = RowOutcome::ApplyRelated(RelatedFilter::Map(meta.map.clone()));
+                    ui.close();
+                }
+
+                if let Some(op) = find_user_player(meta, config).and_then(|p| p.opening.clone()) {
+                    if ui
+                        .button(tf(
+                            "library.related.menu.same_opening",
+                            lang,
+                            &[("opening", &op)],
+                        ))
+                        .clicked()
+                    {
+                        outcome = RowOutcome::ApplyRelated(RelatedFilter::Opening(op));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    }
+
+    outcome
 }
 
 /// Internal split of `entry_row` for `MetaState::Parsed` entries — the

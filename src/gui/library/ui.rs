@@ -13,6 +13,7 @@ use super::entry_row::*;
 use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder, matches_filter};
 use super::hero::{self, HeroAction};
 use super::scanner::ReplayLibrary;
+use crate::widgets::removable_chip;
 
 /// Ação solicitada pelo usuário ao interagir com o painel.
 pub enum LibraryAction {
@@ -48,6 +49,10 @@ pub fn show(
                         filter.search.clear();
                         filter.race = None;
                         filter.outcome = OutcomeFilter::All;
+                        filter.opponent_name = None;
+                        filter.matchup_code = None;
+                        filter.map_name = None;
+                        filter.opening = None;
                         let prev_range = filter.date_range;
                         filter.date_range = DateRange::All;
                         if prev_range != DateRange::All {
@@ -106,11 +111,58 @@ pub fn show(
         return action;
     }
 
+    // ── Chips de "relacionados" ──────────────────────────────────────
+    // Cada chip é cancelável; clicar limpa apenas aquele campo. Ficam
+    // acima do status "X de Y" para dar contexto imediato do filtro
+    // ativo vindo do menu de contexto.
+    let has_related = filter.opponent_name.is_some()
+        || filter.matchup_code.is_some()
+        || filter.map_name.is_some()
+        || filter.opening.is_some();
+    if has_related {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_S;
+            if let Some(name) = filter.opponent_name.clone() {
+                let label = tf(
+                    "library.related.chip.vs_opponent",
+                    lang,
+                    &[("name", &name)],
+                );
+                if removable_chip(ui, &label, config).clicked() {
+                    filter.opponent_name = None;
+                }
+            }
+            if let Some(code) = filter.matchup_code.clone() {
+                let label = tf("library.related.chip.matchup", lang, &[("code", &code)]);
+                if removable_chip(ui, &label, config).clicked() {
+                    filter.matchup_code = None;
+                }
+            }
+            if let Some(map) = filter.map_name.clone() {
+                let label = tf("library.related.chip.map", lang, &[("map", &map)]);
+                if removable_chip(ui, &label, config).clicked() {
+                    filter.map_name = None;
+                }
+            }
+            if let Some(op) = filter.opening.clone() {
+                let label = tf("library.related.chip.opening", lang, &[("opening", &op)]);
+                if removable_chip(ui, &label, config).clicked() {
+                    filter.opening = None;
+                }
+            }
+        });
+        ui.add_space(SPACE_S);
+    }
+
     // ── Filtragem ────────────────────────────────────────────────────
     let any_filter_active = !filter.search.trim().is_empty()
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
-        || filter.date_range != DateRange::All;
+        || filter.date_range != DateRange::All
+        || filter.opponent_name.is_some()
+        || filter.matchup_code.is_some()
+        || filter.map_name.is_some()
+        || filter.opening.is_some();
 
     let today = today_str();
 
@@ -198,8 +250,21 @@ pub fn show(
                 let idx = visible[virtual_idx];
                 let entry = &library.entries[idx];
                 let is_current = current_path.map_or(false, |cp| cp == entry.path);
-                if entry_row(ui, entry, is_current, config, row_h) {
-                    action = LibraryAction::Load(entry.path.clone());
+                match entry_row(ui, entry, is_current, config, row_h) {
+                    RowOutcome::None => {}
+                    RowOutcome::Load => action = LibraryAction::Load(entry.path.clone()),
+                    RowOutcome::ApplyRelated(RelatedFilter::Opponent(n)) => {
+                        filter.opponent_name = Some(n);
+                    }
+                    RowOutcome::ApplyRelated(RelatedFilter::Matchup(c)) => {
+                        filter.matchup_code = Some(c);
+                    }
+                    RowOutcome::ApplyRelated(RelatedFilter::Map(m)) => {
+                        filter.map_name = Some(m);
+                    }
+                    RowOutcome::ApplyRelated(RelatedFilter::Opening(o)) => {
+                        filter.opening = Some(o);
+                    }
                 }
             }
         });

@@ -187,12 +187,20 @@ pub fn show(
     let any_filter = !filter.search.is_empty()
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
-        || filter.date_range != DateRange::All;
+        || filter.date_range != DateRange::All
+        || filter.opponent_name.is_some()
+        || filter.matchup_code.is_some()
+        || filter.map_name.is_some()
+        || filter.opening.is_some();
     ui.add_enabled_ui(any_filter, |ui| {
         if ui.button(t("library.filter.clear_all", lang)).clicked() {
             filter.search.clear();
             filter.race = None;
             filter.outcome = OutcomeFilter::All;
+            filter.opponent_name = None;
+            filter.matchup_code = None;
+            filter.map_name = None;
+            filter.opening = None;
             let prev = filter.date_range;
             filter.date_range = DateRange::All;
             if prev != DateRange::All {
