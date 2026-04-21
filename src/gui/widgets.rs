@@ -221,18 +221,49 @@ impl NameDensity {
     }
 }
 
-/// Small rounded badge with the race letter (T/P/Z/R) on top of the
-/// corresponding race colour. Pill-shaped (fully rounded corners); the
-/// caller places it inline inside an `ui.horizontal`.
-pub fn race_badge(ui: &mut Ui, race: &str, cfg: &AppConfig) -> Response {
+/// Race icon rendered inline with the player name. For the four known
+/// races (T/P/Z/R) we render the native SC2 logo as an SVG — these are
+/// instantly recognisable and colour-coded on their own, so we drop the
+/// pill background to avoid competing with the logo's own shape.
+/// Unknown races keep the text-pill fallback so the badge never
+/// disappears silently when parsing drifts.
+///
+/// The icon is sized to `density.name_size(cfg)` so it optically aligns
+/// with the player name next to it. Caller places it inline inside an
+/// `ui.horizontal`.
+pub fn race_badge(ui: &mut Ui, race: &str, density: NameDensity, cfg: &AppConfig) -> Response {
     let letter = crate::utils::race_letter(race);
+    let side = density.name_size(cfg);
+    let icon_size = egui::vec2(side, side);
+    match letter {
+        'T' => ui.add(
+            egui::Image::new(egui::include_image!("../../assets/race/terran.svg"))
+                .fit_to_exact_size(icon_size),
+        ),
+        'P' => ui.add(
+            egui::Image::new(egui::include_image!("../../assets/race/protoss.svg"))
+                .fit_to_exact_size(icon_size),
+        ),
+        'Z' => ui.add(
+            egui::Image::new(egui::include_image!("../../assets/race/zerg.svg"))
+                .fit_to_exact_size(icon_size),
+        ),
+        'R' => ui.add(
+            egui::Image::new(egui::include_image!("../../assets/race/random.svg"))
+                .fit_to_exact_size(icon_size),
+        ),
+        _ => race_badge_text_fallback(ui, letter, race, cfg),
+    }
+}
+
+/// Text-pill fallback for races we couldn't classify. Keeps the old
+/// coloured pill so unknown values remain visible rather than silently
+/// taking zero space.
+fn race_badge_text_fallback(ui: &mut Ui, letter: char, race: &str, cfg: &AppConfig) -> Response {
     let fill = race_color(race);
     let font = FontId::monospace(size_caption(cfg));
-    let galley = ui.painter().layout_no_wrap(
-        letter.to_string(),
-        font,
-        Color32::WHITE,
-    );
+    let galley =
+        ui.painter().layout_no_wrap(letter.to_string(), font, Color32::WHITE);
 
     let pad_x = 6.0;
     let pad_y = 2.0;
@@ -275,7 +306,7 @@ pub fn player_identity(
     cfg: &AppConfig,
     lang: Language,
 ) {
-    race_badge(ui, race, cfg);
+    race_badge(ui, race, density, cfg);
     ui.label(
         RichText::new(name)
             .size(density.name_size(cfg))

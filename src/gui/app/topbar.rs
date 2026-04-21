@@ -19,7 +19,7 @@ use crate::tabs::Tab;
 use crate::tokens::{
     size_body, size_caption, size_subtitle, SPACE_M, SPACE_S, SPACE_XS, TOPBAR_HEIGHT,
 };
-use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label};
+use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label, NameDensity};
 
 use super::state::{AppState, Screen};
 
@@ -359,7 +359,7 @@ fn player_chip_topbar(
                     .strong()
                     .color(name_color),
             );
-            race_badge(ui, &player.race, config);
+            race_badge(ui, &player.race, NameDensity::Compact, config);
         });
     });
 
