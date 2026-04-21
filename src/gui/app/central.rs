@@ -79,6 +79,8 @@ impl AppState {
                             loaded,
                             &self.config,
                             &mut self.timeline_tab_loop,
+                            &mut self.timeline_playing,
+                            &mut self.timeline_playback_speed,
                             &mut self.timeline_show_heatmap,
                             &mut self.timeline_show_creep,
                             &mut self.timeline_show_map,
@@ -89,7 +91,6 @@ impl AppState {
                             loaded,
                             &self.config,
                             &mut self.charts_army_opts,
-                            &mut self.charts_efficiency_target,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                         Tab::Insights => {

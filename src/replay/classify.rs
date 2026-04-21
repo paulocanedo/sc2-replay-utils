@@ -58,6 +58,13 @@ pub(super) fn is_army_producer(name: &str) -> bool {
     )
 }
 
+/// Produtores army de todas as raças — inclui Hatchery/Lair/Hive como
+/// "1 slot de larva bandwidth" para modelar idle de produção Zerg. Usado
+/// por `derive_capacity_indices` para alimentar `army_capacity`.
+pub(super) fn is_army_producer_all(name: &str) -> bool {
+    is_army_producer(name) || is_zerg_hatch(name)
+}
+
 /// Hatcheries do Zerg (inclui morphs Lair/Hive) — cada uma contribui
 /// com 1 slot de larva bandwidth na série de eficiência Zerg
 /// (`production_efficiency::compute_series_zerg`). Valor 1 (e não 3)

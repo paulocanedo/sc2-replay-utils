@@ -47,9 +47,10 @@ pub(super) const CAMERA_HEIGHT_TILES: f32 = 14.0;
 /// Número de caracteres monospace que cabem no painel lateral. A
 /// largura real é derivada do glifo "M" da fonte monospace atual, então
 /// escala com o `font_size_points` do usuário (HiDPI-aware).
-/// Dimensionado para o conteúdo mais largo, "200/200 supply" (14 ch),
-/// com folga para padding interno.
-const SIDE_PANEL_CHARS: f32 = 16.0;
+/// Dimensionado para comportar a barra de supply com overlay "200/200"
+/// mais ícones de recursos + barras inline de capacidade. 18 caracteres
+/// dá ~216px com a fonte padrão — suficiente sem ficar largo demais.
+const SIDE_PANEL_CHARS: f32 = 18.0;
 
 /// Calcula a largura do painel lateral com base no tamanho atual da
 /// fonte monospace + padding do frame do painel. Recomputado a cada
@@ -72,6 +73,8 @@ pub fn show(
     loaded: &LoadedReplay,
     config: &AppConfig,
     current_loop: &mut u32,
+    playing: &mut bool,
+    playback_speed: &mut u8,
     show_heatmap: &mut bool,
     show_creep: &mut bool,
     show_map: &mut bool,
@@ -81,6 +84,16 @@ pub fn show(
     let max_loop = tl.game_loops.max(1);
     if *current_loop > max_loop {
         *current_loop = max_loop;
+    }
+    // Avança o tempo antes de renderizar o frame; também pausa
+    // automaticamente ao atingir o fim. Quando `*playing` é false,
+    // `advance_playback` é no-op (exceto por resetar o acumulador
+    // fracionário).
+    let dt = ui.input(|i| i.unstable_dt);
+    let ctx = ui.ctx().clone();
+    transport::advance_playback(tl, current_loop, max_loop, playing, *playback_speed, dt, &ctx);
+    if *playing {
+        ctx.request_repaint();
     }
     let game_loop = *current_loop;
     let side_w = side_panel_width(ui);
@@ -113,7 +126,7 @@ pub fn show(
         .resizable(false)
         .show_inside(ui, |ui| {
             ui.add_space(2.0);
-            transport::transport_slider(ui, tl, current_loop, max_loop);
+            transport::transport_slider(ui, tl, current_loop, max_loop, playing, playback_speed);
             ui.add_space(2.0);
         });
 
@@ -121,18 +134,14 @@ pub fn show(
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            if let Some(p) = loaded.timeline.players.get(0) {
-                side_panel::player_side_panel(ui, p, 0, game_loop, lang);
-            }
+            side_panel::player_side_panel(ui, loaded, 0, game_loop, config);
         });
 
     egui::Panel::right("timeline_p2")
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            if let Some(p) = loaded.timeline.players.get(1) {
-                side_panel::player_side_panel(ui, p, 1, game_loop, lang);
-            }
+            side_panel::player_side_panel(ui, loaded, 1, game_loop, config);
         });
 
     egui::CentralPanel::default().show_inside(ui, |ui| {

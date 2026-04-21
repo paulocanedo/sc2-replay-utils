@@ -1,6 +1,5 @@
 // Aba Gráficos — plot genérico de army (valor/quantidade, por jogador
-// ou agrupado por tipo de unidade) + gráfico de eficiência de produção
-// + cards de resumo numérico.
+// ou agrupado por tipo de unidade).
 //
 // O plot principal tem três eixos de configuração:
 // - Métrica: Valor (minerals+gas, ou supply contribution por tipo) ou
@@ -17,18 +16,13 @@
 // Organização:
 //   - `classify`    — classificação de tipos, nomes canônicos, paleta de cores.
 //   - `army`        — plot principal de army value/count.
-//   - `efficiency`  — plot de eficiência de produção.
-//   - `summary`     — cards de resumo numérico.
 
 mod army;
 mod classify;
-mod efficiency;
-mod summary;
 
 use egui::Ui;
 
 use crate::config::AppConfig;
-use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::LoadedReplay;
 
 /// Métrica mostrada no eixo Y do plot principal.
@@ -53,6 +47,8 @@ pub struct ArmyChartOptions {
     pub group_by_type: bool,
     /// Jogador selecionado para o modo por-tipo. Ignorado em agregado.
     pub grouped_player: usize,
+    /// Mostrar o subgrid (marcas intermediárias entre os ticks rotulados).
+    pub show_minor_grid: bool,
 }
 
 impl Default for ArmyChartOptions {
@@ -63,6 +59,7 @@ impl Default for ArmyChartOptions {
             show_workers: false,
             group_by_type: false,
             grouped_player: 0,
+            show_minor_grid: true,
         }
     }
 }
@@ -72,19 +69,10 @@ pub fn show(
     loaded: &LoadedReplay,
     config: &AppConfig,
     army_opts: &mut ArmyChartOptions,
-    efficiency_target: &mut EfficiencyTarget,
 ) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             army::army_value_plot(ui, loaded, config, army_opts);
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(8.0);
-            efficiency::efficiency_plot(ui, loaded, config, efficiency_target);
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(8.0);
-            summary::summary_cards(ui, loaded, config);
         });
 }

@@ -1,4 +1,6 @@
-// Helper compartilhado entre os cards `key_losses` e `army_trades`.
+// Helper de análise de perdas/engajamentos — consumer puro de
+// `ReplayTimeline`. Usado pelo card de GUI `army_trades` e pelo
+// extractor não-UI `army_production_by_battle`.
 //
 // Filtra `entity_events` do stream canônico por
 // `kind = Died && killer_player_id != self` — isso exclui morphs

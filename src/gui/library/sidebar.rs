@@ -3,7 +3,7 @@
 //! the caller's `LibraryFilter` in place and returns a `LibraryAction`
 //! (only non-`None` for `SaveDateRange`, which the app persists).
 
-use egui::{Align, Color32, ComboBox, Layout, RichText, Ui};
+use egui::{Align, Color32, ComboBox, CornerRadius, Layout, Rect, RichText, Sense, Ui};
 
 use crate::colors::{
     ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM, LABEL_DIMMER, LABEL_STRONG, RACE_PROTOSS,
@@ -11,7 +11,7 @@ use crate::colors::{
 };
 use crate::config::AppConfig;
 use crate::locale::t;
-use crate::tokens::{SPACE_M, SPACE_S, size_caption};
+use crate::tokens::{SPACE_M, SPACE_S, SPACE_XS, size_caption};
 use crate::widgets::chip;
 
 use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder};
@@ -230,24 +230,71 @@ fn section_header(ui: &mut Ui, label: &str, config: &AppConfig) {
 fn show_matchup_insights(ui: &mut Ui, stats: &LibraryStats, config: &AppConfig) {
     let lang = config.language;
     section_header(ui, t("library.sidebar.insights_matchup", lang), config);
+    let size = size_caption(config);
     for m in &stats.matchup_winrates {
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(&m.code)
-                    .size(size_caption(config))
-                    .strong()
-                    .color(LABEL_STRONG),
-            );
+            matchup_code_colored(ui, &m.code, size);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let wr = m.winrate() * 100.0;
-                let color = winrate_color(wr);
                 ui.label(
                     RichText::new(format!("{:.0}% · {}g", wr, m.n))
-                        .size(size_caption(config))
-                        .color(color),
+                        .size(size)
+                        .color(winrate_color(wr)),
                 );
             });
         });
+        let bar_w = ui.available_width();
+        winrate_bar(ui, bar_w, m.wins, m.n);
+        ui.add_space(SPACE_XS);
+    }
+}
+
+fn matchup_code_colored(ui: &mut Ui, code: &str, size: f32) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for ch in code.chars() {
+            let color = match ch {
+                'T' => RACE_TERRAN,
+                'P' => RACE_PROTOSS,
+                'Z' => RACE_ZERG,
+                'v' => LABEL_DIM,
+                _ => LABEL_STRONG,
+            };
+            ui.label(RichText::new(ch).size(size).strong().color(color));
+        }
+    });
+}
+
+fn winrate_bar(ui: &mut Ui, width: f32, wins: usize, n: usize) {
+    let h = 5.0;
+    let r: u8 = 2;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), Sense::hover());
+    let full = CornerRadius::same(r);
+    ui.painter().rect_filled(rect, full, Color32::from_gray(40));
+    if n == 0 {
+        return;
+    }
+    let ratio = wins as f32 / n as f32;
+    let split = rect.left() + width * ratio;
+    let full_win = ratio >= 1.0;
+    let full_loss = ratio <= 0.0;
+    if ratio > 0.0 {
+        let win_rect = Rect::from_min_max(rect.left_top(), egui::pos2(split, rect.bottom()));
+        let radius = if full_win {
+            full
+        } else {
+            CornerRadius { nw: r, sw: r, ne: 0, se: 0 }
+        };
+        ui.painter().rect_filled(win_rect, radius, ACCENT_SUCCESS);
+    }
+    if ratio < 1.0 {
+        let loss_rect = Rect::from_min_max(egui::pos2(split, rect.top()), rect.right_bottom());
+        let radius = if full_loss {
+            full
+        } else {
+            CornerRadius { nw: 0, sw: 0, ne: r, se: r }
+        };
+        ui.painter().rect_filled(loss_rect, radius, ACCENT_DANGER);
     }
 }
 

@@ -16,8 +16,8 @@ use crate::colors::{
 use crate::config::AppConfig;
 use crate::locale::{t, Language};
 use crate::tokens::{
-    size_caption, size_subtitle, CARD_INNER_MX, CARD_INNER_MY, RADIUS_CARD, RADIUS_CHIP,
-    STROKE_HAIRLINE,
+    size_caption, size_subtitle, CARD_INNER_MX, CARD_INNER_MY, CHIP_MIN_HEIGHT, RADIUS_CARD,
+    RADIUS_CHIP, SHADOW_CARD, STROKE_HAIRLINE,
 };
 
 // ── Chip ─────────────────────────────────────────────────────────────
@@ -39,7 +39,8 @@ pub fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -
     ui.add(
         egui::Button::new(RichText::new(label).color(text_color).small())
             .fill(fill)
-            .corner_radius(RADIUS_CHIP),
+            .corner_radius(RADIUS_CHIP)
+            .min_size(egui::vec2(0.0, CHIP_MIN_HEIGHT)),
     )
 }
 
@@ -87,6 +88,7 @@ pub fn card<R>(
         .fill(CARD_FILL)
         .stroke(Stroke::new(STROKE_HAIRLINE, BORDER))
         .corner_radius(RADIUS_CARD)
+        .shadow(SHADOW_CARD)
         .inner_margin(Margin::symmetric(CARD_INNER_MX, CARD_INNER_MY))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

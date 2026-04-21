@@ -13,7 +13,6 @@ use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
 use crate::library::{self, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
-use crate::production_efficiency::EfficiencyTarget;
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
 use crate::watcher::ReplayWatcher;
@@ -26,7 +25,7 @@ use crate::watcher::ReplayWatcher;
 /// enriquecimento pra parsear o mesmo arquivo de novo.
 const OPENING_CLASSIFICATION_WINDOW_SECS: u32 = 300;
 
-use super::apply_style;
+use super::{apply_style, install_fonts};
 
 pub(super) const TOAST_TTL: Duration = Duration::from_secs(4);
 
@@ -60,10 +59,16 @@ pub struct AppState {
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
     pub timeline_tab_loop: u32,
+    /// Playback state da aba Timeline. `true` = auto-advance do
+    /// `timeline_tab_loop` em tempo real, multiplicado por
+    /// `timeline_playback_speed`. Clicar no slider não pausa — o usuário
+    /// pode scrubar com playback ativo.
+    pub timeline_playing: bool,
+    /// Multiplicador de velocidade do playback. Gira entre 1× → 2× → 4× →
+    /// 8× → 1× ao clicar no botão de velocidade.
+    pub timeline_playback_speed: u8,
     /// Opções do plot principal de army (métrica, grouping, checkboxes).
     pub charts_army_opts: tabs::charts::ArmyChartOptions,
-    /// Alvo do novo gráfico de eficiência de produção (workers x army).
-    pub charts_efficiency_target: EfficiencyTarget,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
@@ -89,6 +94,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let config = AppConfig::load();
+        install_fonts(&cc.egui_ctx);
         apply_style(&cc.egui_ctx, &config);
 
         let library_filter = library::LibraryFilter::from_config(&config);
@@ -107,8 +113,9 @@ impl AppState {
             library_filter,
             library_sidebar_open: true,
             timeline_tab_loop: 0,
+            timeline_playing: false,
+            timeline_playback_speed: 1,
             charts_army_opts: tabs::charts::ArmyChartOptions::default(),
-            charts_efficiency_target: EfficiencyTarget::Workers,
             show_about: false,
             timeline_show_heatmap: false,
             timeline_show_creep: true,
@@ -167,6 +174,10 @@ impl AppState {
                 // Reset do scrubbing da aba Timeline: replay novo
                 // sempre começa em t=0.
                 self.timeline_tab_loop = 0;
+                // Pausa ao trocar de replay — evita "perseguir" a
+                // transição com playback ligado do replay anterior.
+                self.timeline_playing = false;
+                self.timeline_playback_speed = 1;
                 // Reset do POV da aba Insights: novo replay
                 // re-resolve o default via user_nicknames.
                 self.insights_pov = None;

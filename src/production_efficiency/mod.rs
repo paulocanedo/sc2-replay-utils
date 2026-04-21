@@ -18,7 +18,10 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use types::{EfficiencySample, EfficiencyTarget, PlayerEfficiencySeries, ProductionEfficiencySeries};
+pub use types::{EfficiencyTarget, PlayerEfficiencySeries, ProductionEfficiencySeries};
+pub(crate) use types::{
+    is_warp_gate_unit, ARMY_SUPPLY_MAXED_THRESHOLD, WARP_GATE_CYCLE_LOOPS, WARP_GATE_RESEARCH,
+};
 
 use crate::replay::ReplayTimeline;
 use models::*;

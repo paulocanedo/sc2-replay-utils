@@ -42,11 +42,14 @@ pub struct LibraryStats {
     pub best_matchup: Option<String>,
 }
 
-const MMR_TREND_WINDOW: usize = 7;
+pub const MMR_TREND_WINDOW: usize = 7;
 const BEST_MATCHUP_MIN_GAMES: usize = 5;
 const TOP_MAPS_LIMIT: usize = 5;
 
-pub fn compute_library_stats(entries: &[LibraryEntry], config: &AppConfig) -> LibraryStats {
+pub fn compute_library_stats<'a, I>(entries: I, config: &AppConfig) -> LibraryStats
+where
+    I: IntoIterator<Item = &'a LibraryEntry>,
+{
     let mut total_parsed = 0usize;
     let mut total_unsupported = 0usize;
     let mut wins = 0usize;
@@ -336,6 +339,31 @@ mod tests {
         ));
         let s = compute_library_stats(&entries, &cfg);
         assert_eq!(s.best_matchup, Some("TvZ".into()));
+    }
+
+    #[test]
+    fn accepts_pre_filtered_iterator() {
+        let cfg = config_with_nick("me");
+        let entries = vec![
+            make_parsed("Map1", "2026-04-10T10:00:00", "me", "Terran", None, "Win", "Zerg", None),
+            make_parsed("Map2", "2026-04-11T10:00:00", "me", "Terran", None, "Loss", "Zerg", None),
+            make_parsed("Map3", "2026-04-12T10:00:00", "me", "Terran", None, "Win", "Zerg", None),
+        ];
+        // Simula um filtro outcome=Wins passando só vitórias à projeção.
+        let filtered = entries.iter().filter(|e| match &e.meta {
+            MetaState::Parsed(m) => m.players[0].result == "Win",
+            _ => false,
+        });
+        let s = compute_library_stats(filtered, &cfg);
+        assert_eq!(s.total_parsed, 2);
+        assert_eq!(s.wins, 2);
+        assert_eq!(s.losses, 0);
+        assert!((s.winrate_global.unwrap() - 1.0).abs() < 1e-6);
+        // Top maps só considera as duas vitórias.
+        let names: Vec<&str> = s.top_maps.iter().map(|(m, _)| m.as_str()).collect();
+        assert!(names.contains(&"Map1"));
+        assert!(names.contains(&"Map3"));
+        assert!(!names.contains(&"Map2"));
     }
 
     #[test]

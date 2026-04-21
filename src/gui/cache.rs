@@ -17,7 +17,13 @@ use crate::library::{MetaState, ParsedMeta, PlayerMeta};
 // (`CachedPlayerMeta.opening`) e o scanner agora parseia ~5 min de
 // game loops em vez de só metadados para extrair o build order inicial.
 // O formato binário mudou, então cache antigos são descartados no load.
-const CACHE_VERSION: u32 = 3;
+//
+// CACHE_VERSION bump 3→4: corrigido o bug de fuso horário em
+// `replay::parse` (o `datetime` era computado com o sinal errado do
+// `time_local_offset` e ficava a 2×offset do horário local correto).
+// Entries cacheadas com a string antiga precisam ser descartadas para
+// que o parser re-rode e grave o horário local correto.
+const CACHE_VERSION: u32 = 4;
 const CACHE_FILE: &str = "library_meta.bin";
 
 // ── Tipos serializáveis (desacoplados dos tipos da UI) ───────────────

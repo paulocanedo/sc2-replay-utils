@@ -257,6 +257,7 @@ fn analysis_topbar(
                             "{matchup} \u{2022} {duration} \u{2022} {date_display}"
                         ))
                         .size(size_caption(config))
+                        .monospace()
                         .color(LABEL_DIM)
                         .underline(),
                     )
@@ -345,6 +346,7 @@ fn player_chip_topbar(
             ui.label(
                 RichText::new(mmr_text)
                     .size(size_body(config))
+                    .monospace()
                     .strong()
                     .color(LABEL_SOFT),
             );

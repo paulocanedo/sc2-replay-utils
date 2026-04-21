@@ -5,6 +5,7 @@
 // `AppConfig.user_nicknames`; se nenhum bater, cai em 0. O usuário pode
 // trocar no ComboBox do topo pra ver os insights do adversário.
 
+pub mod army_prod_by_battle;
 pub mod army_trades;
 pub mod base_timings;
 pub mod card;
@@ -12,8 +13,6 @@ pub mod chrono_distribution;
 pub mod economy_gap;
 pub mod grid;
 pub mod inject_efficiency;
-pub mod key_losses;
-pub mod loss_analysis;
 pub mod production_idle;
 pub mod resources_unspent;
 pub mod supply_block;

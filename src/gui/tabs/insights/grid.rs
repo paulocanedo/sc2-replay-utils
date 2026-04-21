@@ -4,36 +4,38 @@
 // available width. Every card in a row is forced to the same height
 // (the tallest card in that row), so adjacent cards align visually.
 //
-// Implementation uses a 2-pass approach per row:
-//   1. Sizing pass — each card is rendered into a `UiBuilder::sizing_pass()`
-//      child Ui that collects layout metrics but paints nothing. The
-//      resulting `min_rect().height()` gives the natural height.
-//   2. Visible pass — the row height is broadcast to `card.rs` via a
-//      `ctx.data` slot (`MIN_INNER_H_KEY`) and each card is re-rendered
-//      with `ui.set_min_height` applied inside its Frame body.
-//
-// Cards that skip silently (race-locked, 1v1-only, etc.) produce ~0
-// height in the sizing pass and do not influence the row height. If
-// the whole row is empty, the row is omitted entirely.
+// Implementation:
+//   1. Sizing pass — every card is rendered into a
+//      `UiBuilder::sizing_pass()` child Ui that collects layout metrics
+//      but paints nothing. Cards that skip silently (race-locked,
+//      mirror-only, etc.) produce ~0 height and are filtered out, so
+//      they don't leave empty slots in the grid.
+//   2. Visible pass — the surviving cards are chunked into rows of
+//      `cols`. For each row, the row height is broadcast to `card.rs`
+//      via a `ctx.data` slot (`MIN_INNER_H_KEY`) and each card is
+//      re-rendered with `ui.set_min_height` applied inside its Frame
+//      body, so adjacent cards end up visually aligned.
 
 use egui::{Align, Id, Layout, Rect, Ui, UiBuilder, vec2};
 
 use crate::config::AppConfig;
 use crate::replay_state::LoadedReplay;
-use crate::tokens::{INSIGHT_CARD_MIN_W, INSIGHT_COL_GAP, INSIGHT_MAX_COLS, SPACE_M};
+use crate::tokens::{
+    CARD_INNER_MY, INSIGHT_CARD_MIN_W, INSIGHT_COL_GAP, INSIGHT_MAX_COLS, SPACE_M,
+};
 
 use super::card::MIN_INNER_H_KEY;
 use super::{
-    army_trades, base_timings, chrono_distribution, economy_gap, inject_efficiency,
-    key_losses, production_idle, resources_unspent, supply_block, tech_timings,
-    turning_point, worker_potential,
+    army_prod_by_battle, army_trades, base_timings, chrono_distribution, economy_gap,
+    inject_efficiency, production_idle, resources_unspent, supply_block,
+    tech_timings, turning_point, worker_potential,
 };
 
 // Threshold below which a card is considered "not rendered".
 const SKIP_HEIGHT_EPS: f32 = 4.0;
 
-// Uniform signature for every card. The eleven void-returning cards
-// are wrapped to always return `None`; `turning_point::show` already
+// Uniform signature for every card. The void-returning cards are
+// wrapped to always return `None`; `turning_point::show` already
 // matches and is used directly.
 type CardFn = fn(&mut Ui, &LoadedReplay, &AppConfig, usize) -> Option<u32>;
 
@@ -77,8 +79,8 @@ fn wrap_army_trades(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> O
     army_trades::show(ui, l, c, i);
     None
 }
-fn wrap_key_losses(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> Option<u32> {
-    key_losses::show(ui, l, c, i);
+fn wrap_army_prod_by_battle(ui: &mut Ui, l: &LoadedReplay, c: &AppConfig, i: usize) -> Option<u32> {
+    army_prod_by_battle::show(ui, l, c, i);
     None
 }
 
@@ -93,7 +95,7 @@ const CARDS: &[CardFn] = &[
     wrap_chrono_distribution,
     wrap_inject_efficiency,
     wrap_army_trades,
-    wrap_key_losses,
+    wrap_army_prod_by_battle,
     turning_point::show,
 ];
 
@@ -118,59 +120,51 @@ pub fn render_masonry(
     ui.ctx()
         .data_mut(|d| d.insert_temp::<f32>(min_inner_id, 0.0));
 
+    // ── Pass 1: sizing for every card ────────────────────────────
+    // Measure natural heights at the column width that will actually
+    // be used, then drop cards that rendered empty so they don't leave
+    // gaps in the grid.
+    let mut rendered: Vec<(CardFn, f32)> = Vec::with_capacity(CARDS.len());
+    for card_fn in CARDS {
+        let probe_rect = Rect::from_min_size(origin, vec2(col_w, f32::INFINITY));
+        let res = ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(probe_rect)
+                .sizing_pass()
+                .invisible()
+                .layout(Layout::top_down_justified(Align::Min)),
+            |ui| {
+                card_fn(ui, loaded, config, selected);
+                ui.min_rect().height()
+            },
+        );
+        if res.inner > SKIP_HEIGHT_EPS {
+            rendered.push((*card_fn, res.inner));
+        }
+    }
+
     let mut seek_request: Option<u32> = None;
     let mut cursor_y: f32 = 0.0;
 
-    for chunk in CARDS.chunks(cols) {
-        // ── Pass 1: sizing ───────────────────────────────────────
-        let mut natural_heights = [0.0_f32; INSIGHT_MAX_COLS];
-        for (i_in_row, card_fn) in chunk.iter().enumerate() {
-            let col_rect = Rect::from_min_size(
-                egui::pos2(
-                    origin.x + (col_w + INSIGHT_COL_GAP) * i_in_row as f32,
-                    origin.y + cursor_y,
-                ),
-                vec2(col_w, f32::INFINITY),
-            );
-            let res = ui.scope_builder(
-                UiBuilder::new()
-                    .max_rect(col_rect)
-                    .sizing_pass()
-                    .invisible()
-                    .layout(Layout::top_down_justified(Align::Min)),
-                |ui| {
-                    card_fn(ui, loaded, config, selected);
-                    ui.min_rect().height()
-                },
-            );
-            natural_heights[i_in_row] = res.inner;
-        }
-
-        // Tallest non-skipped card in this row.
-        let row_h = natural_heights
+    for chunk in rendered.chunks(cols) {
+        // Tallest card in this row drives the shared height.
+        let row_h = chunk
             .iter()
-            .take(chunk.len())
-            .copied()
-            .filter(|h| *h > SKIP_HEIGHT_EPS)
+            .map(|(_, h)| *h)
             .fold(0.0_f32, f32::max);
 
-        if row_h < SKIP_HEIGHT_EPS {
-            // Entire row is empty — skip it without consuming vertical space.
-            continue;
-        }
-
         // ── Pass 2: visible render with equalized height ─────────
-        // The hint is the min inner height for the Ui inside the Frame.
-        // `insight_card` already pads with SPACE_M/SPACE_S and draws the
-        // title before honouring it, so matching the natural max is
-        // enough to make short cards grow to the tall one's size.
+        // The hint is the min inner height for the Ui *inside* the Frame.
+        // `row_h` was measured from the outer child Ui and therefore
+        // includes the Frame's vertical inner margin on both sides plus
+        // the trailing SPACE_M outside the Frame — strip those out so
+        // the rendered Frame ends up the same height as the tallest
+        // natural card (not taller), preserving the SPACE_M row gap.
+        let frame_inner_hint = (row_h - 2.0 * CARD_INNER_MY as f32 - SPACE_M).max(0.0);
         ui.ctx()
-            .data_mut(|d| d.insert_temp::<f32>(min_inner_id, row_h));
+            .data_mut(|d| d.insert_temp::<f32>(min_inner_id, frame_inner_hint));
 
-        for (i_in_row, card_fn) in chunk.iter().enumerate() {
-            // Cards that skipped in the sizing pass get rendered into
-            // the same slot; they still produce 0 height, leaving the
-            // slot visually empty — which is the desired behaviour.
+        for (i_in_row, (card_fn, _)) in chunk.iter().enumerate() {
             let col_rect = Rect::from_min_size(
                 egui::pos2(
                     origin.x + (col_w + INSIGHT_COL_GAP) * i_in_row as f32,

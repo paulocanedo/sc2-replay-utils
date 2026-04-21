@@ -21,6 +21,10 @@ mod army_value;
 mod production_gap;
 #[path = "../production_efficiency/mod.rs"]
 mod production_efficiency;
+#[path = "../army_production_by_battle.rs"]
+mod army_production_by_battle;
+#[path = "../loss_analysis.rs"]
+mod loss_analysis;
 #[path = "../supply_block.rs"]
 mod supply_block;
 #[path = "../worker_potential.rs"]

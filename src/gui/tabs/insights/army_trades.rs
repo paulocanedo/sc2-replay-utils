@@ -12,8 +12,9 @@ use crate::locale::{t, tf};
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 use crate::tokens::{size_subtitle, SPACE_M, SPACE_S};
 
+use crate::loss_analysis::{cluster_engagements, player_kills, player_losses, Engagement};
+
 use super::card::insight_card;
-use super::loss_analysis::{cluster_engagements, player_kills, player_losses, Engagement};
 
 /// Gap (em segundos) que separa engajamentos. Mortes dentro dessa
 /// janela entram no mesmo cluster — suficiente pra cobrir um combate
