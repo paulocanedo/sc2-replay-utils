@@ -13,14 +13,14 @@ use egui::{
 };
 
 use crate::colors::{
-    player_slot_color, ACCENT_DANGER, BORDER, CARD_FILL, LABEL_DIM, LABEL_STRONG, USER_CHIP_BG,
-    USER_CHIP_FG,
+    player_slot_color, player_slot_color_bright, race_color, ACCENT_DANGER, BORDER, CARD_FILL,
+    LABEL_DIM, LABEL_STRONG, USER_CHIP_BG, USER_CHIP_FG,
 };
 use crate::config::AppConfig;
 use crate::locale::{t, Language};
 use crate::tokens::{
     size_caption, size_subtitle, CARD_INNER_MX, CARD_INNER_MY, CHIP_MIN_HEIGHT, RADIUS_CARD,
-    RADIUS_CHIP, SHADOW_CARD, STROKE_HAIRLINE,
+    RADIUS_CHIP, SHADOW_CARD, SPACE_S, SPACE_XS, STROKE_HAIRLINE,
 };
 
 // ── Chip ─────────────────────────────────────────────────────────────
@@ -195,36 +195,153 @@ pub fn card<R>(
     InnerResponse::new(inner.inner, inner.response)
 }
 
-// ── Player label ─────────────────────────────────────────────────────
+// ── Player identity ──────────────────────────────────────────────────
 //
-// The "player name + optional YOU chip" composition. Renders inline
-// inside the current layout so callers can wrap in `ui.horizontal`
-// together with MMR / race metadata.
+// The canonical "race · name · YOU?" composition shared by the analysis
+// topbar, timeline side panel and build-order card header. Name colour
+// is always `player_slot_color_bright(idx)` and race is always rendered
+// as a `race_badge` — keeps the visual language consistent across the
+// GUI while the caller varies density (compact vs normal) per context.
 
-pub fn player_label(
+/// Vertical rhythm for the player identity block. `Compact` suits
+/// single-line bars (topbar, chat); `Normal` is the default card
+/// header size used by side panels and the build-order column.
+#[derive(Clone, Copy, Debug)]
+pub enum NameDensity {
+    Compact,
+    Normal,
+}
+
+impl NameDensity {
+    fn name_size(self, cfg: &AppConfig) -> f32 {
+        match self {
+            Self::Compact => size_caption(cfg),
+            Self::Normal => size_subtitle(cfg),
+        }
+    }
+}
+
+/// Small rounded badge with the race letter (T/P/Z/R) on top of the
+/// corresponding race colour. Pill-shaped (fully rounded corners); the
+/// caller places it inline inside an `ui.horizontal`.
+pub fn race_badge(ui: &mut Ui, race: &str, cfg: &AppConfig) -> Response {
+    let letter = crate::utils::race_letter(race);
+    let fill = race_color(race);
+    let font = FontId::monospace(size_caption(cfg));
+    let galley = ui.painter().layout_no_wrap(
+        letter.to_string(),
+        font,
+        Color32::WHITE,
+    );
+
+    let pad_x = 6.0;
+    let pad_y = 2.0;
+    let size = egui::vec2(
+        galley.size().x + pad_x * 2.0,
+        galley.size().y + pad_y * 2.0,
+    );
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+
+    ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+    let text_pos = egui::pos2(
+        rect.center().x - galley.size().x / 2.0,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    ui.painter().galley(text_pos, galley, Color32::WHITE);
+    response
+}
+
+/// Canonical YOU chip. Keeps foreground/background harmonised with the
+/// selection palette instead of the slot colour, so it never fights the
+/// player name for attention.
+pub fn you_chip_label(cfg: &AppConfig, lang: Language) -> RichText {
+    RichText::new(format!(" {} ", t("common.you_chip", lang).trim()))
+        .size(size_caption(cfg))
+        .strong()
+        .color(USER_CHIP_FG)
+        .background_color(USER_CHIP_BG)
+}
+
+/// Full "race · name · YOU?" row. Must be called inside an
+/// `ui.horizontal` (or an explicit `left_to_right` layout when the
+/// parent is RTL). The caller owns the surrounding spacing.
+pub fn player_identity(
     ui: &mut Ui,
     name: &str,
+    race: &str,
     player_idx: usize,
-    is_you: bool,
-    show_you_chip: bool,
+    is_user: bool,
+    density: NameDensity,
     cfg: &AppConfig,
     lang: Language,
 ) {
+    race_badge(ui, race, cfg);
     ui.label(
         RichText::new(name)
-            .size(size_subtitle(cfg))
+            .size(density.name_size(cfg))
             .strong()
-            .color(player_slot_color(player_idx)),
+            .color(player_slot_color_bright(player_idx)),
     );
-    if is_you && show_you_chip {
-        ui.label(
-            RichText::new(t("common.you_chip", lang))
-                .size(size_caption(cfg))
-                .strong()
-                .color(USER_CHIP_FG)
-                .background_color(USER_CHIP_BG),
-        );
+    if is_user {
+        ui.label(you_chip_label(cfg, lang));
     }
+}
+
+// ── Player POV pill ──────────────────────────────────────────────────
+//
+// Clickable pill wrapping a `player_identity(Compact)`. Used by the
+// Insights tab to pick a point-of-view — replaces a plain ComboBox so
+// both players are visible at a glance and the selection surfaces in
+// the shared visual language (race badge + bright slot colour).
+//
+// Selected: filled with a subtle tint of the slot colour + slot stroke.
+// Unselected: neutral grey fill + hairline border.
+
+pub fn player_pov_pill(
+    ui: &mut Ui,
+    name: &str,
+    race: &str,
+    player_idx: usize,
+    is_user: bool,
+    selected: bool,
+    cfg: &AppConfig,
+    lang: Language,
+) -> Response {
+    let slot = player_slot_color(player_idx);
+    let (fill, stroke) = if selected {
+        let tint = Color32::from_rgb(
+            40 + slot.r() / 5,
+            40 + slot.g() / 5,
+            40 + slot.b() / 5,
+        );
+        (tint, Stroke::new(1.5, slot))
+    } else {
+        (Color32::from_gray(36), Stroke::new(STROKE_HAIRLINE, BORDER))
+    };
+
+    let inner = egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(RADIUS_CHIP)
+        .inner_margin(Margin::symmetric(crate::tokens::SPACE_M as i8, SPACE_XS as i8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = SPACE_S;
+                player_identity(
+                    ui,
+                    name,
+                    race,
+                    player_idx,
+                    is_user,
+                    NameDensity::Compact,
+                    cfg,
+                    lang,
+                );
+            });
+        });
+
+    ui.interact(inner.response.rect, inner.response.id, Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 // ── Labeled value ────────────────────────────────────────────────────

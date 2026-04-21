@@ -6,13 +6,13 @@
 use egui::{Color32, Grid, Id, RichText, ScrollArea, TextEdit, Ui};
 
 use crate::build_order::{classify_entry, EntryKind, EntryOutcome, PlayerBuildOrder};
-use crate::colors::{player_slot_color, user_fill, CARD_FILL, USER_CHIP_BG, USER_CHIP_FG};
+use crate::colors::{player_slot_color, user_fill, CARD_FILL};
 use crate::config::AppConfig;
 use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
 use crate::tokens::SPACE_S;
-use crate::widgets::toggle_chip_bool;
+use crate::widgets::{player_identity, toggle_chip_bool, NameDensity};
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 6] = [
@@ -175,7 +175,17 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             for (i, player) in players.iter().take(n).enumerate() {
                 let ui = &mut cols[i];
                 let is_user = config.is_user(&player.name);
-                player_column(ui, player, i, lps, is_user, &query_lower, &filter, lang);
+                player_column(
+                    ui,
+                    player,
+                    i,
+                    lps,
+                    is_user,
+                    &query_lower,
+                    &filter,
+                    config,
+                    lang,
+                );
             }
         });
     });
@@ -290,13 +300,13 @@ fn player_column(
     is_user: bool,
     query_lower: &str,
     filter: &BuildOrderFilter,
+    config: &AppConfig,
     lang: locale::Language,
 ) {
     let slot_color = player_slot_color(index);
     let fill = if is_user { user_fill(index) } else { CARD_FILL };
 
     // ── Cabeçalho estilo sidebar card ───────────────────────────
-    let race_letter = race_initial(&player.race);
     let header_resp = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
@@ -306,21 +316,17 @@ fn player_column(
             ui.set_width(ui.available_width());
 
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("({race_letter}) {}", player.name))
-                        .size(15.0)
-                        .strong()
-                        .color(Color32::WHITE),
+                ui.spacing_mut().item_spacing.x = SPACE_S;
+                player_identity(
+                    ui,
+                    &player.name,
+                    &player.race,
+                    index,
+                    is_user,
+                    NameDensity::Normal,
+                    config,
+                    lang,
                 );
-                if is_user {
-                    ui.label(
-                        RichText::new(format!("{} ", t("common.you_chip", lang)))
-                            .small()
-                            .strong()
-                            .color(USER_CHIP_FG)
-                            .background_color(USER_CHIP_BG),
-                    );
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .small_button("📋")

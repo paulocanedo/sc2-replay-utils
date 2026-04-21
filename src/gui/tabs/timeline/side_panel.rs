@@ -13,9 +13,7 @@ use egui::{
     Ui,
 };
 
-use crate::colors::{
-    player_slot_color_bright, race_color, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT,
-};
+use crate::colors::{player_slot_color_bright, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT};
 use crate::config::AppConfig;
 use crate::locale::{tf, Language};
 use crate::production_gap::{compute_idle_periods, compute_idle_periods_ranges, is_zerg_race};
@@ -23,8 +21,7 @@ use crate::replay::{PlayerTimeline, StatsSnapshot};
 use crate::replay_state::LoadedReplay;
 use crate::supply_block::SupplyBlockEntry;
 use crate::tokens::{size_body, size_caption, size_subtitle, SPACE_S, SPACE_XS};
-use crate::utils::race_letter;
-use crate::widgets::chip;
+use crate::widgets::{chip, player_identity, NameDensity};
 
 use super::entities::structure_attention_at;
 
@@ -56,7 +53,7 @@ pub(super) fn player_side_panel(
     let slot_color = player_slot_color_bright(idx);
 
     ui.add_space(SPACE_S);
-    header(ui, p, slot_color, cfg);
+    header(ui, p, idx, cfg, lang);
     ui.add_space(SPACE_XS);
     ui.separator();
 
@@ -85,18 +82,20 @@ pub(super) fn player_side_panel(
 
 // ── Header ─────────────────────────────────────────────────────────────
 
-fn header(ui: &mut Ui, p: &PlayerTimeline, slot_color: Color32, cfg: &AppConfig) {
+fn header(ui: &mut Ui, p: &PlayerTimeline, idx: usize, cfg: &AppConfig, lang: Language) {
+    let is_user = cfg.is_user(&p.name);
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(&p.name)
-                .size(size_subtitle(cfg))
-                .strong()
-                .color(slot_color),
+        ui.spacing_mut().item_spacing.x = SPACE_S;
+        player_identity(
+            ui,
+            &p.name,
+            &p.race,
+            idx,
+            is_user,
+            NameDensity::Normal,
+            cfg,
+            lang,
         );
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let letter = race_letter(&p.race);
-            chip(ui, &letter.to_string(), true, Some(race_color(&p.race)));
-        });
     });
 }
 
