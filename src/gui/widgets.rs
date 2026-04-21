@@ -19,8 +19,8 @@ use crate::colors::{
 use crate::config::AppConfig;
 use crate::locale::{t, Language};
 use crate::tokens::{
-    size_caption, size_subtitle, CARD_INNER_MX, CARD_INNER_MY, CHIP_MIN_HEIGHT, RADIUS_CARD,
-    RADIUS_CHIP, SHADOW_CARD, SPACE_S, SPACE_XS, STROKE_HAIRLINE,
+    size_body, size_caption, size_subtitle, size_title, CARD_INNER_MX, CARD_INNER_MY,
+    CHIP_MIN_HEIGHT, RADIUS_CARD, RADIUS_CHIP, SHADOW_CARD, SPACE_S, SPACE_XS, STROKE_HAIRLINE,
 };
 
 // ── Chip ─────────────────────────────────────────────────────────────
@@ -219,6 +219,18 @@ impl NameDensity {
             Self::Normal => size_subtitle(cfg),
         }
     }
+
+    /// Race icon side length. SVG logos have less optical weight than
+    /// glyphs at the same pixel size, so we render them one typographic
+    /// tier above the surrounding name — otherwise the badge reads as
+    /// tiny in dense bars. In Normal density subtitle is already the
+    /// name size, so we bump to title to keep the one-tier gap.
+    fn icon_size(self, cfg: &AppConfig) -> f32 {
+        match self {
+            Self::Compact => size_body(cfg),
+            Self::Normal => size_title(cfg),
+        }
+    }
 }
 
 /// Race icon rendered inline with the player name. For the four known
@@ -228,12 +240,13 @@ impl NameDensity {
 /// Unknown races keep the text-pill fallback so the badge never
 /// disappears silently when parsing drifts.
 ///
-/// The icon is sized to `density.name_size(cfg)` so it optically aligns
-/// with the player name next to it. Caller places it inline inside an
+/// The icon is sized one typographic tier above the name (see
+/// `NameDensity::icon_size`) so it reads with the same optical weight
+/// as the glyphs next to it. Caller places it inline inside an
 /// `ui.horizontal`.
 pub fn race_badge(ui: &mut Ui, race: &str, density: NameDensity, cfg: &AppConfig) -> Response {
     let letter = crate::utils::race_letter(race);
-    let side = density.name_size(cfg);
+    let side = density.icon_size(cfg);
     let icon_size = egui::vec2(side, side);
     match letter {
         'T' => ui.add(
