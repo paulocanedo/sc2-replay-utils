@@ -287,6 +287,7 @@ timeline.stats.idle_army = ⚔ {secs}s army idle
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
 timeline.stats.units_none = — no live units
 timeline.stats.structures_none = — no live structures
+timeline.stats.researches_none = — no researches yet
 timeline.tt.supply = Supply used / supply cap at this moment.
 timeline.tt.supply_blocked = Supply-blocked: used equals cap, can't train more units until you add supply.
 timeline.tt.minerals = Banked minerals. Right side shows income rate per minute.
@@ -302,6 +303,7 @@ timeline.tt.idle_worker = Time worker production slots sat idle while capacity w
 timeline.tt.idle_army = Time army producers sat idle while capacity was free. Zerg: each Hatch/Lair/Hive counts as 1 larva-bandwidth slot. Counts up to current slider position.
 timeline.tt.blocks = Supply-blocked periods up to current time — total count and accumulated duration.
 timeline.tt.unit_chip = {name} × {count}
+timeline.tt.research_chip = {name} · finished at {mm}:{ss}
 
 # ── Rename screen ───────────────────────────────────────────────────────────
 rename.heading = Batch Rename Replays

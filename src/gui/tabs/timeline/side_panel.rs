@@ -8,7 +8,8 @@
 //! 4. Army — valor total + split mineral/gas + pips de attack/armor.
 //! 5. Composição — chips com abreviação de 3 letras por unidade viva.
 //! 6. Estruturas — chips com abreviação de 3 letras por estrutura viva.
-//! 7. Eficiência — building focus, idle time e supply block count.
+//! 7. Pesquisas — chips com upgrades pontuais concluídos (não-leveled).
+//! 8. Eficiência — building focus, idle time e supply block count.
 
 use std::collections::HashMap;
 
@@ -21,7 +22,7 @@ use crate::colors::{player_slot_color_bright, ACCENT_WARNING, LABEL_DIM, LABEL_S
 use crate::config::AppConfig;
 use crate::locale::{localize, tf, Language};
 use crate::production_gap::{compute_idle_periods, compute_idle_periods_ranges, is_zerg_race};
-use crate::replay::{is_structure_name, PlayerTimeline, StatsSnapshot};
+use crate::replay::{is_structure_name, PlayerTimeline, StatsSnapshot, UpgradeEntry};
 use crate::replay_state::LoadedReplay;
 use crate::supply_block::SupplyBlockEntry;
 use crate::tokens::{size_body, size_caption, size_subtitle, SPACE_S, SPACE_XS};
@@ -93,6 +94,11 @@ pub(super) fn player_side_panel(
     ui.separator();
     ui.add_space(SPACE_XS);
     structures_block(ui, p, game_loop, lang);
+
+    ui.add_space(SPACE_XS);
+    ui.separator();
+    ui.add_space(SPACE_XS);
+    researches_block(ui, p, game_loop, loops_per_second, lang);
 
     ui.add_space(SPACE_XS);
     ui.separator();
@@ -587,6 +593,88 @@ fn structure_abbrev(canonical: &str) -> &'static str {
         "ShieldBattery" => "SB",
         _ => "STR",
     }
+}
+
+// ── Researches block ───────────────────────────────────────────────────
+//
+// Lista os upgrades pontuais concluídos até o instante corrente — Stim,
+// WarpGate, Blink, etc. Os upgrades com níveis (`*Level1/2/3`) não
+// aparecem aqui porque já estão representados como pips `⚔+N` / `🛡+N`
+// no army block; duplicar seria ruído. A ordenação é cronológica —
+// primeiro pesquisado à esquerda, último à direita, o que ajuda a ler
+// a progressão de tech sem precisar decorar nomes.
+
+fn researches_block(
+    ui: &mut Ui,
+    p: &PlayerTimeline,
+    game_loop: u32,
+    loops_per_second: f64,
+    lang: Language,
+) {
+    let done: Vec<&UpgradeEntry> = p
+        .upgrades
+        .iter()
+        .filter(|u| {
+            // `Reward*` são achievements cosméticos (portrait, spray, voice
+            // set) que entram na stream de upgrades mas não têm efeito de
+            // jogo — poluiriam a lista sem valor tático.
+            u.game_loop <= game_loop
+                && !is_level_upgrade_name(&u.name)
+                && !u.name.starts_with("Reward")
+        })
+        .collect();
+    if done.is_empty() {
+        ui.label(
+            RichText::new(tf("timeline.stats.researches_none", lang, &[]))
+                .small()
+                .color(LABEL_DIM),
+        );
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        for u in done {
+            let full = localize(&u.name, lang);
+            let label = short_research_label(full);
+            let secs = (u.game_loop as f64 / loops_per_second).round() as u32;
+            let tooltip = tf(
+                "timeline.tt.research_chip",
+                lang,
+                &[
+                    ("name", full),
+                    ("mm", &format!("{:02}", secs / 60)),
+                    ("ss", &format!("{:02}", secs % 60)),
+                ],
+            );
+            chip(ui, label, false, None).on_hover_text(tooltip);
+        }
+    });
+}
+
+/// Espelha `build_order::classify::is_leveled_upgrade` — precisamos do
+/// mesmo critério para filtrar os upgrades que já aparecem como pips
+/// attack/armor no army block. Duplicar a heurística aqui evita expor
+/// API cross-module só pra três linhas.
+fn is_level_upgrade_name(name: &str) -> bool {
+    name.ends_with("Level1") || name.ends_with("Level2") || name.ends_with("Level3")
+}
+
+/// Encurta nomes de pesquisa pra caber no chip sem quebrar linha a
+/// cada entrada. Pega a primeira palavra (até 12 chars), preservando
+/// o nome completo no tooltip. Cobre o caso típico onde a tradução é
+/// "Extended Thermal Lance" ou "Concussive Shells" — a primeira palavra
+/// dá contexto suficiente pro jogador reconhecer. Walk por `char_indices`
+/// pra não partir caracteres multibyte em traduções pt-BR com acentos.
+fn short_research_label(full: &str) -> &str {
+    let mut end = full.len();
+    let mut chars_taken = 0;
+    for (i, c) in full.char_indices() {
+        if c == ' ' || chars_taken >= 12 {
+            end = i;
+            break;
+        }
+        chars_taken += 1;
+    }
+    &full[..end]
 }
 
 // ── Efficiency block ───────────────────────────────────────────────────
