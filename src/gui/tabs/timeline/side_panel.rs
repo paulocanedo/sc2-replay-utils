@@ -14,7 +14,7 @@ use egui::{
 };
 
 use crate::colors::{
-    player_slot_color_bright, race_color, ACCENT_DANGER, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT,
+    player_slot_color_bright, race_color, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT,
 };
 use crate::config::AppConfig;
 use crate::locale::{tf, Language};
@@ -112,7 +112,7 @@ fn supply_bar(ui: &mut Ui, s: &StatsSnapshot, slot_color: Color32) {
         0.0
     };
     let blocked = s.supply_made > 0 && s.supply_used >= s.supply_made;
-    let bar_color = if blocked { ACCENT_DANGER } else { slot_color };
+    let bar_color = if blocked { ACCENT_WARNING } else { slot_color };
     let label = if blocked {
         format!("⚠ {}/{}", s.supply_used, cap)
     } else {

@@ -369,7 +369,7 @@ fn player_column(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             Grid::new(format!("bo_grid_{}", index))
-                .num_columns(5)
+                .num_columns(4)
                 .spacing([12.0, 2.0])
                 .striped(true)
                 .show(ui, |ui| {
@@ -377,7 +377,6 @@ fn player_column(
                     ui.label(RichText::new(t("build_order.col.end", lang)).small().strong());
                     ui.label(RichText::new(t("build_order.col.supply", lang)).small().strong());
                     ui.label(RichText::new(t("build_order.col.action", lang)).small().strong());
-                    ui.label(RichText::new(t("build_order.col.type", lang)).small().strong());
                     ui.end_row();
 
                     let mut rendered = 0usize;
@@ -469,16 +468,6 @@ fn player_column(
                                 ));
                             }
                         });
-
-                        // tipo (última coluna)
-                        let color = kind_color(kind);
-                        ui.label(
-                            RichText::new(kind.short_letter())
-                                .monospace()
-                                .strong()
-                                .color(color),
-                        )
-                        .on_hover_text(entry_kind_full_name(kind, lang));
 
                         ui.end_row();
                         rendered += 1;
