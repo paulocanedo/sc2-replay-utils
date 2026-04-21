@@ -44,7 +44,7 @@ pub struct ProductionGapResult {
 
 // ── Classificação ────────────────────────────────────────────────────────────
 
-fn is_zerg_race(race: &str) -> bool {
+pub fn is_zerg_race(race: &str) -> bool {
     race.starts_with('Z') || race.starts_with('z')
 }
 
@@ -132,8 +132,27 @@ impl EvKind {
     }
 }
 
+/// Wrapper histórico para worker idle — infere start a partir do birth
+/// subtraindo `WORKER_BUILD_TIME` (constante para SCV/Probe). Para army,
+/// onde os build times variam por unidade, use `compute_idle_periods_ranges`
+/// passando os pares `(start, end)` reais do parser.
 pub fn compute_idle_periods(
     worker_births: &[u32],
+    capacity_events: &[(u32, i32)],
+    game_end: u32,
+) -> (Vec<ProductionGapEntry>, u32, f64) {
+    let ranges: Vec<(u32, u32)> = worker_births
+        .iter()
+        .map(|&b| (b.saturating_sub(WORKER_BUILD_TIME), b))
+        .collect();
+    compute_idle_periods_ranges(&ranges, capacity_events, game_end)
+}
+
+/// Calcula períodos ociosos dado uma lista de `(start_loop, end_loop)`
+/// de produções e os deltas de capacidade. Usado para worker (via
+/// `compute_idle_periods`) e army (direto com `PlayerTimeline::army_productions`).
+pub fn compute_idle_periods_ranges(
+    productions: &[(u32, u32)],
     capacity_events: &[(u32, i32)],
     game_end: u32,
 ) -> (Vec<ProductionGapEntry>, u32, f64) {
@@ -148,10 +167,9 @@ pub fn compute_idle_periods(
         }
     }
 
-    for &birth in worker_births {
-        let start = birth.saturating_sub(WORKER_BUILD_TIME);
+    for &(start, end) in productions {
         timeline.push((start, EvKind::ProdStart));
-        timeline.push((birth, EvKind::ProdEnd));
+        timeline.push((end, EvKind::ProdEnd));
     }
 
     // Ordenar: por game_loop, desempate por ordem do tipo

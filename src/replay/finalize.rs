@@ -8,10 +8,12 @@
 use std::collections::{HashMap, HashSet};
 
 use super::classify::{
-    is_armor_upgrade, is_army_producer, is_attack_upgrade, is_creep_tumor_name, is_worker_producer,
-    upgrade_level,
+    classify_entity, is_armor_upgrade, is_army_producer_all, is_attack_upgrade,
+    is_creep_tumor_name, is_larva_born_army, is_worker_name, is_worker_producer, upgrade_level,
 };
-use super::types::{CreepEntry, CreepKind, EntityEventKind, PlayerTimeline, StatsSnapshot};
+use super::types::{
+    CreepEntry, CreepKind, EntityCategory, EntityEventKind, PlayerTimeline, StatsSnapshot,
+};
 
 // ── Constantes de morph ─────────────────────────────────────────────
 //
@@ -248,6 +250,27 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
         }
     }
 
+    // Critério "é unidade army" por raça:
+    // - Zerg: `is_larva_born_army` (Zergling/Roach/.../Overlord — usam
+    //   slot de larva). Queen/Baneling/BroodLord ficam fora (morph).
+    // - T/P: qualquer Unit não-worker e não-larva-born — cobre unidades
+    //   produzidas por Barracks/Gateway/Factory/Starport/etc.
+    let is_zerg = player.race.starts_with('Z') || player.race.starts_with('z');
+    let is_army_unit = |name: &str| -> bool {
+        if is_worker_name(name) {
+            return false;
+        }
+        if is_zerg {
+            is_larva_born_army(name)
+        } else {
+            matches!(classify_entity(name), EntityCategory::Unit) && !is_larva_born_army(name)
+        }
+    };
+
+    // Correlaciona Started→Finished por tag para army units — alimenta
+    // `army_productions` com pares (start_loop, end_loop) reais.
+    let mut pending_army_start: HashMap<i64, u32> = HashMap::new();
+
     for (i, ev) in events.iter().enumerate() {
         match ev.kind {
             EntityEventKind::Died => {
@@ -260,7 +283,7 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
                 if is_worker_producer(&ev.entity_type) {
                     player.worker_capacity.push((ev.game_loop, -1));
                 }
-                if is_army_producer(&ev.entity_type) {
+                if is_army_producer_all(&ev.entity_type) {
                     player.army_capacity.push((ev.game_loop, -1));
                 }
             }
@@ -281,7 +304,14 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
                 } else {
                     None
                 };
-                let Some(old_type) = old_type else { continue };
+                let Some(old_type) = old_type else {
+                    // Started sem Died companheiro = produção normal.
+                    // Se for army unit, abre uma janela de produção.
+                    if is_army_unit(&ev.entity_type) {
+                        pending_army_start.insert(ev.tag, ev.game_loop);
+                    }
+                    continue;
+                };
 
                 let new_type = ev.entity_type.as_str();
                 let old_w = is_worker_producer(old_type);
@@ -304,8 +334,8 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
                     (false, false) => {}
                 }
 
-                let old_a = is_army_producer(old_type);
-                let new_a = is_army_producer(new_type);
+                let old_a = is_army_producer_all(old_type);
+                let new_a = is_army_producer_all(new_type);
                 match (old_a, new_a) {
                     (true, true) => {
                         let mt = morph_build_time(new_type);
@@ -340,8 +370,17 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
                     if is_worker_producer(&ev.entity_type) {
                         player.worker_capacity.push((ev.game_loop, 1));
                     }
-                    if is_army_producer(&ev.entity_type) {
+                    if is_army_producer_all(&ev.entity_type) {
                         player.army_capacity.push((ev.game_loop, 1));
+                    }
+
+                    // army_productions: fecha a janela aberta em
+                    // `ProductionStarted`. Tags sem start pareado (eventos
+                    // parciais) são ignoradas.
+                    if is_army_unit(&ev.entity_type) {
+                        if let Some(start) = pending_army_start.remove(&ev.tag) {
+                            player.army_productions.push((start, ev.game_loop));
+                        }
                     }
                 }
 
@@ -356,7 +395,11 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
                     }
                 }
             }
-            EntityEventKind::ProductionCancelled => {}
+            EntityEventKind::ProductionCancelled => {
+                // Produção cancelada: limpa a janela aberta para não
+                // contar como idle nem como produção finalizada.
+                pending_army_start.remove(&ev.tag);
+            }
         }
     }
 
@@ -368,6 +411,7 @@ fn derive_capacity_indices(player: &mut PlayerTimeline) {
     // emitido. Um sort estável defensivo garante o invariante.
     player.worker_capacity.sort_by_key(|(l, _)| *l);
     player.army_capacity.sort_by_key(|(l, _)| *l);
+    player.army_productions.sort_by_key(|(start, _)| *start);
     // `worker_births` sai estritamente crescente (só vem de Finished
     // em ordem de loop) — nenhum sort necessário.
 
