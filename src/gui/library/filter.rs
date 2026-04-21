@@ -115,7 +115,12 @@ pub fn matches_filter(
                 let map_match = meta.map.to_ascii_lowercase().contains(&needle);
                 let mc = matchup_code(meta, config);
                 let matchup_match = mc.to_ascii_lowercase().contains(&needle);
-                if !(name_match || map_match || matchup_match) {
+                let opening_match = meta.players.iter().any(|p| {
+                    p.opening
+                        .as_ref()
+                        .map_or(false, |o| o.to_ascii_lowercase().contains(&needle))
+                });
+                if !(name_match || map_match || matchup_match || opening_match) {
                     return false;
                 }
             }
@@ -281,6 +286,42 @@ mod tests {
             ..LibraryFilter::default()
         };
         assert!(!matches_filter(&parsed, &miss, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn search_matches_opening_label() {
+        let cfg = cfg_with("me");
+        let mut parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        if let MetaState::Parsed(meta) = &mut parsed.meta {
+            meta.players[0].opening = Some("3 Rax Reaper — Stim Timing".into());
+            meta.players[1].opening = Some("Hatch First — Ling/Queen".into());
+        }
+        for q in ["reaper", "HATCH", "ling/queen", "stim"] {
+            let f = LibraryFilter {
+                search: q.into(),
+                date_range: DateRange::All,
+                ..LibraryFilter::default()
+            };
+            assert!(matches_filter(&parsed, &f, &cfg, "2026-04-20"), "query={q}");
+        }
+        let miss = LibraryFilter {
+            search: "roach".into(),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &miss, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn search_ignores_missing_opening() {
+        let cfg = cfg_with("me");
+        let parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        let f = LibraryFilter {
+            search: "hatch".into(),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &f, &cfg, "2026-04-20"));
     }
 
     #[test]
