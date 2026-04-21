@@ -42,7 +42,7 @@ pub struct LibraryStats {
     pub best_matchup: Option<String>,
 }
 
-const MMR_TREND_WINDOW: usize = 7;
+pub const MMR_TREND_WINDOW: usize = 7;
 const BEST_MATCHUP_MIN_GAMES: usize = 5;
 const TOP_MAPS_LIMIT: usize = 5;
 

@@ -42,7 +42,7 @@ pub fn show(
     // ── Hero KPI strip ───────────────────────────────────────────────
     if let Some(stats) = library.stats() {
         if stats.total_parsed > 0 {
-            if let Some(ha) = hero::show(ui, stats, config) {
+            if let Some(ha) = hero::show(ui, stats, config, filter.date_range) {
                 match ha {
                     HeroAction::ClearFilters => {
                         filter.search.clear();
