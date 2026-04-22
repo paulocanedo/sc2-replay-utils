@@ -168,8 +168,8 @@ fn render_units_section(
     lang: Language,
     size_factor: f32,
 ) {
-    let entries = collect_alive_units(p, game_loop);
-    if entries.is_empty() {
+    let raw = collect_alive_units(p, game_loop);
+    if raw.is_empty() {
         ui.label(
             RichText::new(tf("timeline.stats.units_none", lang, &[]))
                 .small()
@@ -177,18 +177,39 @@ fn render_units_section(
         );
         return;
     }
+    // Agrega variantes de estado (Sieged/Burrowed/Cocoon/Phased/AG/AP…)
+    // no nome canônico antes de renderizar — caso contrário
+    // `SiegeTank` e `SiegeTankSieged` apareceriam como dois chips
+    // distintos mesmo compartilhando sprite e abreviação. Entidades
+    // desconhecidas (mods/patches novos) caem no `else` e preservam o
+    // nome bruto.
+    let mut agg: HashMap<String, i32> = HashMap::new();
+    for (ty, count) in &raw {
+        let canonical = unit_canonical(ty);
+        let key = if canonical.is_empty() {
+            ty.clone()
+        } else {
+            canonical.to_string()
+        };
+        *agg.entry(key).or_insert(0) += count;
+    }
+    let mut entries: Vec<(String, i32)> = agg.into_iter().collect();
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
-        for (ty, count) in entries {
+        for (canonical, count) in entries {
             let tooltip = tf(
                 "timeline.tt.unit_chip",
                 lang,
-                &[("name", localize(&ty, lang)), ("count", &count.to_string())],
+                &[
+                    ("name", localize(&canonical, lang)),
+                    ("count", &count.to_string()),
+                ],
             );
-            if let Some(icon) = unit_icon(&ty) {
+            if let Some(icon) = unit_icon(&canonical) {
                 icon_chip(ui, icon, count, size_factor, slot_idx).on_hover_text(tooltip);
             } else {
-                text_chip(ui, &unit_abbrev(&ty), count, size_factor, slot_idx)
+                text_chip(ui, &unit_abbrev(&canonical), count, size_factor, slot_idx)
                     .on_hover_text(tooltip);
             }
         }
@@ -241,6 +262,88 @@ fn render_structures_section(
             }
         }
     });
+}
+
+/// Colapsa variantes de estado (Sieged, Burrowed, Cocoon, Phased, AG,
+/// AP, PhaseShift, SiegeMode, Transport…) no nome canônico da unidade.
+/// Análogo ao `structure_canonical` — usado pela agregação em
+/// `render_units_section` pra garantir que `SiegeTank` e
+/// `SiegeTankSieged` virem um único chip com a soma das contagens.
+/// Retorna string vazia pra entidades desconhecidas — caller preserva
+/// o nome bruto nesse caso.
+pub(super) fn unit_canonical(name: &str) -> &'static str {
+    match name {
+        // Terran
+        "SCV" => "SCV",
+        "MULE" => "MULE",
+        "Marine" => "Marine",
+        "Marauder" => "Marauder",
+        "Reaper" => "Reaper",
+        "Ghost" | "GhostAlternate" => "Ghost",
+        "Hellion" => "Hellion",
+        "HellionTank" => "HellionTank",
+        "SiegeTank" | "SiegeTankSieged" => "SiegeTank",
+        "Cyclone" => "Cyclone",
+        "WidowMine" | "WidowMineBurrowed" => "WidowMine",
+        "Thor" | "ThorAP" => "Thor",
+        "VikingFighter" | "VikingAssault" => "VikingFighter",
+        "Medivac" => "Medivac",
+        "Liberator" | "LiberatorAG" => "Liberator",
+        "Raven" => "Raven",
+        "Banshee" => "Banshee",
+        "Battlecruiser" => "Battlecruiser",
+        // Protoss
+        "Probe" => "Probe",
+        "Zealot" => "Zealot",
+        "Stalker" => "Stalker",
+        "Sentry" => "Sentry",
+        "Adept" | "AdeptPhaseShift" => "Adept",
+        "HighTemplar" => "HighTemplar",
+        "DarkTemplar" => "DarkTemplar",
+        "Archon" => "Archon",
+        "Immortal" => "Immortal",
+        "Colossus" => "Colossus",
+        "Disruptor" | "DisruptorPhased" => "Disruptor",
+        "Observer" | "ObserverSiegeMode" => "Observer",
+        "WarpPrism" | "WarpPrismPhasing" => "WarpPrism",
+        "Phoenix" => "Phoenix",
+        "VoidRay" => "VoidRay",
+        "Oracle" => "Oracle",
+        "Tempest" => "Tempest",
+        "Carrier" => "Carrier",
+        "Mothership" => "Mothership",
+        // Zerg
+        "Drone" => "Drone",
+        "Queen" => "Queen",
+        "Zergling" => "Zergling",
+        "Baneling" | "BanelingCocoon" => "Baneling",
+        "Roach" | "RoachBurrowed" => "Roach",
+        "Ravager" | "RavagerCocoon" => "Ravager",
+        "Hydralisk" | "HydraliskBurrowed" => "Hydralisk",
+        "LurkerMP" | "LurkerMPBurrowed" | "LurkerMPEgg" => "LurkerMP",
+        "Mutalisk" => "Mutalisk",
+        "Corruptor" => "Corruptor",
+        "BroodLord" | "BroodLordCocoon" => "BroodLord",
+        "Infestor" | "InfestorBurrowed" => "Infestor",
+        "SwarmHostMP" | "SwarmHostBurrowedMP" => "SwarmHostMP",
+        "Viper" => "Viper",
+        "Ultralisk" | "UltraliskBurrowed" => "Ultralisk",
+        "Overlord" | "OverlordTransport" => "Overlord",
+        "Overseer" | "OverseerSiegeMode" => "Overseer",
+        // Neutrals / shared spawns
+        "Larva" => "Larva",
+        "Interceptor" => "Interceptor",
+        "AutoTurret" => "AutoTurret",
+        "Locust" | "LocustMP" | "LocustMPFlying" => "LocustMP",
+        "Broodling" => "Broodling",
+        "Changeling"
+        | "ChangelingMarine"
+        | "ChangelingMarineShield"
+        | "ChangelingZealot"
+        | "ChangelingZergling"
+        | "ChangelingZerglingWings" => "Changeling",
+        _ => "",
+    }
 }
 
 /// Mapeia `entity_type` → ícone PNG embutido. Filenames casam exatamente

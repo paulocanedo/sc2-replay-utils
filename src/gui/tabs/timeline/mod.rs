@@ -58,7 +58,7 @@ const SIDE_PANEL_CHARS: f32 = 28.0;
 /// lado do ícone de unidade nas colunas verticais do painel central.
 /// ~2.6× dá ícones legíveis (~40 px na fonte padrão) sem engolir o
 /// minimapa. Escala com o zoom do usuário (HiDPI-aware).
-const UNIT_ICON_BODY_FACTOR: f32 = 2.6;
+const UNIT_ICON_BODY_FACTOR: f32 = 1.8;
 
 /// Largura das colunas verticais de unidades/estruturas dentro do
 /// painel central, em caracteres monospace. Dimensionado pra acomodar
