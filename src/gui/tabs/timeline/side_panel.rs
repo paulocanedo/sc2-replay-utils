@@ -288,9 +288,9 @@ fn army_block(
 // Chips por tipo de unidade viva. Quando há ícone disponível
 // (`assets/units/<race>/<Entity>.png`), renderiza `[icon] N` em vez de
 // `ABR N`. O fallback textual mantém o layout funcional pras raças sem
-// sprites ainda (todo Zerg) e pras unidades raras sem arte (Larva,
-// Interceptor, Changeling, AutoTurret…). Estruturas ficam de fora —
-// já estão implícitas em Supply/Economy/Army.
+// sprites (unidades raras sem arte: Larva, Interceptor, Changeling,
+// AutoTurret, Broodling, Locust…). Estruturas ficam de fora — já estão
+// implícitas em Supply/Economy/Army.
 
 fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) {
     let mut entries: Vec<(&str, i32)> = p
@@ -428,6 +428,44 @@ fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
         "Oracle" => include_image!("../../../../assets/units/protoss/Oracle.png"),
         "Tempest" => include_image!("../../../../assets/units/protoss/Tempest.png"),
         "Carrier" => include_image!("../../../../assets/units/protoss/Carrier.png"),
+        // Zerg
+        "Drone" => include_image!("../../../../assets/units/zerg/Drone.png"),
+        "Queen" => include_image!("../../../../assets/units/zerg/Queen.png"),
+        "Zergling" => include_image!("../../../../assets/units/zerg/Zergling.png"),
+        "Baneling" | "BanelingCocoon" => {
+            include_image!("../../../../assets/units/zerg/Baneling.png")
+        }
+        "Roach" | "RoachBurrowed" => include_image!("../../../../assets/units/zerg/Roach.png"),
+        "Ravager" | "RavagerCocoon" => {
+            include_image!("../../../../assets/units/zerg/Ravager.png")
+        }
+        "Hydralisk" | "HydraliskBurrowed" => {
+            include_image!("../../../../assets/units/zerg/Hydralisk.png")
+        }
+        "LurkerMP" | "LurkerMPBurrowed" | "LurkerMPEgg" => {
+            include_image!("../../../../assets/units/zerg/LurkerMP.png")
+        }
+        "Mutalisk" => include_image!("../../../../assets/units/zerg/Mutalisk.png"),
+        "Corruptor" => include_image!("../../../../assets/units/zerg/Corruptor.png"),
+        "BroodLord" | "BroodLordCocoon" => {
+            include_image!("../../../../assets/units/zerg/BroodLord.png")
+        }
+        "Infestor" | "InfestorBurrowed" => {
+            include_image!("../../../../assets/units/zerg/Infestor.png")
+        }
+        "SwarmHostMP" | "SwarmHostBurrowedMP" => {
+            include_image!("../../../../assets/units/zerg/SwarmHostMP.png")
+        }
+        "Viper" => include_image!("../../../../assets/units/zerg/Viper.png"),
+        "Ultralisk" | "UltraliskBurrowed" => {
+            include_image!("../../../../assets/units/zerg/Ultralisk.png")
+        }
+        "Overlord" | "OverlordTransport" => {
+            include_image!("../../../../assets/units/zerg/Overlord.png")
+        }
+        "Overseer" | "OverseerSiegeMode" => {
+            include_image!("../../../../assets/units/zerg/Overseer.png")
+        }
         _ => return None,
     };
     Some(src)
