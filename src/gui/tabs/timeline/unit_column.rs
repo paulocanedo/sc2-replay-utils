@@ -347,6 +347,18 @@ pub(super) fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>>
         "Overseer" | "OverseerSiegeMode" => {
             include_image!("../../../../assets/units/zerg/Overseer.png")
         }
+        // Zerg — spawns/ephemerals. Changelings (morphed por Overseer)
+        // e Locusts (deploy do Swarm Host) têm variantes de estado que
+        // colapsam em um único sprite.
+        "Larva" => include_image!("../../../../assets/units/zerg/Larva.png"),
+        "Broodling" => include_image!("../../../../assets/units/zerg/Broodling.png"),
+        "Locust" | "LocustMP" | "LocustMPFlying" => {
+            include_image!("../../../../assets/units/zerg/LocustMP.png")
+        }
+        "Changeling" | "ChangelingMarine" | "ChangelingMarineShield" | "ChangelingZealot"
+        | "ChangelingZergling" | "ChangelingZerglingWings" => {
+            include_image!("../../../../assets/units/zerg/Changeling.png")
+        }
         _ => return None,
     };
     Some(src)
@@ -420,7 +432,12 @@ pub(super) fn unit_abbrev(entity_type: &str) -> String {
         "AutoTurret" => "TUR",
         "Locust" | "LocustMP" | "LocustMPFlying" => "LOC",
         "Broodling" => "BRO",
-        "Changeling" | "ChangelingMarine" | "ChangelingZealot" | "ChangelingZergling" => "CHG",
+        "Changeling"
+        | "ChangelingMarine"
+        | "ChangelingMarineShield"
+        | "ChangelingZealot"
+        | "ChangelingZergling"
+        | "ChangelingZerglingWings" => "CHG",
         other => {
             return other
                 .chars()
@@ -505,8 +522,9 @@ pub(super) fn structure_canonical(name: &str) -> &'static str {
 /// Terran Tech Lab / Reactor reutilizam o mesmo módulo em
 /// Barracks/Factory/Starport, e Gateway/WarpGate também compartilham —
 /// WarpGate é morph do Gateway, a diferenciação fica a cargo do tooltip
-/// localizado. Retorna `None` pra Zerg (sem sprites ainda) — caller cai
-/// no `text_chip` com a abreviação.
+/// localizado. Morphs Zerg na linha Hatch→Lair→Hive e Spire→GreaterSpire
+/// têm sprites próprios. Retorna `None` apenas pras estruturas ainda
+/// sem arte (todas cobertas agora — fallback é defensivo).
 pub(super) fn structure_icon(canonical: &str) -> Option<egui::ImageSource<'static>> {
     use egui::include_image;
     let src = match canonical {
@@ -586,8 +604,48 @@ pub(super) fn structure_icon(canonical: &str) -> Option<egui::ImageSource<'stati
         "ShieldBattery" => {
             include_image!("../../../../assets/buildings/protoss/ShieldBattery.png")
         }
-        // WarpGate não tem sprite próprio ainda — morph do Gateway com
-        // visual distinto, cai no text_chip com "WG" até chegar arte.
+        // Zerg — base (morphs na linha Hatch→Lair→Hive e Spire→GreaterSpire
+        // têm sprites distintos).
+        "Hatchery" => include_image!("../../../../assets/buildings/zerg/Hatchery.png"),
+        "Lair" => include_image!("../../../../assets/buildings/zerg/Lair.png"),
+        "Hive" => include_image!("../../../../assets/buildings/zerg/Hive.png"),
+        "Extractor" => include_image!("../../../../assets/buildings/zerg/Extractor.png"),
+        // Zerg — produção/tecnologia
+        "SpawningPool" => {
+            include_image!("../../../../assets/buildings/zerg/SpawningPool.png")
+        }
+        "RoachWarren" => include_image!("../../../../assets/buildings/zerg/RoachWarren.png"),
+        "HydraliskDen" => {
+            include_image!("../../../../assets/buildings/zerg/HydraliskDen.png")
+        }
+        "BanelingNest" => {
+            include_image!("../../../../assets/buildings/zerg/BanelingNest.png")
+        }
+        "EvolutionChamber" => {
+            include_image!("../../../../assets/buildings/zerg/EvolutionChamber.png")
+        }
+        "Spire" => include_image!("../../../../assets/buildings/zerg/Spire.png"),
+        "GreaterSpire" => {
+            include_image!("../../../../assets/buildings/zerg/GreaterSpire.png")
+        }
+        "InfestationPit" => {
+            include_image!("../../../../assets/buildings/zerg/InfestationPit.png")
+        }
+        "UltraliskCavern" => {
+            include_image!("../../../../assets/buildings/zerg/UltraliskCavern.png")
+        }
+        "NydusNetwork" => {
+            include_image!("../../../../assets/buildings/zerg/NydusNetwork.png")
+        }
+        "NydusCanal" => include_image!("../../../../assets/buildings/zerg/NydusCanal.png"),
+        "LurkerDen" => include_image!("../../../../assets/buildings/zerg/LurkerDen.png"),
+        // Zerg — defesa (sessile after root, mesma sprite)
+        "SpineCrawler" => {
+            include_image!("../../../../assets/buildings/zerg/SpineCrawler.png")
+        }
+        "SporeCrawler" => {
+            include_image!("../../../../assets/buildings/zerg/SporeCrawler.png")
+        }
         _ => return None,
     };
     Some(src)
