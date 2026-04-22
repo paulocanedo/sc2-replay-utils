@@ -20,17 +20,34 @@ use super::entities::{collect_alive_structures, collect_alive_units};
 
 /// Alpha do background semi-transparente pintado com a cor do jogador.
 /// ~20% de opacidade — visível o suficiente pra identificar o dono do
-/// card mas sem lavar o ícone renderizado por cima.
-const CARD_BG_ALPHA: u8 = 50;
+/// conteúdo mas sem lavar os ícones renderizados por cima.
+const SECTION_BG_ALPHA: u8 = 50;
 
-/// Raio dos cantos do card e da borda de hover.
+/// Raio dos cantos do container de seção e da borda de hover dos cards.
 const CARD_CORNER_RADIUS: f32 = 4.0;
 
+/// Padding interno do container de seção — folga entre o background e
+/// a primeira/última linha de cards.
+const SECTION_INNER_PAD: i8 = 6;
+
 /// Fill semi-transparente na cor do slot. Usado como background único
-/// dos cards da coluna central.
-fn card_bg(slot_idx: usize) -> Color32 {
+/// do container que envolve todos os cards de uma seção (unidades ou
+/// estruturas). Cards individuais não recebem background próprio —
+/// fica um bloco visual coeso em vez de uma lista de pílulas.
+fn section_bg(slot_idx: usize) -> Color32 {
     let c = player_slot_color(slot_idx);
-    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), CARD_BG_ALPHA)
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), SECTION_BG_ALPHA)
+}
+
+/// Frame pintado com o fill da seção + cantos arredondados + padding
+/// interno. Usado nas duas seções (`render_units_section` e
+/// `render_structures_section`) pra envolver o stack vertical de cards
+/// num único bloco colorido.
+fn section_frame(slot_idx: usize) -> egui::Frame {
+    egui::Frame::new()
+        .fill(section_bg(slot_idx))
+        .corner_radius(CARD_CORNER_RADIUS)
+        .inner_margin(egui::Margin::same(SECTION_INNER_PAD))
 }
 
 /// Gap horizontal entre o ícone e o número de contagem dentro do card.
@@ -56,26 +73,22 @@ fn card_size(ui: &Ui, size_factor: f32) -> (f32, egui::Vec2) {
     (icon_side, egui::vec2(width, icon_side))
 }
 
-/// Pinta o background semi-transparente + borda de hover comum a
-/// todos os cards da coluna. Fator ed unificado pra manter icon_chip e
-/// text_chip visualmente idênticos exceto pelo conteúdo do slot.
-fn paint_card_chrome(ui: &Ui, rect: egui::Rect, slot_idx: usize, hovered: bool) {
-    ui.painter()
-        .rect_filled(rect, CARD_CORNER_RADIUS, card_bg(slot_idx));
-    if hovered {
-        ui.painter().rect_stroke(
-            rect,
-            CARD_CORNER_RADIUS,
-            Stroke::new(1.0, player_slot_color_bright(slot_idx)),
-            StrokeKind::Inside,
-        );
-    }
+/// Pinta apenas a borda fina na cor do slot quando o card está
+/// hovered. Sem fill — o background fica no container da seção.
+fn paint_hover_ring(ui: &Ui, rect: egui::Rect, slot_idx: usize) {
+    ui.painter().rect_stroke(
+        rect,
+        CARD_CORNER_RADIUS,
+        Stroke::new(1.0, player_slot_color_bright(slot_idx)),
+        StrokeKind::Inside,
+    );
 }
 
-/// Card compacto `[ícone] [contagem]` com background semi-transparente
-/// na cor do jogador e borda de hover. Tamanho fixo (ícone + gap + slot
-/// de 3 dígitos) pra que cards alinhem verticalmente sem depender do
-/// número de dígitos.
+/// Card compacto `[ícone] [contagem]`. Sem background próprio — o
+/// container da seção pinta o fill único que envolve todos os cards.
+/// Tamanho fixo (ícone + gap + slot de 3 dígitos) pra que cards alinhem
+/// verticalmente independente do número de dígitos. Mostra ring de
+/// hover na cor do slot pra feedback de interação.
 pub(super) fn icon_chip(
     ui: &mut Ui,
     icon: egui::ImageSource<'static>,
@@ -86,7 +99,6 @@ pub(super) fn icon_chip(
     let (icon_side, size) = card_size(ui, size_factor);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        paint_card_chrome(ui, rect, slot_idx, response.hovered());
         let icon_rect = egui::Rect::from_min_size(rect.min, egui::vec2(icon_side, icon_side));
         egui::Image::new(icon)
             .fit_to_exact_size(egui::vec2(icon_side, icon_side))
@@ -99,14 +111,17 @@ pub(super) fn icon_chip(
             font_id,
             Color32::from_gray(220),
         );
+        if response.hovered() {
+            paint_hover_ring(ui, rect, slot_idx);
+        }
     }
     response
 }
 
 /// Variante do card compacto onde o slot do ícone é ocupado por uma
-/// abreviação textual (3 letras). Usado para estruturas — que não têm
-/// sprite — e para unidades raras sem ícone. Mantém o mesmo tamanho
-/// fixo de `icon_chip` pra preservar o alinhamento vertical da coluna.
+/// abreviação textual (3 letras). Usado para unidades sem sprite.
+/// Mantém o mesmo tamanho fixo de `icon_chip` pra preservar o
+/// alinhamento vertical da coluna.
 fn text_chip(
     ui: &mut Ui,
     abbrev: &str,
@@ -117,7 +132,6 @@ fn text_chip(
     let (icon_side, size) = card_size(ui, size_factor);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        paint_card_chrome(ui, rect, slot_idx, response.hovered());
         let font_id = ui.style().text_styles[&egui::TextStyle::Body].clone();
         let icon_rect = egui::Rect::from_min_size(rect.min, egui::vec2(icon_side, icon_side));
         ui.painter().text(
@@ -134,6 +148,9 @@ fn text_chip(
             font_id,
             Color32::from_gray(220),
         );
+        if response.hovered() {
+            paint_hover_ring(ui, rect, slot_idx);
+        }
     }
     response
 }
@@ -195,7 +212,7 @@ fn render_units_section(
     }
     let mut entries: Vec<(String, i32)> = agg.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    ui.vertical(|ui| {
+    section_frame(slot_idx).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
         for (canonical, count) in entries {
             let tooltip = tf(
@@ -243,7 +260,7 @@ fn render_structures_section(
     }
     let mut entries: Vec<(&'static str, i32)> = agg.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-    ui.vertical(|ui| {
+    section_frame(slot_idx).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
         for (canonical, count) in entries {
             let tooltip = tf(
