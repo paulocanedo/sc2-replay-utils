@@ -48,9 +48,10 @@ pub(super) const CAMERA_HEIGHT_TILES: f32 = 14.0;
 /// largura real é derivada do glifo "M" da fonte monospace atual, então
 /// escala com o `font_size_points` do usuário (HiDPI-aware).
 /// Dimensionado para comportar a barra de supply com overlay "200/200"
-/// mais ícones de recursos + barras inline de capacidade. 18 caracteres
-/// dá ~216px com a fonte padrão — suficiente sem ficar largo demais.
-const SIDE_PANEL_CHARS: f32 = 18.0;
+/// mais ícones de recursos + barras inline de capacidade, e ainda
+/// deixar folga pra chips `[ícone] N` dos blocos de unidades/estruturas
+/// caberem 2-3 por linha em vez de quebrar a cada chip.
+const SIDE_PANEL_CHARS: f32 = 28.0;
 
 /// Calcula a largura do painel lateral com base no tamanho atual da
 /// fonte monospace + padding do frame do painel. Recomputado a cada

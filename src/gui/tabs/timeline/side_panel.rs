@@ -343,25 +343,27 @@ fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) 
 /// Pill estilo `chip` com imagem + contagem. Usado quando há sprite
 /// disponível pra unidade — a imagem substitui a abreviação de 3
 /// letras, mantendo o número à direita pra leitura rápida.
+///
+/// Tamanho do ícone deriva da altura do texto body (`text_style_height`)
+/// — assim a razão ícone:texto se mantém constante quando o usuário
+/// sobe o `font_size_points` em HiDPI. Um fator 1.4 dá ícone visível
+/// sem estufar o chip. `Button::image_and_text` reserva espaço correto
+/// pros dois filhos; abordagens baseadas em `Frame + horizontal` não
+/// medem a imagem direito e geram overflow horizontal ocultando o
+/// ícone.
 fn icon_chip(ui: &mut Ui, icon: egui::ImageSource<'static>, count: i32) -> egui::Response {
-    use egui::{Frame, Margin};
+    use crate::tokens::{CHIP_MIN_HEIGHT, RADIUS_CHIP};
     let fill = Color32::from_gray(40);
     let text_color = Color32::from_gray(160);
-    let icon_size = egui::vec2(16.0, 16.0);
-    Frame::new()
-        .fill(fill)
-        .corner_radius(crate::tokens::RADIUS_CHIP)
-        .inner_margin(Margin::symmetric(6, 2))
-        .stroke(egui::Stroke::NONE)
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.horizontal(|ui| {
-                ui.add(egui::Image::new(icon).fit_to_exact_size(icon_size));
-                ui.label(RichText::new(count.to_string()).small().color(text_color));
-            });
-        })
-        .response
-        .interact(Sense::hover())
+    let icon_side = (ui.text_style_height(&egui::TextStyle::Body) * 1.4).round();
+    let image = egui::Image::new(icon).fit_to_exact_size(egui::vec2(icon_side, icon_side));
+    let text = RichText::new(count.to_string()).small().color(text_color);
+    ui.add(
+        egui::Button::image_and_text(image, text)
+            .fill(fill)
+            .corner_radius(RADIUS_CHIP)
+            .min_size(egui::vec2(0.0, CHIP_MIN_HEIGHT)),
+    )
 }
 
 /// Mapeia `entity_type` → ícone PNG embutido. Filenames casam exatamente
@@ -375,6 +377,7 @@ fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
     let src = match entity_type {
         // Terran
         "SCV" => include_image!("../../../../assets/units/terran/SCV.png"),
+        "MULE" => include_image!("../../../../assets/units/terran/MULE.png"),
         "Marine" => include_image!("../../../../assets/units/terran/Marine.png"),
         "Marauder" => include_image!("../../../../assets/units/terran/Marauder.png"),
         "Reaper" => include_image!("../../../../assets/units/terran/Reaper.png"),
