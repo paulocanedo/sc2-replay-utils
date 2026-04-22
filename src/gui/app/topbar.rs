@@ -5,8 +5,6 @@
 // See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
 #![allow(deprecated)]
 
-use std::path::PathBuf;
-
 use egui::{Color32, Panel, RichText};
 
 use crate::colors::{
@@ -27,8 +25,6 @@ impl AppState {
     pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
-        let mut pick_dir: Option<PathBuf> = None;
-        let mut rename_clicked = false;
         let mut toggle_sidebar = false;
         let working_dir_display = self
             .library
@@ -43,6 +39,15 @@ impl AppState {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    // Sidebar toggle sits left-most — right next to the
+                    // panel it actually controls. Keeping it on the far
+                    // right created a cross-window pointer trip.
+                    if icon_button(ui, "☰", t("library.sidebar.toggle_tooltip", lang))
+                        .clicked()
+                    {
+                        toggle_sidebar = true;
+                    }
+                    ui.add_space(SPACE_S);
                     ui.label(
                         RichText::new(t("library.title", lang))
                             .size(size_subtitle(&self.config))
@@ -69,37 +74,15 @@ impl AppState {
                         }
                     }
 
+                    // Reload stays on the right (screen-level action).
+                    // Working dir → Settings, rename → menu View.
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if icon_button(ui, "📂", t("library.pick_dir_tooltip", lang))
-                                .clicked()
-                            {
-                                if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                                    pick_dir = Some(p);
-                                }
-                            }
-                            ui.add_space(SPACE_XS);
-                            if icon_button(ui, "✏", t("library.rename_tooltip", lang))
-                                .clicked()
-                            {
-                                rename_clicked = true;
-                            }
-                            ui.add_space(SPACE_XS);
                             if icon_button(ui, "↻", t("library.reload_tooltip", lang))
                                 .clicked()
                             {
                                 reload_clicked = true;
-                            }
-                            ui.add_space(SPACE_XS);
-                            if icon_button(
-                                ui,
-                                "☰",
-                                t("library.sidebar.toggle_tooltip", lang),
-                            )
-                            .clicked()
-                            {
-                                toggle_sidebar = true;
                             }
                         },
                     );
@@ -107,19 +90,6 @@ impl AppState {
             });
         if reload_clicked {
             self.refresh_library();
-        }
-        if let Some(p) = pick_dir {
-            self.config.working_dir = Some(p);
-            if let Err(e) = self.config.save() {
-                self.set_toast(tf("toast.save_error", lang, &[("err", &e)]));
-            }
-            self.refresh_library();
-        }
-        if rename_clicked {
-            self.rename_previews =
-                crate::rename::generate_previews(&self.library, &self.rename_template);
-            self.rename_status = None;
-            self.screen = Screen::Rename;
         }
         if toggle_sidebar {
             self.library_sidebar_open = !self.library_sidebar_open;

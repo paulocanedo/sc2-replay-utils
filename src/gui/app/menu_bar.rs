@@ -58,6 +58,11 @@ impl AppState {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button(t("menu.view.refresh", lang)).clicked() {
+                        self.refresh_library();
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button(t("menu.view.settings", lang)).clicked() {
                         self.show_settings = true;
                         ui.close();
