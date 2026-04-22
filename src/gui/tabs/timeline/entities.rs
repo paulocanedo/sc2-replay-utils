@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::balance_data;
-use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline};
+use crate::replay::{is_structure_name, EntityCategory, EntityEventKind, PlayerTimeline};
 
 /// Lado base (px) do quadrado de uma unidade de 1 supply no minimapa.
 /// Unidades com mais supply escalam a partir daqui via
@@ -144,6 +144,49 @@ pub(super) fn alive_entities_at(
         }
     }
     alive.into_values().collect()
+}
+
+// ── Alive collections (tipo → count) ──────────────────────────────────
+//
+// Derivados de `PlayerTimeline.alive_count` via binary search com
+// `alive_count_at`. Usados pelo painel central da Timeline pra renderizar
+// chips de unidades/estruturas vivas no instante de scrubbing. A
+// filtragem é UI-first: remove ruído que polui a visualização (Beacons,
+// CreepTumors) mas mantém tudo o que o jogador interage.
+
+/// Unidades (não-estrutura) vivas em `game_loop`, ordenadas por count
+/// descendente com desempate alfabético. Filtra `Beacon*` (pings de
+/// minimapa, não unidades controláveis).
+pub(super) fn collect_alive_units(p: &PlayerTimeline, game_loop: u32) -> Vec<(String, i32)> {
+    let mut entries: Vec<(String, i32)> = p
+        .alive_count
+        .keys()
+        .filter(|ty| !is_structure_name(ty) && !ty.starts_with("Beacon"))
+        .filter_map(|ty| {
+            let c = p.alive_count_at(ty, game_loop);
+            if c > 0 { Some((ty.clone(), c)) } else { None }
+        })
+        .collect();
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    entries
+}
+
+/// Estruturas vivas em `game_loop`, em ordem alfabética (sem agregação de
+/// variantes — `BarracksFlying` e `Barracks` aparecem separados; a
+/// agregação canonical é responsabilidade do render por ser UI-only).
+/// Filtra `CreepTumor*` (aparecem às dezenas no lategame Zerg).
+pub(super) fn collect_alive_structures(p: &PlayerTimeline, game_loop: u32) -> Vec<(String, i32)> {
+    let mut entries: Vec<(String, i32)> = p
+        .alive_count
+        .keys()
+        .filter(|ty| is_structure_name(ty) && !ty.starts_with("CreepTumor"))
+        .filter_map(|ty| {
+            let c = p.alive_count_at(ty, game_loop);
+            if c > 0 { Some((ty.clone(), c)) } else { None }
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
 }
 
 // ── Structure attention ───────────────────────────────────────────────
@@ -381,5 +424,67 @@ mod tests {
         let (att, tot) = structure_attention_at(&p, 10);
         assert_eq!(att, 0);
         assert_eq!(tot, 11);
+    }
+
+    fn alive_step(ty: &str, steps: &[(u32, i32)]) -> (String, Vec<(u32, i32)>) {
+        (ty.to_string(), steps.to_vec())
+    }
+
+    #[test]
+    fn collect_alive_units_filters_and_sorts() {
+        let mut p = empty_player();
+        p.alive_count = HashMap::from([
+            alive_step("Marine", &[(0, 10)]),
+            alive_step("Marauder", &[(0, 5)]),
+            alive_step("SCV", &[(0, 10)]),
+            alive_step("Barracks", &[(0, 2)]),          // filtrada (estrutura)
+            alive_step("BeaconAttack", &[(0, 3)]),      // filtrada (ping)
+            alive_step("Reaper", &[(0, 0)]),            // filtrada (count zero)
+        ]);
+        let got = collect_alive_units(&p, 100);
+        // Ordem: count desc, depois alfabética entre empates (Marine vs SCV ambos 10).
+        assert_eq!(
+            got,
+            vec![
+                ("Marine".to_string(), 10),
+                ("SCV".to_string(), 10),
+                ("Marauder".to_string(), 5),
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_alive_structures_filters_creep_and_units() {
+        let mut p = empty_player();
+        p.alive_count = HashMap::from([
+            alive_step("Barracks", &[(0, 2)]),
+            alive_step("SupplyDepot", &[(0, 4)]),
+            alive_step("CreepTumorBurrowed", &[(0, 25)]), // filtrado
+            alive_step("Marine", &[(0, 10)]),              // filtrado (não-estrutura)
+            alive_step("Factory", &[(0, 0)]),              // filtrado (zero)
+        ]);
+        let got = collect_alive_structures(&p, 100);
+        // Ordem alfabética: Barracks, SupplyDepot.
+        assert_eq!(
+            got,
+            vec![
+                ("Barracks".to_string(), 2),
+                ("SupplyDepot".to_string(), 4),
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_alive_uses_count_at_game_loop() {
+        // `alive_count_at` faz partition_point em cima das amostras cumulativas.
+        // Antes do primeiro step o count é zero; no step, é o valor registrado.
+        let mut p = empty_player();
+        p.alive_count = HashMap::from([
+            alive_step("Marine", &[(100, 5), (200, 12)]),
+        ]);
+        assert!(collect_alive_units(&p, 50).is_empty()); // antes do nascimento
+        assert_eq!(collect_alive_units(&p, 100), vec![("Marine".to_string(), 5)]);
+        assert_eq!(collect_alive_units(&p, 150), vec![("Marine".to_string(), 5)]);
+        assert_eq!(collect_alive_units(&p, 250), vec![("Marine".to_string(), 12)]);
     }
 }

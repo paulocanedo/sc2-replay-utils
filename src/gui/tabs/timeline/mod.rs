@@ -29,6 +29,7 @@ mod minimap;
 mod overlays;
 mod side_panel;
 mod transport;
+mod unit_column;
 
 use egui::{Color32, TextStyle, Ui};
 
@@ -53,6 +54,17 @@ pub(super) const CAMERA_HEIGHT_TILES: f32 = 14.0;
 /// caberem 2-3 por linha em vez de quebrar a cada chip.
 const SIDE_PANEL_CHARS: f32 = 28.0;
 
+/// Fator multiplicativo sobre `text_style_height(Body)` pra definir o
+/// lado do ícone de unidade nas colunas verticais do painel central.
+/// ~2.6× dá ícones legíveis (~40 px na fonte padrão) sem engolir o
+/// minimapa. Escala com o zoom do usuário (HiDPI-aware).
+const UNIT_ICON_BODY_FACTOR: f32 = 2.6;
+
+/// Largura das colunas verticais de unidades/estruturas dentro do
+/// painel central, em caracteres monospace. Dimensionado pra acomodar
+/// ícone ~40 px + gap + contagem de 3 dígitos + padding do chip.
+const UNIT_COLUMN_CHARS: f32 = 10.0;
+
 /// Calcula a largura do painel lateral com base no tamanho atual da
 /// fonte monospace + padding do frame do painel. Recomputado a cada
 /// frame pra responder a mudanças no zoom/font size sem reload.
@@ -67,6 +79,20 @@ fn side_panel_width(ui: &Ui) -> f32 {
         .width();
     let frame_padding = ui.style().spacing.window_margin.sum().x;
     glyph_w * SIDE_PANEL_CHARS + frame_padding
+}
+
+/// Largura de uma coluna de ícones dentro do painel central. Mesma
+/// fórmula baseada no glifo "M" monospace que `side_panel_width` —
+/// garante que colunas e painel lateral escalem juntos.
+fn unit_column_width(ui: &Ui) -> f32 {
+    let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+    let glyph_w = ui
+        .painter()
+        .layout_no_wrap("M".to_string(), font_id, Color32::WHITE)
+        .rect
+        .width();
+    let frame_padding = ui.style().spacing.window_margin.sum().x;
+    glyph_w * UNIT_COLUMN_CHARS + frame_padding
 }
 
 pub fn show(
@@ -150,16 +176,68 @@ pub fn show(
         });
 
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        let aspect = minimap::map_aspect(loaded);
-        let map_size = minimap::fit_aspect(ui.available_size(), aspect);
-        minimap::minimap_with_size(
-            ui,
-            loaded,
-            game_loop,
-            map_size,
-            *show_heatmap,
-            *show_creep,
-            *show_map,
-        );
+        let col_w = unit_column_width(ui);
+        let avail_h = ui.available_height();
+        let avail_w = ui.available_width();
+        // Reserva explícita: 2 colunas (col_w cada) + minimapa no meio,
+        // com `SPACE_XS` entre cada par. Sem isso, `ui.available_size()`
+        // do centro engoliria a largura do gutter direito e empurraria a
+        // coluna do P2 pra fora da viewport.
+        let middle_w = (avail_w - 2.0 * col_w - 2.0 * SPACE_XS).max(0.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_XS;
+            // Coluna esquerda — unidades/estruturas do P1.
+            ui.allocate_ui_with_layout(
+                egui::vec2(col_w, avail_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    if let Some(p) = loaded.timeline.players.first() {
+                        unit_column::render_player_column(
+                            ui,
+                            p,
+                            0,
+                            game_loop,
+                            lang,
+                            UNIT_ICON_BODY_FACTOR,
+                        );
+                    }
+                },
+            );
+            // Coluna central — minimapa com largura explícita.
+            ui.allocate_ui_with_layout(
+                egui::vec2(middle_w, avail_h),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    let aspect = minimap::map_aspect(loaded);
+                    let map_size = minimap::fit_aspect(ui.available_size(), aspect);
+                    minimap::minimap_with_size(
+                        ui,
+                        loaded,
+                        game_loop,
+                        map_size,
+                        *show_heatmap,
+                        *show_creep,
+                        *show_map,
+                    );
+                },
+            );
+            // Coluna direita — unidades/estruturas do P2.
+            ui.allocate_ui_with_layout(
+                egui::vec2(col_w, avail_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    if let Some(p) = loaded.timeline.players.get(1) {
+                        unit_column::render_player_column(
+                            ui,
+                            p,
+                            1,
+                            game_loop,
+                            lang,
+                            UNIT_ICON_BODY_FACTOR,
+                        );
+                    }
+                },
+            );
+        });
     });
 }
