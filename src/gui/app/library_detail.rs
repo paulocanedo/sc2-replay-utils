@@ -10,7 +10,8 @@
 use egui::{Color32, ColorImage, Pos2, Rect, RichText, ScrollArea, TextureOptions};
 
 use crate::colors::{
-    race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM, LABEL_SOFT, LABEL_STRONG, SURFACE_ALT,
+    race_color, ACCENT_DANGER, ACCENT_SUCCESS, FOCUS_RING, LABEL_DIM, LABEL_SOFT, LABEL_STRONG,
+    SURFACE_ALT,
 };
 use crate::library::{LibraryAction, MetaState, ParsedMeta, PlayerMeta};
 use crate::locale::{t, Language};
@@ -166,12 +167,7 @@ fn detail_card_filled(
     ui.add_space(SPACE_S);
 
     // ── Botão primário: Abrir análise ──────────────
-    let open_btn = egui::Button::new(
-        RichText::new(t("library.detail.open_analysis", lang)).strong(),
-    )
-    .min_size(egui::vec2(ui.available_width(), 32.0))
-    .corner_radius(RADIUS_BUTTON);
-    if ui.add(open_btn).clicked() {
+    if primary_open_button(ui, &t("library.detail.open_analysis", lang), config).clicked() {
         *action = Some(LibraryAction::Load(path.to_path_buf()));
     }
     ui.add_space(SPACE_M);
@@ -425,6 +421,82 @@ fn opening_row(
         );
     });
     let _ = lang; // reservado p/ futuras strings traduzidas no opening
+}
+
+// ── Botão primário pintado à mão ─────────────────────────────────────
+//
+// Por que não `egui::Button::new(...).fill(FOCUS_RING)`? `Button.fill`
+// só sobrescreve a cor *idle*; o hover/pressed continuam vindo do tema
+// global e devolvem cinzas neutros — perde o destaque que queremos no
+// CTA. Pintar manualmente nos dá controle dos três estados (idle/
+// hover/active) sem mexer no estilo global. O ícone `▶` (BMP, presente
+// em qualquer fonte) sinaliza "siga adiante / vá para a análise" — já
+// usado pelo player da Timeline.
+
+fn primary_open_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    config: &crate::config::AppConfig,
+) -> egui::Response {
+    use egui::{FontId, Sense, Stroke, StrokeKind};
+
+    let height = 36.0;
+    let width = ui.available_width();
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
+
+    let hovered = response.hovered();
+    let pressed = response.is_pointer_button_down_on();
+
+    let (fill, stroke_col) = if pressed {
+        (lighten(FOCUS_RING, -25), lighten(FOCUS_RING, 30))
+    } else if hovered {
+        (lighten(FOCUS_RING, 15), lighten(FOCUS_RING, 50))
+    } else {
+        (FOCUS_RING, lighten(FOCUS_RING, -10))
+    };
+
+    ui.painter().rect(
+        rect,
+        RADIUS_BUTTON,
+        fill,
+        Stroke::new(1.0, stroke_col),
+        StrokeKind::Inside,
+    );
+
+    let label_font = FontId::proportional(size_body(config));
+    let icon_font = FontId::proportional(size_body(config));
+    let text_color = egui::Color32::WHITE;
+
+    let icon_galley = ui
+        .painter()
+        .layout_no_wrap("▶".to_string(), icon_font, text_color);
+    let label_galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), label_font, text_color);
+
+    let gap = SPACE_S;
+    let total_w = icon_galley.size().x + gap + label_galley.size().x;
+    let start_x = rect.center().x - total_w / 2.0;
+    let icon_pos = egui::pos2(
+        start_x,
+        rect.center().y - icon_galley.size().y / 2.0,
+    );
+    let label_pos = egui::pos2(
+        start_x + icon_galley.size().x + gap,
+        rect.center().y - label_galley.size().y / 2.0,
+    );
+    ui.painter().galley(icon_pos, icon_galley, text_color);
+    ui.painter().galley(label_pos, label_galley, text_color);
+
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Ajusta brilho de uma cor por delta (–255..=255). Negativo escurece,
+/// positivo clareia. Saturação por canal, alpha preservado.
+fn lighten(c: egui::Color32, delta: i32) -> egui::Color32 {
+    let adj = |v: u8| ((v as i32 + delta).clamp(0, 255)) as u8;
+    egui::Color32::from_rgba_unmultiplied(adj(c.r()), adj(c.g()), adj(c.b()), c.a())
 }
 
 // ── Helpers locais ───────────────────────────────────────────────────
