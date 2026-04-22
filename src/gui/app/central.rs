@@ -60,15 +60,27 @@ impl AppState {
                         }
                     }
                     let current = self.loaded.as_ref().map(|l| l.path.as_path());
+                    let selected = self.library_selection.as_deref();
                     let central_action = library::show(
                         ui,
                         &self.library,
                         current,
+                        selected,
                         &self.config,
                         &mut self.library_filter,
                     );
                     if !matches!(central_action, LibraryAction::None) {
                         library_action = central_action;
+                    }
+
+                    // Card lateral de detalhes da seleção. Renderizado
+                    // *depois* da lista para ocupar a coluna direita do
+                    // CentralPanel via `Panel::right`. Sem seleção, o
+                    // card colapsa e a lista fica com 100% da largura.
+                    if self.library_selection.is_some() {
+                        if let Some(action) = self.show_library_detail_card(ui) {
+                            library_action = action;
+                        }
                     }
                 }
                 Screen::Analysis => match self.loaded.as_ref() {
@@ -126,6 +138,8 @@ impl AppState {
         match action {
             LibraryAction::None => {}
             LibraryAction::Load(p) => self.load_path(p),
+            LibraryAction::Select(p) => self.set_library_selection(Some(p)),
+            LibraryAction::ClearSelection => self.set_library_selection(None),
             LibraryAction::Refresh => self.refresh_library(),
             LibraryAction::PickWorkingDir(p) => {
                 self.config.working_dir = Some(p);

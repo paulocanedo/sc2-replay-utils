@@ -171,6 +171,19 @@ library.entry.parsing = reading metadata…
 library.entry.unsupported = ⚠ unsupported: {reason}
 library.entry.failed = failed: {err}
 library.entry.open = open
+library.outcome.win = WIN
+library.outcome.loss = LOSS
+# ── Library detail card (right-side panel on single click) ──
+library.detail.close_tooltip = Close details
+library.detail.open_analysis = Open analysis
+library.detail.section.match = Match
+library.detail.section.players = Players
+library.detail.section.openings = Build orders
+library.detail.played_at = Played at
+library.detail.duration = Duration
+library.detail.version = Version
+library.detail.you_chip = you
+library.detail.minimap_unavailable = Minimap unavailable
 # Strategic opening label shown in the library entry row. The classifier
 # in build_order/opening.rs produces English-only strings by design
 # (names like "Hatch First", "3 Rax", "Gate Expand" are used universally

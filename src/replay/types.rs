@@ -420,6 +420,11 @@ pub struct ReplayTimeline {
     /// gerou o arquivo. Usado pelo `balance_data` para selecionar a
     /// tabela de tempos correspondente ao patch do replay.
     pub base_build: u32,
+    /// Versão do jogo (formato `5.0.13.92440`) montada a partir de
+    /// `header.m_version.{m_major,m_minor,m_revision,m_build}`. Mostrada
+    /// na UI como referência humana — `base_build` continua sendo a chave
+    /// usada pela `balance_data`.
+    pub version: String,
     /// Limite de coleta de eventos em segundos. 0 indica sem limite.
     pub max_time_seconds: u32,
     pub players: Vec<PlayerTimeline>,

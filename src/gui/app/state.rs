@@ -13,6 +13,7 @@ use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
 use crate::library::{self, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
+use crate::map_image::{self, MapImage};
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
 use crate::watcher::ReplayWatcher;
@@ -55,6 +56,21 @@ pub struct AppState {
     /// Toggled by the ☰ button in the Library topbar; persisted only in
     /// session memory (not saved to disk).
     pub library_sidebar_open: bool,
+    /// Caminho do replay atualmente *selecionado* na biblioteca (clique
+    /// único). Diferente de `loaded`: selecionar apenas alimenta o card
+    /// lateral de detalhes; carregar (duplo-clique ou botão "Abrir
+    /// análise") atualiza `loaded` e troca para a tela `Analysis`.
+    /// `None` colapsa o card de detalhes e devolve a largura à lista.
+    pub library_selection: Option<PathBuf>,
+    /// Minimapa carregado para `library_selection`. Cache simples: ao
+    /// selecionar outra entrada, descarregamos o anterior e reabrimos o
+    /// MPQ do novo. `None` significa "não tentado" ou "falhou" — o card
+    /// renderiza um placeholder no lugar.
+    pub library_selection_minimap: Option<MapImage>,
+    /// Caminho do replay para o qual `library_selection_minimap` foi
+    /// resolvido. Usado para detectar mudança de seleção e disparar o
+    /// recarregamento do minimapa (sem reentrar no MPQ a cada frame).
+    pub library_selection_minimap_path: Option<PathBuf>,
     /// Game loop selecionado no slider da aba Timeline (mini-mapa).
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
@@ -123,6 +139,9 @@ impl AppState {
             library: ReplayLibrary::new(),
             library_filter,
             library_sidebar_open: true,
+            library_selection: None,
+            library_selection_minimap: None,
+            library_selection_minimap_path: None,
             timeline_tab_loop: 0,
             timeline_playing: false,
             timeline_playback_speed: 1,
@@ -224,6 +243,36 @@ impl AppState {
 
     pub(super) fn set_toast(&mut self, msg: impl Into<String>) {
         self.toast = Some((msg.into(), Instant::now()));
+    }
+
+    /// Aplica uma nova seleção (ou limpa) na biblioteca. Carrega o
+    /// minimapa correspondente *sincronamente* — custo aceitável (TGA
+    /// de minimapa decodifica em milissegundos). Se a entrada não tiver
+    /// `cache_handles` cacheados (cache antigo) ou se a resolução falhar,
+    /// o minimapa fica `None` e o card mostra um placeholder.
+    pub(super) fn set_library_selection(&mut self, sel: Option<PathBuf>) {
+        if self.library_selection == sel {
+            return;
+        }
+        self.library_selection = sel.clone();
+        self.library_selection_minimap = None;
+        self.library_selection_minimap_path = None;
+        let Some(path) = sel else { return };
+        let Some(entry) = self.library.entries.iter().find(|e| e.path == path) else {
+            return;
+        };
+        let crate::library::MetaState::Parsed(meta) = &entry.meta else {
+            return;
+        };
+        match map_image::load_for_replay(&meta.map, &meta.cache_handles) {
+            Ok(img) => {
+                self.library_selection_minimap = Some(img);
+                self.library_selection_minimap_path = Some(path);
+            }
+            Err(e) => {
+                eprintln!("library minimap: {e}");
+            }
+        }
     }
 
     pub(super) fn poll_watcher(&mut self, ctx: &Context) {
