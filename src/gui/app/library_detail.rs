@@ -32,31 +32,20 @@ const MAX_WIDTH: f32 = 480.0;
 const MINIMAP_SIDE: f32 = 200.0;
 
 impl AppState {
-    /// Renderiza o card de detalhes da seleção atual da biblioteca.
-    /// Devolve uma `LibraryAction` quando o usuário clica "Abrir análise"
-    /// (load) ou "×" (clear). `None` em qualquer outro frame.
-    ///
-    /// Pré-condição: `self.library_selection.is_some()`. O caller em
-    /// `central.rs` confere antes de chamar, então um `unwrap_or_return`
-    /// silencioso aqui é seguro.
+    /// Renderiza o card de detalhes lateral. **Sempre visível** — quando
+    /// não há `library_selection`, mostra um placeholder convidando o
+    /// usuário a clicar numa entry da lista. Devolve `LibraryAction` em
+    /// dois casos: clique em "Abrir análise" (`Load`) e clique em "×"
+    /// (`ClearSelection`); `None` nos demais frames.
     pub(super) fn show_library_detail_card(&mut self, ui: &mut egui::Ui) -> Option<LibraryAction> {
         let lang = self.config.language;
-        let path = self.library_selection.clone()?;
-        // A entry pode ter sumido (refresh, watcher, etc.). Nesse caso
-        // limpamos a seleção via ação devolvida — caller fecha o card.
-        let entry_idx = self.library.entries.iter().position(|e| e.path == path)?;
-        let entry = &self.library.entries[entry_idx];
-        let meta = match &entry.meta {
-            MetaState::Parsed(m) => m.clone(),
-            _ => return Some(LibraryAction::ClearSelection),
-        };
-        let minimap = self
-            .library_selection_minimap
-            .as_ref()
-            .filter(|_| self.library_selection_minimap_path.as_deref() == Some(&path))
-            .cloned_handle();
-
         let mut action: Option<LibraryAction> = None;
+
+        // Resolve a seleção em uma struct `Resolved` ANTES de abrir o
+        // painel — assim o closure não precisa pegar `&self.library` e
+        // nós evitamos brigas de borrow com `&mut self.library_selection`
+        // que o caller mantém vivo ao longo do método.
+        let resolved = self.resolve_selection();
 
         egui::Panel::right("library_detail")
             .resizable(true)
@@ -69,98 +58,199 @@ impl AppState {
                     .inner_margin(egui::Margin::same(SPACE_M as i8)),
             )
             .show_inside(ui, |ui| {
-                ScrollArea::vertical().show(ui, |ui| {
-                    // ── Header: filename + close ──────────────────
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(&entry.filename)
-                                .size(size_caption(&self.config))
-                                .monospace()
-                                .color(LABEL_DIM),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                if ui
-                                    .small_button("×")
-                                    .on_hover_text(t("library.detail.close_tooltip", lang))
-                                    .clicked()
-                                {
-                                    action = Some(LibraryAction::ClearSelection);
-                                }
-                            },
-                        );
-                    });
-                    ui.add_space(SPACE_S);
-
-                    // ── Minimapa ───────────────────────────────────
-                    minimap_panel(ui, minimap.as_ref(), &meta.map, lang);
-                    ui.add_space(SPACE_S);
-
-                    // ── Botão primário: Abrir análise ──────────────
-                    let open_btn = egui::Button::new(
-                        RichText::new(t("library.detail.open_analysis", lang)).strong(),
-                    )
-                    .min_size(egui::vec2(ui.available_width(), 32.0))
-                    .corner_radius(RADIUS_BUTTON);
-                    if ui.add(open_btn).clicked() {
-                        action = Some(LibraryAction::Load(path.clone()));
+                ScrollArea::vertical().show(ui, |ui| match resolved {
+                    Resolved::Empty => detail_card_empty(ui, lang, &self.config),
+                    Resolved::SelectionGone => {
+                        // A entry sumiu (refresh, watcher, etc.) — devolve
+                        // ClearSelection para o caller limpar o estado.
+                        action = Some(LibraryAction::ClearSelection);
+                        detail_card_empty(ui, lang, &self.config);
                     }
-                    ui.add_space(SPACE_M);
-
-                    ui.separator();
-                    ui.add_space(SPACE_S);
-
-                    // ── Quando + duração + versão ──────────────────
-                    section_label(ui, &t("library.detail.section.match", lang), &self.config);
-                    let (date_part, time_part) = split_datetime(&meta.datetime);
-                    let date_display = if date_part.is_empty() {
-                        meta.datetime.clone()
-                    } else {
-                        format_date_short(&meta.datetime, lang)
-                    };
-                    info_row(
-                        ui,
-                        &t("library.detail.played_at", lang),
-                        &if time_part.is_empty() {
-                            date_display.clone()
-                        } else {
-                            format!("{date_display} \u{2022} {time_part}")
-                        },
-                        &self.config,
-                    );
-                    info_row(
-                        ui,
-                        &t("library.detail.duration", lang),
-                        &fmt_duration(meta.duration_seconds),
-                        &self.config,
-                    );
-                    info_row(
-                        ui,
-                        &t("library.detail.version", lang),
-                        meta.version.as_deref().unwrap_or("—"),
-                        &self.config,
-                    );
-                    ui.add_space(SPACE_M);
-
-                    // ── Jogadores: nome · MMR (+ delta no usuário) ─
-                    section_label(ui, &t("library.detail.section.players", lang), &self.config);
-                    let user_idx = find_user_index(&meta, &self.config.user_nicknames);
-                    for (i, p) in meta.players.iter().enumerate() {
-                        player_row(ui, p, user_idx == Some(i), &meta, i, &self.config, lang);
-                    }
-                    ui.add_space(SPACE_M);
-
-                    // ── Resumo da abertura por jogador ─────────────
-                    section_label(ui, &t("library.detail.section.openings", lang), &self.config);
-                    for p in meta.players.iter() {
-                        opening_row(ui, p, &self.config, lang);
+                    Resolved::Loaded { path, meta, minimap } => {
+                        detail_card_filled(
+                            ui,
+                            &path,
+                            &meta,
+                            minimap.as_ref(),
+                            lang,
+                            &self.config,
+                            &mut action,
+                        );
                     }
                 });
             });
 
         action
     }
+
+    fn resolve_selection(&self) -> Resolved {
+        let Some(path) = self.library_selection.clone() else {
+            return Resolved::Empty;
+        };
+        let Some(entry) = self.library.entries.iter().find(|e| e.path == path) else {
+            return Resolved::SelectionGone;
+        };
+        let MetaState::Parsed(meta) = &entry.meta else {
+            return Resolved::SelectionGone;
+        };
+        let minimap = self
+            .library_selection_minimap
+            .as_ref()
+            .filter(|_| self.library_selection_minimap_path.as_deref() == Some(&path))
+            .map(|img| MapImage {
+                width: img.width,
+                height: img.height,
+                rgba: img.rgba.clone(),
+            });
+        Resolved::Loaded {
+            path,
+            meta: meta.clone(),
+            minimap,
+        }
+    }
+}
+
+/// Possíveis estados de resolução da seleção atual da biblioteca.
+enum Resolved {
+    /// Nenhuma entry selecionada — card mostra placeholder.
+    Empty,
+    /// Havia seleção, mas a entry sumiu da lista (refresh, etc.) —
+    /// caller deve limpar o estado.
+    SelectionGone,
+    /// Entry parseada e pronta para renderizar.
+    Loaded {
+        path: std::path::PathBuf,
+        meta: ParsedMeta,
+        minimap: Option<MapImage>,
+    },
+}
+
+/// Conteúdo do card quando há entry selecionada e parseada.
+#[allow(clippy::too_many_arguments)]
+fn detail_card_filled(
+    ui: &mut egui::Ui,
+    path: &std::path::Path,
+    meta: &ParsedMeta,
+    minimap: Option<&MapImage>,
+    lang: Language,
+    config: &crate::config::AppConfig,
+    action: &mut Option<LibraryAction>,
+) {
+    let filename = path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+
+    // ── Header: filename + close ──────────────────
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(&filename)
+                .size(size_caption(config))
+                .monospace()
+                .color(LABEL_DIM),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .small_button("×")
+                .on_hover_text(t("library.detail.close_tooltip", lang))
+                .clicked()
+            {
+                *action = Some(LibraryAction::ClearSelection);
+            }
+        });
+    });
+    ui.add_space(SPACE_S);
+
+    // ── Minimapa ──────────────────────────────────
+    minimap_panel(ui, minimap, &meta.map, lang);
+    ui.add_space(SPACE_S);
+
+    // ── Botão primário: Abrir análise ──────────────
+    let open_btn = egui::Button::new(
+        RichText::new(t("library.detail.open_analysis", lang)).strong(),
+    )
+    .min_size(egui::vec2(ui.available_width(), 32.0))
+    .corner_radius(RADIUS_BUTTON);
+    if ui.add(open_btn).clicked() {
+        *action = Some(LibraryAction::Load(path.to_path_buf()));
+    }
+    ui.add_space(SPACE_M);
+
+    ui.separator();
+    ui.add_space(SPACE_S);
+
+    // ── Quando + duração + versão ──────────────────
+    section_label(ui, &t("library.detail.section.match", lang), config);
+    let (date_part, time_part) = split_datetime(&meta.datetime);
+    let date_display = if date_part.is_empty() {
+        meta.datetime.clone()
+    } else {
+        format_date_short(&meta.datetime, lang)
+    };
+    info_row(
+        ui,
+        &t("library.detail.played_at", lang),
+        &if time_part.is_empty() {
+            date_display.clone()
+        } else {
+            format!("{date_display} \u{2022} {time_part}")
+        },
+        config,
+    );
+    info_row(
+        ui,
+        &t("library.detail.duration", lang),
+        &fmt_duration(meta.duration_seconds),
+        config,
+    );
+    info_row(
+        ui,
+        &t("library.detail.version", lang),
+        meta.version.as_deref().unwrap_or("—"),
+        config,
+    );
+    ui.add_space(SPACE_M);
+
+    // ── Jogadores: nome · MMR (+ delta no usuário) ─
+    section_label(ui, &t("library.detail.section.players", lang), config);
+    let user_idx = find_user_index(meta, &config.user_nicknames);
+    for (i, p) in meta.players.iter().enumerate() {
+        player_row(ui, p, user_idx == Some(i), meta, i, config, lang);
+    }
+    ui.add_space(SPACE_M);
+
+    // ── Resumo da abertura por jogador ─────────────
+    section_label(ui, &t("library.detail.section.openings", lang), config);
+    for p in meta.players.iter() {
+        opening_row(ui, p, config, lang);
+    }
+}
+
+/// Estado vazio — convida o usuário a clicar numa entry e explica o
+/// duplo-clique. Renderizado tanto na ausência de seleção quanto
+/// quando a seleção apontava para uma entry que sumiu.
+fn detail_card_empty(ui: &mut egui::Ui, lang: Language, config: &crate::config::AppConfig) {
+    let avail_h = ui.available_height().max(120.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), avail_h),
+        egui::Layout::top_down(egui::Align::Center),
+        |ui| {
+            ui.add_space(avail_h * 0.25);
+            ui.label(RichText::new("📋").size(40.0));
+            ui.add_space(SPACE_M);
+            ui.label(
+                RichText::new(t("library.detail.empty.title", lang))
+                    .strong()
+                    .color(LABEL_STRONG),
+            );
+            ui.add_space(SPACE_XS);
+            ui.label(
+                RichText::new(t("library.detail.empty.hint", lang))
+                    .size(size_caption(config))
+                    .color(LABEL_DIM),
+            );
+        },
+    );
 }
 
 /// Mostra o minimapa carregado ou um placeholder centralizado quando o
@@ -366,23 +456,4 @@ fn find_user_index(meta: &ParsedMeta, nicknames: &[String]) -> Option<usize> {
 
 fn map_image_to_color_image(img: &MapImage) -> ColorImage {
     ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba)
-}
-
-// `Option<MapImage>` não é `Clone` (rgba é grande), então oferecemos um
-// helper para passar o handle adiante sem copiar bytes desnecessariamente.
-trait CloneHandle {
-    fn cloned_handle(self) -> Option<MapImage>;
-}
-
-impl CloneHandle for Option<&MapImage> {
-    fn cloned_handle(self) -> Option<MapImage> {
-        // O card é renderizado por frame e o MapImage tem RGBA8 em
-        // memória — ~256 KB típico. Clonar é barato comparado ao
-        // upload de textura que faríamos sem o cache do egui.
-        self.map(|img| MapImage {
-            width: img.width,
-            height: img.height,
-            rgba: img.rgba.clone(),
-        })
-    }
 }

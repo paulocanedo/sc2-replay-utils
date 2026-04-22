@@ -185,6 +185,8 @@ library.detail.duration = Duração
 library.detail.version = Versão
 library.detail.you_chip = você
 library.detail.minimap_unavailable = Minimapa indisponível
+library.detail.empty.title = Nenhum replay selecionado
+library.detail.empty.hint = Clique num replay para ver detalhes · clique duplo para abrir análise
 # Rótulo de abertura — nomes estratégicos ("Hatch First", "3 Rax",
 # "Gate Expand") ficam em inglês em ambos os locales porque é o
 # vocabulário usado pela comunidade brasileira. Traduzimos só os

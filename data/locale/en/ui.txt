@@ -184,6 +184,8 @@ library.detail.duration = Duration
 library.detail.version = Version
 library.detail.you_chip = you
 library.detail.minimap_unavailable = Minimap unavailable
+library.detail.empty.title = No replay selected
+library.detail.empty.hint = Click a replay to preview details · double-click to open analysis
 # Strategic opening label shown in the library entry row. The classifier
 # in build_order/opening.rs produces English-only strings by design
 # (names like "Hatch First", "3 Rax", "Gate Expand" are used universally

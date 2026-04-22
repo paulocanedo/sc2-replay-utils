@@ -59,6 +59,16 @@ impl AppState {
                             library_action = side_action;
                         }
                     }
+                    // Card lateral de detalhes — renderizado ANTES da
+                    // lista central para que `Panel::right` reserve sua
+                    // coluna primeiro (caso contrário a `ScrollArea` da
+                    // lista consome todo o espaço disponível e o painel
+                    // direito fica sem onde aparecer). O card é sempre
+                    // visível: quando não há seleção, mostra um placeholder.
+                    if let Some(action) = self.show_library_detail_card(ui) {
+                        library_action = action;
+                    }
+
                     let current = self.loaded.as_ref().map(|l| l.path.as_path());
                     let selected = self.library_selection.as_deref();
                     let central_action = library::show(
@@ -71,16 +81,6 @@ impl AppState {
                     );
                     if !matches!(central_action, LibraryAction::None) {
                         library_action = central_action;
-                    }
-
-                    // Card lateral de detalhes da seleção. Renderizado
-                    // *depois* da lista para ocupar a coluna direita do
-                    // CentralPanel via `Panel::right`. Sem seleção, o
-                    // card colapsa e a lista fica com 100% da largura.
-                    if self.library_selection.is_some() {
-                        if let Some(action) = self.show_library_detail_card(ui) {
-                            library_action = action;
-                        }
                     }
                 }
                 Screen::Analysis => match self.loaded.as_ref() {
