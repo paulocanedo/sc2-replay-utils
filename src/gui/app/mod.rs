@@ -125,6 +125,14 @@ impl eframe::App for AppState {
             self.screen = Screen::Library;
         }
 
+        // F5 atalha o "Refresh library" do menu View. Só dispara na tela
+        // de biblioteca para não surpreender em Analysis/Rename.
+        if self.screen == Screen::Library
+            && ctx.input(|i| i.key_pressed(egui::Key::F5))
+        {
+            self.refresh_library();
+        }
+
         // Top-level panels: use `.show(ctx, ...)` so each call updates the
         // ctx's pass_state.available_rect — otherwise sibling panels don't
         // know about each other's reservations and the CentralPanel can
