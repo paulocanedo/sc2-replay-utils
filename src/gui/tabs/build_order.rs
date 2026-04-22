@@ -12,7 +12,9 @@ use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
 use crate::tokens::SPACE_S;
-use crate::widgets::{player_identity, toggle_chip_bool, NameDensity};
+use crate::widgets::{
+    copy_icon_button, copy_labeled_button, player_identity, toggle_chip_bool, NameDensity,
+};
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 6] = [
@@ -219,7 +221,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                             .font(egui::TextStyle::Monospace),
                     );
                     ui.add_space(4.0);
-                    if ui.button(t("build_order.salt.copy", lang)).clicked() {
+                    if copy_labeled_button(ui, t("build_order.salt.copy", lang)).clicked() {
                         ui.ctx().copy_text(encoded);
                     }
                 });
@@ -328,11 +330,7 @@ fn player_column(
                     lang,
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button("📋")
-                        .on_hover_text(t("build_order.copy_tooltip", lang))
-                        .clicked()
-                    {
+                    if copy_icon_button(ui, t("build_order.copy_tooltip", lang)).clicked() {
                         let text = format_clipboard_single(player, lps, lang);
                         ui.ctx().copy_text(text);
                     }

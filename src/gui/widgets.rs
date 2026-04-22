@@ -412,3 +412,32 @@ pub fn icon_button(ui: &mut Ui, glyph: &str, hover: &str) -> Response {
     ui.small_button(glyph).on_hover_text(hover)
 }
 
+// ── Copy-to-clipboard glyph ─────────────────────────────────────────
+//
+// Single source of truth for every "copy to clipboard" affordance in
+// the app. Rendering an SVG (over the ad-hoc 📋 emoji we used before)
+// keeps the glyph crisp at any DPI and identical across host font
+// stacks — the emoji fell back to very different shapes on Linux vs
+// Windows. The SVG is white so callers can `.tint()` freely.
+
+fn copy_icon_image(side: f32) -> egui::Image<'static> {
+    egui::Image::new(egui::include_image!("../../assets/icons/copy.svg"))
+        .fit_to_exact_size(egui::vec2(side, side))
+        .tint(Color32::from_gray(210))
+}
+
+/// Icon-only copy button sized to the surrounding body text. Mirrors
+/// `icon_button` but swaps the glyph for the shared SVG.
+pub fn copy_icon_button(ui: &mut Ui, hover: &str) -> Response {
+    let side = ui.text_style_height(&egui::TextStyle::Body);
+    ui.add(egui::Button::image(copy_icon_image(side)))
+        .on_hover_text(hover)
+}
+
+/// Copy button with an inline label. For surfaces where the explicit
+/// "Copy to clipboard" text matters (e.g., modals).
+pub fn copy_labeled_button(ui: &mut Ui, label: &str) -> Response {
+    let side = ui.text_style_height(&egui::TextStyle::Body);
+    ui.add(egui::Button::image_and_text(copy_icon_image(side), label))
+}
+
