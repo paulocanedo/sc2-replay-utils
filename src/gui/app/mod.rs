@@ -39,6 +39,7 @@
 //   - `modals`     — janelas modais (language prompt, about).
 
 mod central;
+mod library_detail;
 mod menu_bar;
 mod modals;
 mod state;

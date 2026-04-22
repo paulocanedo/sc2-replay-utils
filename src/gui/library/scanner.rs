@@ -675,6 +675,8 @@ fn parse_meta(path: &Path) -> ParseOutcome {
         datetime: data.datetime,
         duration_seconds: data.duration_seconds,
         game_loops: data.game_loops,
+        version: Some(data.version),
+        cache_handles: data.cache_handles,
         players: data
             .players
             .into_iter()

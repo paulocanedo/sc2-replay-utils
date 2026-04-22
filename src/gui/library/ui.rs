@@ -19,6 +19,11 @@ use crate::widgets::removable_chip;
 pub enum LibraryAction {
     None,
     Load(PathBuf),
+    /// Clique simples — seleciona a entrada (alimenta o card lateral)
+    /// sem disparar o parse pesado do `Load`.
+    Select(PathBuf),
+    /// Limpa a seleção atual (botão × no card de detalhes).
+    ClearSelection,
     Refresh,
     PickWorkingDir(PathBuf),
     OpenRename,
@@ -29,6 +34,7 @@ pub fn show(
     ui: &mut Ui,
     library: &ReplayLibrary,
     current_path: Option<&Path>,
+    selected_path: Option<&Path>,
     config: &AppConfig,
     filter: &mut LibraryFilter,
 ) -> LibraryAction {
@@ -250,8 +256,10 @@ pub fn show(
                 let idx = visible[virtual_idx];
                 let entry = &library.entries[idx];
                 let is_current = current_path.map_or(false, |cp| cp == entry.path);
-                match entry_row(ui, entry, is_current, config, row_h) {
+                let is_selected = selected_path.map_or(false, |sp| sp == entry.path);
+                match entry_row(ui, entry, is_current, is_selected, config, row_h) {
                     RowOutcome::None => {}
+                    RowOutcome::Select => action = LibraryAction::Select(entry.path.clone()),
                     RowOutcome::Load => action = LibraryAction::Load(entry.path.clone()),
                     RowOutcome::ApplyRelated(RelatedFilter::Opponent(n)) => {
                         filter.opponent_name = Some(n);

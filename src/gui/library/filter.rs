@@ -240,6 +240,8 @@ mod tests {
                 datetime: datetime.into(),
                 duration_seconds: 600,
                 game_loops: 10_000,
+                version: None,
+                cache_handles: Vec::new(),
                 players: vec![
                     PlayerMeta {
                         name: user_name.into(),

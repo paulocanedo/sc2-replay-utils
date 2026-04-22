@@ -172,6 +172,19 @@ library.entry.parsing = lendo metadados…
 library.entry.unsupported = ⚠ não suportado: {reason}
 library.entry.failed = falha: {err}
 library.entry.open = abrir
+library.outcome.win = VIT
+library.outcome.loss = DER
+# ── Card lateral de detalhes (clique simples na entry) ──
+library.detail.close_tooltip = Fechar detalhes
+library.detail.open_analysis = Abrir análise
+library.detail.section.match = Partida
+library.detail.section.players = Jogadores
+library.detail.section.openings = Build orders
+library.detail.played_at = Jogado em
+library.detail.duration = Duração
+library.detail.version = Versão
+library.detail.you_chip = você
+library.detail.minimap_unavailable = Minimapa indisponível
 # Rótulo de abertura — nomes estratégicos ("Hatch First", "3 Rax",
 # "Gate Expand") ficam em inglês em ambos os locales porque é o
 # vocabulário usado pela comunidade brasileira. Traduzimos só os
