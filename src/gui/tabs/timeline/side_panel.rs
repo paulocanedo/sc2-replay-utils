@@ -205,24 +205,19 @@ fn resource_row(
 }
 
 fn worker_row(ui: &mut Ui, p: &PlayerTimeline, s: &StatsSnapshot, game_loop: u32, lang: Language) {
-    // `worker_capacity_at` devolve o número de town halls vivos (cada
-    // base = 1 slot de treinamento). Para exibição no painel, porém,
-    // queremos mostrar saturação (workers / ideal) e não slot count.
+    // Mostra só o número de workers; a razão workers/saturação fica
+    // implícita na mini-barra. `worker_capacity_at` × `WORKERS_PER_BASE_IDEAL`
+    // dá a saturação alvo — a barra satura em 100% assim que o jogador
+    // ultrapassa o cap, mantendo o indicador legível em lategame.
     let bases = p.worker_capacity_at(game_loop);
     let saturation = (bases * WORKERS_PER_BASE_IDEAL).min(WORKER_SATURATION_CAP);
-    let (denom, frac) = if s.workers > WORKER_SATURATION_CAP {
-        (s.workers, 1.0)
-    } else if saturation > 0 {
-        (
-            saturation,
-            (s.workers as f32 / saturation as f32).clamp(0.0, 1.0),
-        )
+    let frac = if s.workers >= WORKER_SATURATION_CAP || saturation == 0 {
+        1.0
     } else {
-        // Nenhuma base registrada ainda (fração inicial do replay).
-        (s.workers.max(1), 1.0)
+        (s.workers as f32 / saturation as f32).clamp(0.0, 1.0)
     };
     ui.horizontal(|ui| {
-        ui.monospace(format!("👷 {}/{}", s.workers, denom));
+        ui.monospace(format!("👷 {}", s.workers));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             draw_mini_bar(ui, 42.0, 4.0, frac, LABEL_SOFT);
         });
