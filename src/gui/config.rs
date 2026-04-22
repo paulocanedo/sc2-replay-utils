@@ -45,6 +45,11 @@ pub struct AppConfig {
     /// selector without re-prompting users who already had a language
     /// configured.
     pub language_selected: bool,
+    /// `true` once the user has explicitly checked "don't show again"
+    /// on the startup disclaimer. While `false`, the disclaimer modal
+    /// is shown on every launch (the user can always re-read it via
+    /// Help → About). The same content is mirrored in the About window.
+    pub disclaimer_acknowledged: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
     pub library_date_range: DateRange,
     /// Minuto do jogo usado pelo card de potencial de workers da aba
@@ -75,6 +80,7 @@ impl Default for AppConfig {
             font_size: 14.0,
             language: Language::default(),
             language_selected: false,
+            disclaimer_acknowledged: false,
             library_date_range: DateRange::default(),
             insight_worker_minutes: default_insight_worker_minutes(),
         }
