@@ -39,6 +39,23 @@ about.tech_label = Tecnologias
 about.tech_value = Rust · egui · s2protocol
 about.version = v{version}
 about.close = Fechar
+about.disclaimer_heading = Avisos
+
+# ── Diálogo de Avisos (inicialização + Sobre) ───────────────────────────────
+# O texto de cada item é deliberadamente formal e em forma extensa. Ele
+# aparece tanto na modal de primeira execução quanto na janela "Sobre",
+# permitindo que o usuário revisite as informações a qualquer momento.
+disclaimer.title = Avisos importantes
+disclaimer.intro = Antes de prosseguir, por favor leia com atenção as informações abaixo a respeito desta aplicação.
+disclaimer.unofficial = Esta aplicação é um projeto independente. Ela não é oficial, não é afiliada, não é endossada nem patrocinada pela Blizzard Entertainment, Inc., e não possui qualquer vínculo com a empresa. StarCraft e StarCraft II são marcas comerciais ou marcas registradas da Blizzard Entertainment; toda a propriedade intelectual relacionada é regida pelo respectivo Contrato de Licença de Usuário Final e permanece de titularidade exclusiva de seus respectivos detentores.
+disclaimer.in_development = Este software encontra-se em fase ativa de desenvolvimento. As métricas, estatísticas e análises apresentadas ainda não foram completamente revisadas e podem conter imprecisões. Não trate os valores exibidos como definitivos e não tome decisões competitivas baseando-se exclusivamente neles.
+disclaimer.supply_block = A detecção de supply block adotada por esta aplicação utiliza uma abordagem diferente da lógica empregada pelo próprio jogo. Por esse motivo, os valores exibidos dificilmente coincidirão com aqueles reportados pelo jogo. A intenção é oferecer uma representação que permaneça realista e útil, e seu feedback sobre essa abordagem é muito bem-vindo.
+disclaimer.feedback = Caso encontre problemas, identifique comportamentos incorretos ou tenha sugestões de melhoria, fica desde já o convite para registrar uma issue no repositório do projeto no GitHub.
+disclaimer.open_source = Este é um projeto de código aberto. O código-fonte completo está disponível no GitHub e contribuições da comunidade são bem-vindas.
+disclaimer.issues_link = Abrir página de issues no GitHub
+disclaimer.repo_link = Acessar o projeto no GitHub
+disclaimer.dont_show_again = Não exibir este aviso nas próximas execuções
+disclaimer.acknowledge = Entendi — continuar
 
 # ── Toasts / erros ──────────────────────────────────────────────────────────
 toast.no_working_dir = Diretório de trabalho não definido (veja Configurações).

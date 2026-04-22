@@ -38,6 +38,23 @@ about.tech_label = Technologies
 about.tech_value = Rust · egui · s2protocol
 about.version = v{version}
 about.close = Close
+about.disclaimer_heading = Notices
+
+# ── Disclaimer dialog (startup + About) ─────────────────────────────────────
+# Bullet bodies are intentionally long-form and formal. They appear both
+# in the first-launch modal and in the About window so users can revisit
+# them at any time. Keep wording aligned between the two locales.
+disclaimer.title = Important notices
+disclaimer.intro = Before you continue, please take a moment to review the following information regarding this application.
+disclaimer.unofficial = This application is an independent project. It is not affiliated with, endorsed by, sponsored by, or otherwise associated with Blizzard Entertainment, Inc. StarCraft and StarCraft II are trademarks or registered trademarks of Blizzard Entertainment, and all related intellectual property is governed by the corresponding End User License Agreement and remains the sole property of its respective owners.
+disclaimer.in_development = The software is currently under active development. The metrics, statistics and analyses it presents have not yet been fully reviewed and may contain inaccuracies. You should not treat the figures shown here as authoritative or rely on them for competitive decisions.
+disclaimer.supply_block = The supply-block detection implemented by this application uses a methodology that differs from the in-game logic. As a result, the values shown will rarely match the ones reported by the game itself. The intent is to provide a representation that remains realistic and useful, and feedback on this approach is highly welcome.
+disclaimer.feedback = If you find issues, observe incorrect behavior, or have suggestions for improvement, you are warmly invited to open an issue on the project's GitHub repository.
+disclaimer.open_source = This is an open-source project. The full source code is available on GitHub and contributions from the community are welcome.
+disclaimer.issues_link = Open the GitHub issues page
+disclaimer.repo_link = View the project on GitHub
+disclaimer.dont_show_again = Do not show this notice on future launches
+disclaimer.acknowledge = I understand — continue
 
 # ── Toasts / errors ─────────────────────────────────────────────────────────
 toast.no_working_dir = Working directory not set (see Settings).

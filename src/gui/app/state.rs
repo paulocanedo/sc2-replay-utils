@@ -85,6 +85,16 @@ pub struct AppState {
     /// the draft separate from `config.language` so cancelling the
     /// modal leaves the real config alone.
     pub language_draft: Language,
+    /// Draft of the "don't show again" checkbox in the startup
+    /// disclaimer modal. Only persisted (into
+    /// `config.disclaimer_acknowledged`) when the user clicks continue
+    /// with the box checked.
+    pub disclaimer_dont_show_again: bool,
+    /// Session-only flag: once the user clicks continue on the
+    /// disclaimer modal, suppress it for the rest of this run even if
+    /// they didn't tick "don't show again" (in which case it will
+    /// re-appear on the next launch).
+    pub disclaimer_dismissed_session: bool,
     /// Índice do jogador de referência na aba Insights. `None` até
     /// o primeiro render pós-load, que resolve pelo nickname do usuário
     /// (cai em 0 se não houver match). Resetado a cada novo replay.
@@ -126,6 +136,8 @@ impl AppState {
             rename_status: None,
             pending_load_latest: false,
             language_draft,
+            disclaimer_dont_show_again: false,
+            disclaimer_dismissed_session: false,
             insights_pov: None,
         };
         me.restart_watcher();
