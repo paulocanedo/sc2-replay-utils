@@ -221,10 +221,15 @@ pub fn show(
                     );
                 },
             );
-            // Coluna direita — unidades/estruturas do P2.
+            // Coluna direita — unidades/estruturas do P2. Ancorada à
+            // direita (`Align::Max`) pra que o conteúdo cole no painel
+            // lateral do P2, espelhando a coluna esquerda que cola no
+            // painel do P1. Sem isso o slack horizontal do col_w — col_w
+            // > largura real do card — ia todo pro lado do painel,
+            // deixando um gap visível entre a coluna e o side panel.
             ui.allocate_ui_with_layout(
                 egui::vec2(col_w, avail_h),
-                egui::Layout::top_down(egui::Align::Min),
+                egui::Layout::top_down(egui::Align::Max),
                 |ui| {
                     if let Some(p) = loaded.timeline.players.get(1) {
                         unit_column::render_player_column(
