@@ -154,8 +154,8 @@ pub(super) fn process_game_events(
                 // SC2: o cmd vai pro primeiro prédio idle ou similar. A
                 // imprecisão é absorvida pelo encadeamento por
                 // finish_loop no build_order.
-                let producer_index = unit_tag_index(selection.active()[0] as i64);
-                let Some(producer) = index_owner.get(&producer_index) else {
+                let producer_tag = selection.active()[0] as i64;
+                let Some(producer) = index_owner.get(&producer_tag) else {
                     continue;
                 };
                 if producer.player_idx != player_idx {
@@ -178,9 +178,10 @@ pub(super) fn process_game_events(
                 // do alvo (Hatchery/Lair/Hive) extraída de m_data.
                 if action == "SpawnLarva" {
                     if let GameSCmdData::TargetUnit(ref tu) = cmd.m_data {
-                        let target_idx = unit_tag_index(tu.m_tag as i64);
+                        let target_tag = tu.m_tag as i64;
+                        let target_idx = unit_tag_index(target_tag);
                         let target_type = index_owner
-                            .get(&target_idx)
+                            .get(&target_tag)
                             .map(|e| e.unit_type.clone())
                             .unwrap_or_default();
                         let target_x = (tu.m_snapshot_point.x / POS_RATIO) as u8;
@@ -199,7 +200,7 @@ pub(super) fn process_game_events(
                 players[player_idx].production_cmds.push(ProductionCmd {
                     game_loop: game_loop as u32,
                     ability: action.to_string(),
-                    producer_tag_indexes: vec![producer_index],
+                    producer_tags: vec![producer_tag],
                     consumed: false,
                 });
             }
