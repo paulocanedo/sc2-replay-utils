@@ -8,8 +8,6 @@
 
 use std::collections::HashMap;
 
-use s2protocol::tracker_events::unit_tag_index;
-
 use crate::balance_data::build_time_loops;
 use crate::replay::{
     EntityCategory, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
@@ -60,20 +58,22 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     }
 
     // Estado mutável compartilhado pelo cmd matching:
-    // - `cmds_by_producer[producer_index] -> Vec<cmd_idx>` em ordem
+    // - `cmds_by_producer[producer_tag] -> Vec<cmd_idx>` em ordem
     //   de emissão (game.rs já empurra por game_loop crescente).
+    //   Chave é o tag completo (`i64`) porque indexes são reciclados —
+    //   ver comentário em `ProductionCmd::producer_tags`.
     // - `consumed[i]` marca que o cmd `i` já foi pareado a uma entrada,
     //   pra não ser reusado por outro evento.
     // - `prev_finish_by_producer` mantém o último `finish_loop`
     //   computado por produtor pra encadear `start = max(cmd, prev)`.
-    let mut cmds_by_producer: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut cmds_by_producer: HashMap<i64, Vec<usize>> = HashMap::new();
     for (i, cmd) in player.production_cmds.iter().enumerate() {
-        if let Some(&p) = cmd.producer_tag_indexes.first() {
+        if let Some(&p) = cmd.producer_tags.first() {
             cmds_by_producer.entry(p).or_default().push(i);
         }
     }
     let mut consumed = vec![false; player.production_cmds.len()];
-    let mut prev_finish_by_producer: HashMap<u32, u32> = HashMap::new();
+    let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
@@ -128,28 +128,27 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // metade é uma margem segura.
         let max_cmd_loop = projected_finish
             .saturating_sub(build_time_loops(&ev.entity_type, base_build) / 2);
-        let cmd_match: Option<(u32, u32)> = if from_unit_init {
+        let cmd_match: Option<(i64, u32)> = if from_unit_init {
             None
         } else {
             ev.creator_tag.and_then(|t| {
-                let producer_idx = unit_tag_index(t);
                 consume_producer_cmd(
                     &cmds_by_producer,
                     &mut consumed,
                     &player.production_cmds,
-                    producer_idx,
+                    t,
                     &ev.entity_type,
                     max_cmd_loop,
                 )
-                .map(|loop_| (producer_idx, loop_))
+                .map(|loop_| (t, loop_))
             })
         };
 
         let start_loop = if from_unit_init {
             raw_loop
-        } else if let Some((producer_idx, cmd_loop)) = cmd_match {
+        } else if let Some((producer_tag, cmd_loop)) = cmd_match {
             let prev = prev_finish_by_producer
-                .get(&producer_idx)
+                .get(&producer_tag)
                 .copied()
                 .unwrap_or(0);
             cmd_loop.max(prev)
@@ -165,8 +164,8 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // observado — assim a próxima unidade da fila não pode começar
         // antes do término da atual, mesmo que o jogador tenha clicado
         // o train cedo (queue de cmds enquanto a anterior produz).
-        if let Some((producer_idx, _)) = cmd_match {
-            prev_finish_by_producer.insert(producer_idx, projected_finish);
+        if let Some((producer_tag, _)) = cmd_match {
+            prev_finish_by_producer.insert(producer_tag, projected_finish);
         }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou
@@ -294,7 +293,7 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     deduplicate(raw)
 }
 
-/// Procura o primeiro cmd não-consumido emitido pelo `producer_idx`
+/// Procura o primeiro cmd não-consumido emitido pelo `producer_tag`
 /// cuja `ability` bate com `action` E cujo `game_loop` satisfaz
 /// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Marca o
 /// cmd como consumido e retorna seu `game_loop`. Quando não há match,
@@ -305,14 +304,14 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
 /// alternando Phoenix/Voidray) e queremos sempre achar a próxima
 /// ocorrência da ação certa, não a primeira da fila.
 fn consume_producer_cmd(
-    by_producer: &HashMap<u32, Vec<usize>>,
+    by_producer: &HashMap<i64, Vec<usize>>,
     consumed: &mut [bool],
     cmds: &[ProductionCmd],
-    producer_idx: u32,
+    producer_tag: i64,
     action: &str,
     max_cmd_loop: u32,
 ) -> Option<u32> {
-    let queue = by_producer.get(&producer_idx)?;
+    let queue = by_producer.get(&producer_tag)?;
     for &i in queue {
         if consumed[i] {
             continue;

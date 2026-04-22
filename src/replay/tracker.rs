@@ -64,25 +64,25 @@ struct TagState {
 
 // ── Loop principal ──────────────────────────────────────────────────
 
-/// Mapa global `unit_tag_index → (tag completo, player_idx, último
-/// tipo observado)`, populado pelo tracker e consultado por
-/// `game::process_game_events`. O game events parser usa essa tabela
-/// para descobrir o tipo do produtor (Barracks/Gateway/Forge/etc.) que
-/// recebeu um Cmd, alimentando o lookup
-/// `resolve_ability_command(producer, ability_id, cmd_index)`.
+/// Mapa `full_tag (i64) → (player_idx, tipo observado)`, populado
+/// pelo tracker e consultado por `game::process_game_events`. O game
+/// events parser usa essa tabela para descobrir o tipo do produtor
+/// (Barracks/Gateway/Forge/etc.) que recebeu um Cmd, alimentando o
+/// lookup `resolve_ability_command(producer, ability_id, cmd_index)`.
 ///
-/// O "último tipo observado" segue a regra "last write wins" — para
-/// morphs in-place (CC→Orbital, Gateway→WarpGate) o tipo final é o que
-/// fica registrado. Cmds emitidos antes do morph podem perder a
-/// resolução, mas isso é raro o suficiente pra justificar a
-/// simplicidade. Ver `game.rs` para o uso.
+/// Chaveado pelo tag completo (`index << 18 | recycle`) — não só pelo
+/// index — para que Queens que morrem e cujo slot é reciclado por outro
+/// unit (Drone/Zergling) não sejam apagadas. Cmd lookups no game event
+/// carregam o tag completo, então encontramos o entry certo mesmo para
+/// produtores mortos. `UnitTypeChange` (CC→Orbital, Gateway→WarpGate)
+/// atualiza o entry in-place preservando o tag.
 pub(super) struct IndexEntry {
     pub tag: i64,
     pub player_idx: usize,
     pub unit_type: String,
 }
 
-pub(super) type IndexOwnerMap = HashMap<u32, IndexEntry>;
+pub(super) type IndexOwnerMap = HashMap<i64, IndexEntry>;
 
 pub(super) fn process_tracker_events(
     path_str: &str,
@@ -98,6 +98,11 @@ pub(super) fn process_tracker_events(
         .map_err(|e| format!("{:?}", e))?;
 
     let mut tag_map: HashMap<i64, TagState> = HashMap::new();
+    // Índice u32 → tag completo mais recente nesse índice. Só é usado
+    // pelo handler de `UnitPosition`, cujo evento carrega apenas o
+    // index (sem recycle). Mantido "last Born wins" — suficiente porque
+    // UnitPosition descreve a unidade atualmente viva naquele instante.
+    let mut index_to_latest_tag: HashMap<u32, i64> = HashMap::new();
 
     let mut game_loop: u32 = 0;
     // Sequência monotônica usada como tiebreaker entre eventos do
@@ -176,13 +181,14 @@ pub(super) fn process_tracker_events(
                     continue;
                 };
                 index_owner.insert(
-                    e.unit_tag_index,
+                    tag,
                     IndexEntry {
                         tag,
                         player_idx: idx,
                         unit_type: e.unit_type_name.clone(),
                     },
                 );
+                index_to_latest_tag.insert(e.unit_tag_index, tag);
 
                 let category = classify_entity(&e.unit_type_name);
                 let creator_ability = e.creator_ability_name.clone().filter(|s| !s.is_empty());
@@ -278,7 +284,7 @@ pub(super) fn process_tracker_events(
                                 lifecycle: Lifecycle::Finished,
                             },
                         );
-                        if let Some(entry) = index_owner.get_mut(&e.unit_tag_index) {
+                        if let Some(entry) = index_owner.get_mut(&tag) {
                             entry.unit_type = e.unit_type_name.clone();
                         }
                     }
@@ -329,13 +335,14 @@ pub(super) fn process_tracker_events(
                 let Some(&idx) = player_idx.get(&e.control_player_id) else { continue };
                 let category = classify_entity(&e.unit_type_name);
                 index_owner.insert(
-                    e.unit_tag_index,
+                    tag,
                     IndexEntry {
                         tag,
                         player_idx: idx,
                         unit_type: e.unit_type_name.clone(),
                     },
                 );
+                index_to_latest_tag.insert(e.unit_tag_index, tag);
 
                 let creator_ability = if is_tumor {
                     // Hardcoded em vez de ler `creator_ability_name` do
@@ -486,7 +493,7 @@ pub(super) fn process_tracker_events(
                         lifecycle: Lifecycle::Finished,
                     },
                 );
-                if let Some(entry) = index_owner.get_mut(&e.unit_tag_index) {
+                if let Some(entry) = index_owner.get_mut(&tag) {
                     entry.unit_type = e.unit_type_name.clone();
                 }
             }
@@ -502,7 +509,10 @@ pub(super) fn process_tracker_events(
                 // SC2). Para voltar à mesma escala de células usada por
                 // `UnitBornEvent.x/y` (`u8`), dividimos por 4 de novo.
                 for up in e.to_unit_positions_vec() {
-                    let Some(entry) = index_owner.get(&up.tag) else {
+                    let Some(&full_tag) = index_to_latest_tag.get(&up.tag) else {
+                        continue;
+                    };
+                    let Some(entry) = index_owner.get(&full_tag) else {
                         continue;
                     };
                     let cx = (up.x / 4).clamp(0, 255) as u8;
