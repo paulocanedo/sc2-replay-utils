@@ -472,6 +472,7 @@ pub(super) fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>>
         // colapsam em um único sprite.
         "Larva" => include_image!("../../../../assets/units/zerg/Larva.png"),
         "Broodling" => include_image!("../../../../assets/units/zerg/Broodling.png"),
+        "Egg" => include_image!("../../../../assets/units/zerg/Cocoon.png"),
         "Locust" | "LocustMP" | "LocustMPFlying" => {
             include_image!("../../../../assets/units/zerg/LocustMP.png")
         }
