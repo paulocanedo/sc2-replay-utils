@@ -288,7 +288,8 @@ fn army_block(
 // Chips por tipo de unidade viva. Quando há ícone disponível
 // (`assets/units/<race>/<Entity>.png`), renderiza `[icon] N` em vez de
 // `ABR N`. O fallback textual mantém o layout funcional pras raças sem
-// sprites ainda (todo Protoss, todo Zerg). Estruturas ficam de fora —
+// sprites ainda (todo Zerg) e pras unidades raras sem arte (Larva,
+// Interceptor, Changeling, AutoTurret…). Estruturas ficam de fora —
 // já estão implícitas em Supply/Economy/Army.
 
 fn units_block(ui: &mut Ui, p: &PlayerTimeline, game_loop: u32, lang: Language) {
@@ -399,6 +400,34 @@ fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
         "Raven" => include_image!("../../../../assets/units/terran/Raven.png"),
         "Banshee" => include_image!("../../../../assets/units/terran/Banshee.png"),
         "Battlecruiser" => include_image!("../../../../assets/units/terran/Battlecruiser.png"),
+        // Protoss
+        "Probe" => include_image!("../../../../assets/units/protoss/Probe.png"),
+        "Zealot" => include_image!("../../../../assets/units/protoss/Zealot.png"),
+        "Stalker" => include_image!("../../../../assets/units/protoss/Stalker.png"),
+        "Sentry" => include_image!("../../../../assets/units/protoss/Sentry.png"),
+        "HighTemplar" => include_image!("../../../../assets/units/protoss/HighTemplar.png"),
+        "Adept" | "AdeptPhaseShift" => {
+            include_image!("../../../../assets/units/protoss/Adept.png")
+        }
+        "DarkTemplar" => include_image!("../../../../assets/units/protoss/DarkTemplar.png"),
+        "Archon" => include_image!("../../../../assets/units/protoss/Archon.png"),
+        "Immortal" => include_image!("../../../../assets/units/protoss/Immortal.png"),
+        "Disruptor" | "DisruptorPhased" => {
+            include_image!("../../../../assets/units/protoss/Disruptor.png")
+        }
+        "Colossus" => include_image!("../../../../assets/units/protoss/Colossus.png"),
+        "Observer" | "ObserverSiegeMode" => {
+            include_image!("../../../../assets/units/protoss/Observer.png")
+        }
+        "WarpPrism" | "WarpPrismPhasing" => {
+            include_image!("../../../../assets/units/protoss/WarpPrism.png")
+        }
+        "Mothership" => include_image!("../../../../assets/units/protoss/Mothership.png"),
+        "Phoenix" => include_image!("../../../../assets/units/protoss/Phoenix.png"),
+        "VoidRay" => include_image!("../../../../assets/units/protoss/VoidRay.png"),
+        "Oracle" => include_image!("../../../../assets/units/protoss/Oracle.png"),
+        "Tempest" => include_image!("../../../../assets/units/protoss/Tempest.png"),
+        "Carrier" => include_image!("../../../../assets/units/protoss/Carrier.png"),
         _ => return None,
     };
     Some(src)
