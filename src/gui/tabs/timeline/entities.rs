@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use crate::balance_data;
 use crate::replay::{is_structure_name, EntityCategory, EntityEventKind, PlayerTimeline};
 
+use super::unit_column::{structure_canonical, unit_canonical};
+
 /// Lado base (px) do quadrado de uma unidade de 1 supply no minimapa.
 /// Unidades com mais supply escalam a partir daqui via
 /// `unit_scale_for_supply`.
@@ -40,7 +42,7 @@ fn unit_scale_for_supply(supply_x10: u32) -> f32 {
     (1.0 + (supply - 1.0) * 0.25).max(1.0)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct LiveEntity {
     /// Coordenadas em tile units, mas em `f32` pra acomodar a posição
     /// interpolada entre amostras esparsas de `unit_positions`.
@@ -60,6 +62,12 @@ pub(super) struct LiveEntity {
     /// `alive_entities_at` pra evitar lookup na tabela de balance data
     /// a cada frame.
     pub side: f32,
+    /// Forma canônica do tipo (mesma chave usada pelos chips do
+    /// `unit_column`), pra que o minimap consiga filtrar por tipo no
+    /// pass de highlight do hover. Estruturas usam `structure_canonical`,
+    /// unidades `unit_canonical`; tipos desconhecidos preservam a forma
+    /// bruta (mesmo fallback do agg em `unit_column`).
+    pub entity_type: String,
 }
 
 /// Detecta estruturas de main-base (townhalls). Inclui morphs zerg
@@ -99,8 +107,13 @@ pub(super) fn alive_entities_at(
             EntityEventKind::ProductionFinished => {
                 // Tumors são desenhadas implicitamente pela camada de
                 // creep — pular aqui evita o quadrado de 9px de
-                // estrutura por cima da própria mancha.
-                if ev.entity_type.starts_with("CreepTumor") {
+                // estrutura por cima da própria mancha. Beacons são
+                // pings de minimapa do próprio jogador (BeaconAttack,
+                // BeaconRally, etc.), não unidades — mesmo filtro
+                // aplicado por `collect_alive_units` no `unit_column`.
+                if ev.entity_type.starts_with("CreepTumor")
+                    || ev.entity_type.starts_with("Beacon")
+                {
                     continue;
                 }
                 let is_base = is_base_type(&ev.entity_type);
@@ -115,6 +128,16 @@ pub(super) fn alive_entities_at(
                         UNIT_BASE_SIZE * unit_scale_for_supply(cost)
                     }
                 };
+                let canonical: &str = if matches!(ev.category, EntityCategory::Structure) {
+                    structure_canonical(&ev.entity_type)
+                } else {
+                    unit_canonical(&ev.entity_type)
+                };
+                let entity_type = if canonical.is_empty() {
+                    ev.entity_type.clone()
+                } else {
+                    canonical.to_string()
+                };
                 alive.insert(
                     ev.tag,
                     LiveEntity {
@@ -123,6 +146,7 @@ pub(super) fn alive_entities_at(
                         category: ev.category,
                         is_base,
                         side,
+                        entity_type,
                     },
                 );
             }

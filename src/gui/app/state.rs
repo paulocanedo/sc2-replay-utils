@@ -89,6 +89,11 @@ pub struct AppState {
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
     pub timeline_show_map: bool,
+    /// Quando o cursor está sobre um chip do `unit_column`, guarda
+    /// `(slot_idx, canonical_type)` pra que o minimap desenhe um halo
+    /// nas instâncias correspondentes. Resetado a `None` no começo de
+    /// cada frame da Timeline — vida do hover ligada ao frame ativo.
+    pub timeline_hovered_entity: Option<(usize, String)>,
     /// Template de renomeação em lote.
     pub rename_template: String,
     /// Previews gerados a partir do template + biblioteca.
@@ -150,6 +155,7 @@ impl AppState {
             timeline_show_heatmap: false,
             timeline_show_creep: true,
             timeline_show_map: true,
+            timeline_hovered_entity: None,
             rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
             rename_previews: Vec::new(),
             rename_status: None,
