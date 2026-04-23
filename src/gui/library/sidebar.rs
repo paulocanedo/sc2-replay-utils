@@ -1,7 +1,7 @@
 //! Left filter sidebar. Owns search + race chips + outcome + date range +
 //! sort + clear-all + insights (matchup winrate list, top maps). Mutates
 //! the caller's `LibraryFilter` in place and returns a `LibraryAction`
-//! (only non-`None` for `SaveDateRange`, which the app persists).
+//! (only non-`None` for `SaveLibraryFilters`, which the app persists).
 
 use egui::{Align, Color32, ComboBox, CornerRadius, Layout, Rect, RichText, Sense, Ui};
 
@@ -55,6 +55,10 @@ pub fn show(
             let resp = chip(ui, label, selected, Some(color));
             if resp.clicked() && has_nicknames {
                 filter.race = if selected { None } else { Some(letter) };
+                action = LibraryAction::SaveLibraryFilters {
+                    date_range: filter.date_range,
+                    race: filter.race,
+                };
             }
             if !has_nicknames {
                 resp.on_hover_text(t("library.filter.nicknames_race_tooltip", lang));
@@ -136,7 +140,10 @@ pub fn show(
             );
         });
     if filter.date_range != prev_date_range {
-        action = LibraryAction::SaveDateRange(filter.date_range);
+        action = LibraryAction::SaveLibraryFilters {
+            date_range: filter.date_range,
+            race: filter.race,
+        };
     }
 
     ui.add_space(SPACE_M);
@@ -195,16 +202,20 @@ pub fn show(
     ui.add_enabled_ui(any_filter, |ui| {
         if ui.button(t("library.filter.clear_all", lang)).clicked() {
             filter.search.clear();
+            let prev_race = filter.race;
             filter.race = None;
             filter.outcome = OutcomeFilter::All;
             filter.opponent_name = None;
             filter.matchup_code = None;
             filter.map_name = None;
             filter.opening = None;
-            let prev = filter.date_range;
+            let prev_range = filter.date_range;
             filter.date_range = DateRange::All;
-            if prev != DateRange::All {
-                action = LibraryAction::SaveDateRange(DateRange::All);
+            if prev_range != DateRange::All || prev_race.is_some() {
+                action = LibraryAction::SaveLibraryFilters {
+                    date_range: DateRange::All,
+                    race: None,
+                };
             }
         }
     });

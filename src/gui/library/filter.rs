@@ -72,6 +72,7 @@ impl LibraryFilter {
     pub fn from_config(config: &crate::config::AppConfig) -> Self {
         Self {
             date_range: config.library_date_range,
+            race: config.library_race,
             ..Self::default()
         }
     }

@@ -27,7 +27,13 @@ pub enum LibraryAction {
     Refresh,
     PickWorkingDir(PathBuf),
     OpenRename,
-    SaveDateRange(DateRange),
+    /// Persiste filtros que sobrevivem entre sessões (date range + race).
+    /// Sempre carrega o snapshot completo, pra não perder uma mudança quando
+    /// duas acontecem no mesmo frame (ex.: botão "limpar tudo").
+    SaveLibraryFilters {
+        date_range: DateRange,
+        race: Option<char>,
+    },
 }
 
 /// Renderiza o hero (KPI strip clicável). Extraído da `show` principal
@@ -36,9 +42,9 @@ pub enum LibraryAction {
 /// detalhes (na direita) só rouba largura da lista, nunca do hero.
 ///
 /// Devolve `LibraryAction::None` quando o usuário não interagiu, ou a
-/// ação correspondente ao chip clicado (`SaveDateRange` quando limpa
-/// filtros e havia date range ativo, etc.). Nada é renderizado se a
-/// biblioteca ainda não tem stats ou está vazia.
+/// ação correspondente ao chip clicado (`SaveLibraryFilters` quando
+/// limpa filtros e havia date range ou race ativos, etc.). Nada é
+/// renderizado se a biblioteca ainda não tem stats ou está vazia.
 pub fn show_hero(
     ui: &mut Ui,
     library: &ReplayLibrary,
@@ -54,6 +60,7 @@ pub fn show_hero(
         match ha {
             HeroAction::ClearFilters => {
                 filter.search.clear();
+                let prev_race = filter.race;
                 filter.race = None;
                 filter.outcome = OutcomeFilter::All;
                 filter.opponent_name = None;
@@ -62,8 +69,11 @@ pub fn show_hero(
                 filter.opening = None;
                 let prev_range = filter.date_range;
                 filter.date_range = DateRange::All;
-                if prev_range != DateRange::All {
-                    action = LibraryAction::SaveDateRange(DateRange::All);
+                if prev_range != DateRange::All || prev_race.is_some() {
+                    action = LibraryAction::SaveLibraryFilters {
+                        date_range: DateRange::All,
+                        race: None,
+                    };
                 }
             }
             HeroAction::FilterWins => {

@@ -169,8 +169,9 @@ impl AppState {
                 }
                 self.refresh_library();
             }
-            LibraryAction::SaveDateRange(range) => {
-                self.config.library_date_range = range;
+            LibraryAction::SaveLibraryFilters { date_range, race } => {
+                self.config.library_date_range = date_range;
+                self.config.library_race = race;
                 if let Err(e) = self.config.save() {
                     self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
                 }
