@@ -369,7 +369,7 @@ pub(super) fn unit_canonical(name: &str) -> &'static str {
 /// base — são o mesmo modelo visualmente. Retorna `None` pra entidades
 /// raras (Larva, Interceptor, Changeling…) — caller cai no fallback de
 /// abreviação.
-pub(super) fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
+pub(crate) fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>> {
     use egui::include_image;
     let src = match entity_type {
         // Terran
@@ -646,7 +646,7 @@ pub(super) fn structure_canonical(name: &str) -> &'static str {
 /// localizado. Morphs Zerg na linha Hatch→Lair→Hive e Spire→GreaterSpire
 /// têm sprites próprios. Retorna `None` apenas pras estruturas ainda
 /// sem arte (todas cobertas agora — fallback é defensivo).
-pub(super) fn structure_icon(canonical: &str) -> Option<egui::ImageSource<'static>> {
+pub(crate) fn structure_icon(canonical: &str) -> Option<egui::ImageSource<'static>> {
     use egui::include_image;
     let src = match canonical {
         // Terran — base

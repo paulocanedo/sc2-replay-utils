@@ -29,7 +29,7 @@ mod minimap;
 mod overlays;
 mod side_panel;
 mod transport;
-mod unit_column;
+pub(super) mod unit_column;
 
 use egui::{Color32, TextStyle, Ui};
 
