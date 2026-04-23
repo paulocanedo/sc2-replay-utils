@@ -13,10 +13,10 @@
 
 use egui::{Color32, RichText, Sense, Ui};
 
-use crate::colors::{race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM, LABEL_SOFT};
+use crate::colors::{race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM};
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
-use crate::tokens::{size_caption, SPACE_M, SPACE_S};
+use crate::tokens::{size_caption, SPACE_S};
 
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
@@ -119,15 +119,11 @@ pub(super) fn row_height(ui: &Ui) -> f32 {
 
 const FRAME_CHROME_V: f32 = 14.0;
 
-/// Cor da borda esquerda baseada na raça.
-fn race_border_color(race: &str) -> Color32 {
-    race_color(race)
-}
-
-/// Largura fixa da zona direita (W/L). Garante que a coluna do resultado
-/// fique alinhada entre linhas, independentemente do comprimento dos
-/// nomes ou do mapa.
-const RIGHT_ZONE_W: f32 = 56.0;
+/// Largura fixa da zona direita (matchup code + W/L). Garante que a
+/// coluna fique alinhada entre linhas, independentemente do comprimento
+/// dos nomes dos jogadores. Calibrada para caber "TvZ" + gap + "LOSS"
+/// confortavelmente, sem cortar em fontes maiores do slider de tamanho.
+const RIGHT_ZONE_W: f32 = 110.0;
 
 // Paleta dos estados visuais do row.
 const SELECTED_FILL: Color32 = Color32::from_rgb(32, 44, 60);
@@ -207,18 +203,6 @@ pub(super) fn entry_row(
                 }
             }
         });
-
-    // Pinta a borda esquerda colorida pela raça do usuário (ou P1).
-    if let MetaState::Parsed(meta) = &entry.meta {
-        let user_idx = find_user_index(meta, config).unwrap_or(0);
-        let border_color = race_border_color(&meta.players[user_idx].race);
-        let rect = inner.response.rect;
-        let border_rect = egui::Rect::from_min_max(
-            rect.left_top(),
-            egui::pos2(rect.left() + 3.5, rect.bottom()),
-        );
-        ui.painter().rect_filled(border_rect, 4.0, border_color);
-    }
 
     let row_resp = inner.response.interact(Sense::click());
     let mut outcome = if loadable && row_resp.double_clicked() {
@@ -301,9 +285,10 @@ pub(super) fn entry_row(
     outcome
 }
 
-/// Layout do row 1v1 parseado: nomes coloridos por raça (usuário em
-/// destaque), nome do mapa em tom dim e tag W/L à direita quando
-/// aplicável. Tudo em uma única strip horizontal.
+/// Layout do row 1v1 parseado: à esquerda apenas "{P1} vs {P2}"; à
+/// direita o código do matchup (com letras tingidas pela raça) e o
+/// resultado WIN/LOSS quando há usuário identificado. Tudo em uma
+/// única strip horizontal — mapa e demais detalhes ficam no card.
 fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: f32) {
     let user_idx = find_user_index(meta, config);
 
@@ -322,7 +307,7 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
         egui::pos2(strip_rect.right() - RIGHT_ZONE_W, strip_rect.bottom()),
     );
 
-    // ── LEFT: nomes coloridos · mapa ─────────────────────────
+    // ── LEFT: "Player1 vs Player2" ───────────────────────────
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(left_rect)
@@ -343,21 +328,22 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
                     player_label(ui, p, user_idx == Some(i));
                 }
             }
-
-            ui.add_space(SPACE_M);
-            ui.label(
-                RichText::new(format!("· {}", meta.map))
-                    .color(LABEL_SOFT),
-            );
         },
     );
 
-    // ── RIGHT: WIN/LOSS (apenas com user identificado) ──────
+    // ── RIGHT: matchup code · WIN/LOSS ───────────────────────
+    // Layout right-to-left: WIN/LOSS encosta na borda direita; o
+    // código do matchup vem logo antes. Ordem posicional (Race[0] vs
+    // Race[1]), independente de quem é o usuário — casa com a ordem
+    // dos nomes na zona esquerda.
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(right_rect)
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
         |ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_S;
+
+            // (1) WIN/LOSS — só quando há usuário identificado.
             let result = user_idx
                 .and_then(|i| meta.players.get(i))
                 .map(|p| p.result.as_str());
@@ -380,21 +366,38 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
                 }
                 _ => {}
             }
+
+            // (2) Matchup code "ZvT" — letras tingidas pela raça.
+            if meta.players.len() == 2 {
+                let r1 = race_letter(&meta.players[1].race);
+                ui.label(
+                    RichText::new(r1.to_string())
+                        .strong()
+                        .monospace()
+                        .size(size_caption(config))
+                        .color(race_color(&meta.players[1].race)),
+                );
+                ui.label(
+                    RichText::new("v")
+                        .size(size_caption(config))
+                        .color(LABEL_DIM),
+                );
+                let r0 = race_letter(&meta.players[0].race);
+                ui.label(
+                    RichText::new(r0.to_string())
+                        .strong()
+                        .monospace()
+                        .size(size_caption(config))
+                        .color(race_color(&meta.players[0].race)),
+                );
+            }
         },
     );
 }
 
-/// "T firebat" com o nome em branco e a letra da raça colorida. O
-/// jogador identificado como o usuário recebe peso `strong` para
-/// destacá-lo de relance na lista.
+/// Apenas o nome do jogador. Usuário registrado recebe peso `strong`
+/// para destacá-lo de relance entre as linhas.
 fn player_label(ui: &mut Ui, p: &PlayerMeta, is_user: bool) {
-    let race_letter_ch = race_letter(&p.race);
-    ui.label(
-        RichText::new(race_letter_ch.to_string())
-            .strong()
-            .monospace()
-            .color(race_color(&p.race)),
-    );
     let name = RichText::new(&p.name).color(Color32::WHITE);
     let name = if is_user { name.strong() } else { name };
     ui.label(name);
