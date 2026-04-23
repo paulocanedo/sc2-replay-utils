@@ -59,12 +59,33 @@ impl AppState {
                             library_action = side_action;
                         }
                     }
+                    // Hero (KPI strip) no topo — renderizado num
+                    // `Panel::top` para ocupar 100% da largura à direita
+                    // do filtro lateral. Reservar a faixa do topo ANTES
+                    // do `Panel::right` faz com que o card de detalhes
+                    // ocupe somente a área *abaixo* do hero, em vez de
+                    // sentar ao lado e amputar a largura disponível
+                    // para os KPIs.
+                    let hero_action = egui::Panel::top("library_hero")
+                        .resizable(false)
+                        .frame(egui::Frame::new())
+                        .show_inside(ui, |ui| {
+                            library::show_hero(
+                                ui,
+                                &self.library,
+                                &self.config,
+                                &mut self.library_filter,
+                            )
+                        })
+                        .inner;
+                    if !matches!(hero_action, LibraryAction::None) {
+                        library_action = hero_action;
+                    }
+
                     // Card lateral de detalhes — renderizado ANTES da
                     // lista central para que `Panel::right` reserve sua
-                    // coluna primeiro (caso contrário a `ScrollArea` da
-                    // lista consome todo o espaço disponível e o painel
-                    // direito fica sem onde aparecer). O card é sempre
-                    // visível: quando não há seleção, mostra um placeholder.
+                    // coluna primeiro. Sob o hero, lado a lado com a
+                    // lista. Sempre visível (placeholder quando vazio).
                     if let Some(action) = self.show_library_detail_card(ui) {
                         library_action = action;
                     }
