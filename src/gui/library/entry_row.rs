@@ -335,19 +335,22 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
     // Layout right-to-left: WIN/LOSS encosta na borda direita; o
     // código do matchup vem logo antes. Ordem posicional (Race[0] vs
     // Race[1]), independente de quem é o usuário — casa com a ordem
-    // dos nomes na zona esquerda.
+    // dos nomes na zona esquerda. Spacing zero aqui mantém as três
+    // letras do matchup (`ZvT`) grudadas; o gap entre matchup e W/L
+    // é injetado manualmente via `add_space`, condicional à existência
+    // do rótulo W/L.
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(right_rect)
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
         |ui| {
-            ui.spacing_mut().item_spacing.x = SPACE_S;
+            ui.spacing_mut().item_spacing.x = 0.0;
 
             // (1) WIN/LOSS — só quando há usuário identificado.
             let result = user_idx
                 .and_then(|i| meta.players.get(i))
                 .map(|p| p.result.as_str());
-            match result {
+            let has_result = match result {
                 Some("Win") => {
                     ui.label(
                         RichText::new(t("library.outcome.win", config.language))
@@ -355,6 +358,7 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
                             .strong()
                             .color(ACCENT_SUCCESS),
                     );
+                    true
                 }
                 Some("Loss") => {
                     ui.label(
@@ -363,12 +367,17 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
                             .strong()
                             .color(ACCENT_DANGER),
                     );
+                    true
                 }
-                _ => {}
-            }
+                _ => false,
+            };
 
-            // (2) Matchup code "ZvT" — letras tingidas pela raça.
+            // (2) Matchup code "ZvT" — letras tingidas pela raça,
+            // sem espaço entre elas (spacing zerado acima).
             if meta.players.len() == 2 {
+                if has_result {
+                    ui.add_space(SPACE_S);
+                }
                 let r1 = race_letter(&meta.players[1].race);
                 ui.label(
                     RichText::new(r1.to_string())
@@ -379,6 +388,7 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
                 );
                 ui.label(
                     RichText::new("v")
+                        .monospace()
                         .size(size_caption(config))
                         .color(LABEL_DIM),
                 );
