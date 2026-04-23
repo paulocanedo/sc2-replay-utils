@@ -117,6 +117,7 @@ impl AppState {
                             &mut self.timeline_show_heatmap,
                             &mut self.timeline_show_creep,
                             &mut self.timeline_show_map,
+                            &mut self.timeline_hovered_entity,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
                         Tab::Charts => tabs::charts::show(

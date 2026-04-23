@@ -157,6 +157,10 @@ fn text_chip(
 
 /// Renderiza a coluna vertical com unidades + separador + estruturas do
 /// jogador. Scroll automático pra acomodar comps com muitos tipos.
+///
+/// `hovered_out` é setado quando o cursor cruza um chip — caller passa o
+/// mesmo `&mut Option` pras duas colunas (P1/P2) e o pass de highlight
+/// no minimap consome o resultado.
 pub(super) fn render_player_column(
     ui: &mut Ui,
     p: &PlayerTimeline,
@@ -164,16 +168,33 @@ pub(super) fn render_player_column(
     game_loop: u32,
     lang: Language,
     icon_size_factor: f32,
+    hovered_out: &mut Option<(usize, String)>,
 ) {
     egui::ScrollArea::vertical()
         .id_salt(("timeline_units_col", p.name.as_str()))
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            render_units_section(ui, p, slot_idx, game_loop, lang, icon_size_factor);
+            render_units_section(
+                ui,
+                p,
+                slot_idx,
+                game_loop,
+                lang,
+                icon_size_factor,
+                hovered_out,
+            );
             ui.add_space(SPACE_XS);
             ui.separator();
             ui.add_space(SPACE_XS);
-            render_structures_section(ui, p, slot_idx, game_loop, lang, icon_size_factor);
+            render_structures_section(
+                ui,
+                p,
+                slot_idx,
+                game_loop,
+                lang,
+                icon_size_factor,
+                hovered_out,
+            );
         });
 }
 
@@ -184,6 +205,7 @@ fn render_units_section(
     game_loop: u32,
     lang: Language,
     size_factor: f32,
+    hovered_out: &mut Option<(usize, String)>,
 ) {
     let raw = collect_alive_units(p, game_loop);
     if raw.is_empty() {
@@ -223,11 +245,14 @@ fn render_units_section(
                     ("count", &count.to_string()),
                 ],
             );
-            if let Some(icon) = unit_icon(&canonical) {
-                icon_chip(ui, icon, count, size_factor, slot_idx).on_hover_text(tooltip);
+            let resp = if let Some(icon) = unit_icon(&canonical) {
+                icon_chip(ui, icon, count, size_factor, slot_idx).on_hover_text(tooltip)
             } else {
                 text_chip(ui, &unit_abbrev(&canonical), count, size_factor, slot_idx)
-                    .on_hover_text(tooltip);
+                    .on_hover_text(tooltip)
+            };
+            if resp.hovered() {
+                *hovered_out = Some((slot_idx, canonical.clone()));
             }
         }
     });
@@ -240,6 +265,7 @@ fn render_structures_section(
     game_loop: u32,
     lang: Language,
     size_factor: f32,
+    hovered_out: &mut Option<(usize, String)>,
 ) {
     let raw = collect_alive_structures(p, game_loop);
     let mut agg: HashMap<&'static str, i32> = HashMap::new();
@@ -271,11 +297,14 @@ fn render_structures_section(
                     ("count", &count.to_string()),
                 ],
             );
-            if let Some(icon) = structure_icon(canonical) {
-                icon_chip(ui, icon, count, size_factor, slot_idx).on_hover_text(tooltip);
+            let resp = if let Some(icon) = structure_icon(canonical) {
+                icon_chip(ui, icon, count, size_factor, slot_idx).on_hover_text(tooltip)
             } else {
                 text_chip(ui, structure_abbrev(canonical), count, size_factor, slot_idx)
-                    .on_hover_text(tooltip);
+                    .on_hover_text(tooltip)
+            };
+            if resp.hovered() {
+                *hovered_out = Some((slot_idx, canonical.to_string()));
             }
         }
     });
@@ -473,6 +502,7 @@ pub(crate) fn unit_icon(entity_type: &str) -> Option<egui::ImageSource<'static>>
         "Larva" => include_image!("../../../../assets/units/zerg/Larva.png"),
         "Broodling" => include_image!("../../../../assets/units/zerg/Broodling.png"),
         "Egg" => include_image!("../../../../assets/units/zerg/Cocoon.png"),
+        "CreepTumor" | "CreepTumorBurrowed" => include_image!("../../../../assets/units/zerg/CreepTumor.png"),
         "Locust" | "LocustMP" | "LocustMPFlying" => {
             include_image!("../../../../assets/units/zerg/LocustMP.png")
         }
