@@ -306,11 +306,24 @@ fn collect_abilities(json: &Value, version: u32, out: &mut BTreeMap<AbilityKey, 
         }
     }
 
-    // Abilities especiais rastreadas no build order (ex.: SpawnLarva).
+    // Abilities especiais rastreadas no build order (ex.: SpawnLarva)
+    // e em game events (ex.: `*Land` — pouso de estruturas voadoras
+    // terran, que o tracker de UnitTypeChange não posiciona porque o
+    // evento não carrega x/y; o Cmd de Land traz o clique exato no
+    // TargetPoint e o game events parser usa isso para patchar a
+    // posição dos eventos do pouso).
     // Vivem em `abilities.ability[]` com `@index` (ability_id) e
     // `command[].@index` (cmd_index). Whitelist evita poluir a tabela
     // com move/stop/attack/burrow.
-    const TRACKED_ABILITIES: &[&str] = &["SpawnLarva", "SupplyDrop"];
+    const TRACKED_ABILITIES: &[&str] = &[
+        "SpawnLarva",
+        "SupplyDrop",
+        "CommandCenterLand",
+        "OrbitalCommandLand",
+        "BarracksLand",
+        "FactoryLand",
+        "StarportLand",
+    ];
     if let Some(abilities) = json
         .get("abilities")
         .and_then(|a| a.get("ability"))
