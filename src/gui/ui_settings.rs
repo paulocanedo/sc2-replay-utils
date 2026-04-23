@@ -141,7 +141,6 @@ pub fn show(
 
             ui.separator();
             ui.heading(t("settings.section.appearance", lang));
-            ui.checkbox(&mut config.dark_mode, t("settings.dark_mode", lang));
 
             ui.horizontal(|ui| {
                 ui.label(t("settings.font_size.label", lang));

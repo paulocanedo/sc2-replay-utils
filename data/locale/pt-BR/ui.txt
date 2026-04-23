@@ -126,7 +126,6 @@ settings.auto_load_new = Carregar automaticamente quando surgir novo replay
 settings.section.language = Idioma
 settings.language.label = Idioma do aplicativo:
 settings.section.appearance = Aparência
-settings.dark_mode = Tema escuro
 settings.font_size.label = Tamanho da fonte (pt):
 settings.font_size.desc = Tamanho em pontos lógicos. HiDPI é tratado automaticamente pelo sistema.
 settings.save = Salvar
