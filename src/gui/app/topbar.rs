@@ -294,14 +294,15 @@ fn player_chip_topbar(
 ) {
     let slot_stripe = player_slot_color(idx);
     let name_color = player_slot_color_bright(idx);
-    let mmr_text = match player.mmr {
-        Some(v) => v.to_string(),
-        None => "—".to_string(),
-    };
 
+    // Inner margin slightly maior (`SPACE_S` no eixo Y vs. `SPACE_XS`
+    // anteriormente) e nome em `size_body` (vs. `size_caption`) para
+    // dar um pouco mais de presença ao chip agora que ele só carrega
+    // raça + nome + opcional YOU. O MMR migrou para o card lateral
+    // de detalhes; a topbar fica mais limpa para foco em "quem".
     let frame = egui::Frame::new()
         .fill(Color32::from_gray(36))
-        .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_XS as i8))
+        .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8))
         .corner_radius(crate::tokens::RADIUS_CHIP);
 
     let inner = frame.show(ui, |ui| {
@@ -309,23 +310,16 @@ fn player_chip_topbar(
         // but it inherits the parent placer's direction (egui 0.34
         // ui.rs:2623) — and our parent is right-to-left. So we add
         // widgets in REVERSE of the desired visual order.
-        // Visual we want: race · name · YOU? · MMR
-        // Code order:     MMR · YOU? · name · race
+        // Visual we want: race · name · YOU?
+        // Code order:     YOU? · name · race
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = SPACE_S;
-            ui.label(
-                RichText::new(mmr_text)
-                    .size(size_body(config))
-                    .monospace()
-                    .strong()
-                    .color(LABEL_SOFT),
-            );
             if is_user {
                 ui.label(you_chip_label(config, lang));
             }
             ui.label(
                 RichText::new(&player.name)
-                    .size(size_caption(config))
+                    .size(size_body(config))
                     .strong()
                     .color(name_color),
             );
