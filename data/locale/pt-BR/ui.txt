@@ -66,6 +66,7 @@ toast.new_replay_available = Novo replay disponível: {file} — Arquivo → Car
 toast.settings_saved = Configurações salvas.
 toast.save_error = Erro ao salvar: {err}
 toast.save_config_error = Erro ao salvar config: {err}
+toast.date_range_autodetect = Mostrando replays: {range}
 error.load_failed = Erro ao carregar {path}: {err}
 
 # ── Estado vazio ────────────────────────────────────────────────────────────

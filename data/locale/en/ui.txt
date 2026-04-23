@@ -65,6 +65,7 @@ toast.new_replay_available = New replay available: {file} — File → Load late
 toast.settings_saved = Settings saved.
 toast.save_error = Save error: {err}
 toast.save_config_error = Config save error: {err}
+toast.date_range_autodetect = Showing replays: {range}
 error.load_failed = Error loading {path}: {err}
 
 # ── Empty state ─────────────────────────────────────────────────────────────

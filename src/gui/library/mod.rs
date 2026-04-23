@@ -24,8 +24,9 @@ pub mod stats;
 pub mod types;
 pub mod ui;
 
-pub use filter::{DateRange, LibraryFilter};
+pub use date::today_str;
+pub use filter::{DateRange, LibraryFilter, detect_best_date_range};
 pub use scanner::ReplayLibrary;
-pub use sidebar::show as show_sidebar;
+pub use sidebar::{date_range_label, show as show_sidebar};
 pub use types::{MetaState, ParsedMeta, PlayerMeta};
 pub use ui::{LibraryAction, keep_alive, show, show_hero};

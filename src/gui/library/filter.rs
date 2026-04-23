@@ -69,13 +69,44 @@ impl Default for LibraryFilter {
 
 impl LibraryFilter {
     /// Inicializa o filtro restaurando preferências salvas no config.
+    /// Quando `library_date_range` ainda não foi persistido (`None`),
+    /// caímos no default (`ThisWeek`) apenas como placeholder — o
+    /// trigger de auto-detect em `app/mod.rs` reescreve o valor assim
+    /// que o scan termina.
     pub fn from_config(config: &crate::config::AppConfig) -> Self {
         Self {
-            date_range: config.library_date_range,
+            date_range: config.library_date_range.unwrap_or_default(),
             race: config.library_race,
             ..Self::default()
         }
     }
+}
+
+/// Varre as janelas temporais da mais restrita (`Today`) para a mais
+/// permissiva (`All`) e retorna a primeira em que existe ao menos um
+/// replay já parseado. `None` indica biblioteca sem nenhuma entrada
+/// `Parsed` — o caller decide se persiste algo ou tenta de novo depois.
+///
+/// Usada no startup: quando `config.library_date_range == None`, o app
+/// espera o scan terminar e persiste a primeira janela não-vazia para
+/// evitar que o primeiro launch abra a biblioteca num filtro vazio.
+pub fn detect_best_date_range(entries: &[LibraryEntry], today: &str) -> Option<DateRange> {
+    const CANDIDATES: [DateRange; 4] = [
+        DateRange::Today,
+        DateRange::ThisWeek,
+        DateRange::ThisMonth,
+        DateRange::All,
+    ];
+    for range in CANDIDATES {
+        let has_match = entries.iter().any(|e| match &e.meta {
+            MetaState::Parsed(m) => matches_date_range(&m.datetime, range, today),
+            _ => false,
+        });
+        if has_match {
+            return Some(range);
+        }
+    }
+    None
 }
 
 /// Chave de invalidação do cache de stats. Ignora ordenação porque
@@ -540,5 +571,71 @@ mod tests {
             ..LibraryFilter::default()
         };
         assert!(!matches_filter(&make_pending(), &f, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn detect_picks_today_when_today_has_entries() {
+        // Mix de hoje, ontem e mês passado: o mais restrito (`Today`) bate.
+        let entries = vec![
+            make_parsed("M", "2026-04-23T09:00:00", "me", "Terran", "Win", "Zerg"),
+            make_parsed("M", "2026-04-22T10:00:00", "me", "Terran", "Win", "Zerg"),
+            make_parsed("M", "2026-03-10T10:00:00", "me", "Terran", "Win", "Zerg"),
+        ];
+        assert_eq!(
+            detect_best_date_range(&entries, "2026-04-23"),
+            Some(DateRange::Today),
+        );
+    }
+
+    #[test]
+    fn detect_falls_through_to_week_when_today_empty() {
+        // 2026-04-23 é uma quinta; 2026-04-21 (terça) está na mesma semana.
+        let entries = vec![
+            make_parsed("M", "2026-04-21T10:00:00", "me", "Terran", "Win", "Zerg"),
+            make_parsed("M", "2026-03-10T10:00:00", "me", "Terran", "Win", "Zerg"),
+        ];
+        assert_eq!(
+            detect_best_date_range(&entries, "2026-04-23"),
+            Some(DateRange::ThisWeek),
+        );
+    }
+
+    #[test]
+    fn detect_falls_through_to_month() {
+        // Só entries do mês corrente mas fora da semana (dia 1).
+        let entries = vec![
+            make_parsed("M", "2026-04-01T10:00:00", "me", "Terran", "Win", "Zerg"),
+            make_parsed("M", "2025-12-15T10:00:00", "me", "Terran", "Win", "Zerg"),
+        ];
+        assert_eq!(
+            detect_best_date_range(&entries, "2026-04-23"),
+            Some(DateRange::ThisMonth),
+        );
+    }
+
+    #[test]
+    fn detect_falls_through_to_all() {
+        // Apenas entries antigos — cai no mais permissivo.
+        let entries = vec![
+            make_parsed("M", "2025-06-10T10:00:00", "me", "Terran", "Win", "Zerg"),
+            make_parsed("M", "2024-11-02T10:00:00", "me", "Terran", "Win", "Zerg"),
+        ];
+        assert_eq!(
+            detect_best_date_range(&entries, "2026-04-23"),
+            Some(DateRange::All),
+        );
+    }
+
+    #[test]
+    fn detect_returns_none_when_library_empty() {
+        let entries: Vec<LibraryEntry> = Vec::new();
+        assert_eq!(detect_best_date_range(&entries, "2026-04-23"), None);
+    }
+
+    #[test]
+    fn detect_ignores_pending_entries() {
+        // Entries ainda não-parseados não contam: só `Pending` ⇒ `None`.
+        let entries = vec![make_pending()];
+        assert_eq!(detect_best_date_range(&entries, "2026-04-23"), None);
     }
 }

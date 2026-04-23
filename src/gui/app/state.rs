@@ -102,6 +102,13 @@ pub struct AppState {
     pub rename_status: Option<String>,
     /// Carregamento do replay mais recente adiado até o scanner terminar.
     pub pending_load_latest: bool,
+    /// Auto-detect pendente do `DateRange` inicial da biblioteca: quando
+    /// o config não tem um `library_date_range` persistido, percorremos
+    /// as janelas de tempo (Today → ThisWeek → ThisMonth → All) depois
+    /// que o scan termina e persistimos a primeira não-vazia. Flag de
+    /// sessão previne re-execução no mesmo run; biblioteca vazia NÃO
+    /// persiste nada (próximo launch tenta de novo).
+    pub pending_date_range_autodetect: bool,
     /// Transient draft of the language picker (first-run modal). We keep
     /// the draft separate from `config.language` so cancelling the
     /// modal leaves the real config alone.
@@ -130,6 +137,7 @@ impl AppState {
         apply_style(&cc.egui_ctx, &config);
 
         let library_filter = library::LibraryFilter::from_config(&config);
+        let pending_date_range_autodetect = config.library_date_range.is_none();
         let language_draft = config.language;
         let mut me = Self {
             config,
@@ -160,6 +168,7 @@ impl AppState {
             rename_previews: Vec::new(),
             rename_status: None,
             pending_load_latest: false,
+            pending_date_range_autodetect,
             language_draft,
             disclaimer_dont_show_again: false,
             disclaimer_dismissed_session: false,
