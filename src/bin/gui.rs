@@ -25,7 +25,7 @@ mod production_efficiency;
 mod army_production_by_battle;
 #[path = "../loss_analysis.rs"]
 mod loss_analysis;
-#[path = "../supply_block.rs"]
+#[path = "../supply_block/mod.rs"]
 mod supply_block;
 #[path = "../worker_potential.rs"]
 mod worker_potential;
