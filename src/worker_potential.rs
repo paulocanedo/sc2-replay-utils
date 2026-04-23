@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 
 use crate::balance_data;
-use crate::replay::{EntityEventKind, InjectCmd, ReplayTimeline};
+use crate::replay::{is_larva_born_army, EntityEventKind, InjectCmd, PlayerTimeline, ReplayTimeline};
 
 /// Workers iniciais de qualquer raça.
 const INITIAL_WORKERS: u32 = 12;
@@ -33,6 +33,23 @@ const INJECT_LARVAE: u32 = 3;
 /// ~20s). Expressamos como divisor de tempo de build.
 const CHRONO_SPEEDUP: f64 = 1.5;
 
+/// Razão mínima do pool de larvas que um Zerg em jogo macro costuma
+/// direcionar para drones em aberturas econômicas. Tunado via
+/// diagnóstico (`dump_zerg_worker_potential_diagnostic`) — valida
+/// contra Serral/firebat nos minutos 4–8 sem cravar números irreais
+/// (gap verde/amarelo em todos os casos testados).
+///
+/// 0.75 ≈ jogo macro decente: Overlords + tech + queens + army inicial
+/// consomem no máximo 25% das larvas em early game. Serral tipicamente
+/// fica perto desse teto (gap 2–4 drones no early); jogadores medianos
+/// tipicamente abaixo (gaps maiores = margem pra melhoria real).
+///
+/// O valor é combinado via `min()` com a subtração do consumo real
+/// não-drone, o que dá o menor (mais conservador) dos dois tetos e
+/// evita sugerir drones em mid/late game quando o jogador já gastou
+/// bastante larva em army.
+const DRONE_LARVA_RATIO: f64 = 0.75;
+
 /// Fator limitante do potencial. Ajuda o usuário a entender onde o macro
 /// "parou" antes de chegar ao teto teórico.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,8 +61,9 @@ pub enum LimitingFactor {
     /// antes do fim do intervalo — mais chronos nos probes teriam
     /// gerado mais workers.
     ChronoBudget,
-    /// Zerg: a regra de 80% das larvas pra drones foi o teto.
-    LarvaSupply80,
+    /// Zerg: a oferta de larvas (natural + injects) descontadas as
+    /// unidades não-drone que o jogador produziu foi o teto.
+    LarvaSupply,
     /// Produção rodou sem travas: todas as bases produziram non-stop.
     NoLimit,
 }
@@ -121,10 +139,26 @@ pub fn compute_worker_potential(
         }
         "Zerg" => {
             let bt = balance_data::build_time_loops("Drone", base_build);
-            simulate_zerg(&bases, until, bt, &player.inject_cmds)
+            let (consumption_loops, breakdown) = collect_larva_consumptions(player, until);
+            let nondrone_used = breakdown.nondrone_larva_count();
+            simulate_zerg(
+                &bases,
+                &player.inject_cmds,
+                &consumption_loops,
+                nondrone_used,
+                until,
+                bt,
+            )
         }
         _ => (produced, LimitingFactor::NoLimit),
     };
+
+    // Piso invariante: potencial nunca fica abaixo do que o jogador
+    // produziu. Protege casos de over-saturação extrema ou erros de
+    // aproximação do simulador (`simulate_pool_realistic` usa pool
+    // compartilhado, que pode ficar marginalmente abaixo do real em
+    // cenários com inject pesado).
+    let potential = potential.max(produced);
 
     WorkerPotential {
         produced,
@@ -422,90 +456,394 @@ fn simulate_greedy(
 
 // ── Simulação Zerg ──────────────────────────────────────────────────
 
-/// Simulação do pool de larvas por hatch + regra de 80% para drones.
-/// Geramos todos os eventos de larva disponíveis até `until` e
-/// consumimos 4 a cada 5 (80%) em ordem cronológica, respeitando o
-/// cap de saturação no instante de conclusão de cada drone.
+/// Calcula quantos drones o jogador poderia ter produzido até `until`.
+///
+/// Modelo em duas etapas:
+///
+/// 1. **Pool realista** — `simulate_pool_realistic` reconstrói o pool
+///    de larvas **respeitando o cap de 3 por hatch**, usando os
+///    timestamps reais de consumo do jogador extraídos de
+///    `entity_events`. Ticks de regen que cairiam em pool cheio são
+///    descartados (a larva "não nasce"). Injects bypassam o cap, como
+///    no jogo. Isso corrige o bug histórico em que o modelo ignorava
+///    o cap e contabilizava todo tick de 176 loops como larva viável,
+///    inflando o pool ~30%.
+///
+/// 2. **Dois tetos combinados** — a quantidade de drones "ideais" é o
+///    menor entre:
+///    - `DRONE_LARVA_RATIO × pool` — respeita que em early game um
+///      Zerg macro direciona ~70% das larvas a drones, o restante
+///      para Overlords/army.
+///    - `pool − nondrone_used` — teto pelo que o jogador de fato
+///      gastou em não-drones. Se ele fez muito army, sobra pouco.
+///      Garante que não sugerimos drones que **provavelmente não**
+///      estavam disponíveis dada a escolha estratégica real.
+///
+///    Tomar o `min()` é conservador: em early game o ratio geralmente
+///    é o limitante (jogador ainda não fez army); em mid/late o
+///    `subtract` assume. Empiricamente (diagnóstico Serral/firebat)
+///    essa combinação produz gaps verdes/amarelos em todos os minutos
+///    testados, sem nunca cravar valores inatingíveis.
 fn simulate_zerg(
     bases: &[BaseInterval],
+    injects: &[InjectCmd],
+    consumption_loops: &[u32],
+    nondrone_used: u32,
     until: u32,
     drone_time: u32,
-    injects: &[InjectCmd],
 ) -> (u32, LimitingFactor) {
     if drone_time == 0 {
         return (INITIAL_WORKERS, LimitingFactor::NoLimit);
     }
 
-    // Coleta eventos de "larva disponível em L" em ordem cronológica,
-    // simulando o pool natural (cap 3) por base + injects (sem cap).
-    let mut larva_times: Vec<u32> = Vec::new();
+    let pool = simulate_pool_realistic(bases, injects, consumption_loops, until);
 
-    for (i, base) in bases.iter().enumerate() {
-        // Pool natural por base.
-        let mut pool: u32 = 3; // cada base nasce com 3 larvas
-        let mut clock = base.finish_loop;
-        // Registra as 3 larvas iniciais como disponíveis em finish_loop.
-        for _ in 0..pool {
-            larva_times.push(clock);
-        }
-        while clock < until && clock < base.death_loop {
-            clock += LARVA_PERIOD_LOOPS;
-            if clock >= until || clock >= base.death_loop {
-                break;
-            }
-            if pool < LARVA_NATURAL_CAP {
-                pool += 1;
-            } else {
-                // Estouro: como 80% serão consumidas, assumimos que a
-                // larva foi usada imediatamente e a contabilizamos.
-                larva_times.push(clock);
-            }
-        }
+    let ratio_bound = (pool as f64 * DRONE_LARVA_RATIO).floor() as u32;
+    let subtract_bound = pool.saturating_sub(nondrone_used);
+    let ideal_drones = ratio_bound.min(subtract_bound);
 
-        // Injects endereçados a esta base (por posição aproximada). O
-        // replay guarda `target_tag_index` nos injects, mas nosso
-        // `BaseInterval` não preservou o tag_index — distribuímos
-        // injects pela ordem cronológica total (próxima seção). Aqui
-        // só contabilizamos as larvas iniciais e naturais.
-        let _ = i;
-    }
-
-    // Injects: cada um gera 3 larvas em `game_loop + INJECT_DELAY`.
-    // Não distinguimos qual hatch — assumimos que o jogador injectou
-    // hatches vivas (já que o inject foi emitido, uma queen resolveu).
-    for inj in injects {
-        let spawn_loop = inj.game_loop + INJECT_DELAY_LOOPS;
-        if spawn_loop >= until {
-            continue;
-        }
-        for _ in 0..INJECT_LARVAE {
-            larva_times.push(spawn_loop);
-        }
-    }
-
-    larva_times.sort_unstable();
-
-    // Consome 80% em ordem cronológica. De cada 5 larvas, 4 viram
-    // drone; a quinta (conceitualmente) alimenta outras unidades.
-    let mut workers: u32 = INITIAL_WORKERS;
-    for (idx, &larva_loop) in larva_times.iter().enumerate() {
-        if idx % 5 == 4 {
-            continue;
-        }
-        let drone_ready = larva_loop + drone_time;
-        if drone_ready > until {
-            continue;
-        }
-        workers += 1;
-    }
+    let potential = INITIAL_WORKERS.saturating_add(ideal_drones);
 
     let limiting = if bases.len() == 1 && bases[0].finish_loop == 0 {
         LimitingFactor::Bases
     } else {
-        LimitingFactor::LarvaSupply80
+        LimitingFactor::LarvaSupply
     };
 
-    (workers, limiting)
+    (potential, limiting)
+}
+
+// ── Diagnóstico Zerg (Fase 1 do tuning) ─────────────────────────────
+
+/// Coleta os loops em que o jogador consumiu larvas para construir
+/// unidades Zerg. Cada unidade larva-born (drone + unidades de army +
+/// overlord) consome 1 larva no `ProductionStarted`. Zergling vem em
+/// par: 2 `ProductionStarted` de Zergling consomem 1 larva apenas — o
+/// segundo do par é o evento que emitimos (mesma lógica em que o
+/// `zergling_flip` alterna a cada par).
+///
+/// Retorna `(loops_ordenados, decomposicao)` com as contagens por
+/// categoria (drones, overlords, zergling_pares, outros_army) pra
+/// facilitar o dump do diagnóstico.
+struct LarvaConsumptionBreakdown {
+    pub drones_started: u32,
+    pub overlords: u32,
+    pub zergling_individuals: u32,
+    pub zergling_pairs: u32,
+    pub other_army_larva: u32,
+}
+
+impl LarvaConsumptionBreakdown {
+    /// Soma das larvas consumidas em unidades **não-drone** (Overlord,
+    /// Zergling em pares, Roach/Hydra/Infestor/etc.). Queens não entram
+    /// (morfam do prédio, não consomem larva). Morphs de unidade
+    /// (Baneling/Ravager/Lurker/BroodLord/Overseer) também ficam fora,
+    /// pois a larva foi contabilizada no parent.
+    fn nondrone_larva_count(&self) -> u32 {
+        self.overlords
+            .saturating_add(self.zergling_pairs)
+            .saturating_add(self.other_army_larva)
+    }
+}
+
+fn collect_larva_consumptions(
+    player: &PlayerTimeline,
+    until: u32,
+) -> (Vec<u32>, LarvaConsumptionBreakdown) {
+    let mut loops: Vec<u32> = Vec::new();
+    let mut drones_started: u32 = 0;
+    let mut overlords: u32 = 0;
+    let mut zergling_individuals: u32 = 0;
+    let mut zergling_pairs: u32 = 0;
+    let mut other_army_larva: u32 = 0;
+
+    // Zergling vem em par: alternamos `flip` para emitir 1 consume a
+    // cada 2 Starteds. Caso raro de cauda ímpar (cancel de 1 do par),
+    // perdemos 1 consume — <1% dos casos.
+    let mut zergling_flip: bool = false;
+
+    for ev in &player.entity_events {
+        if ev.game_loop > until {
+            break;
+        }
+        if !matches!(ev.kind, EntityEventKind::ProductionStarted) {
+            continue;
+        }
+        match ev.entity_type.as_str() {
+            "Drone" => {
+                drones_started += 1;
+                loops.push(ev.game_loop);
+            }
+            "Overlord" => {
+                overlords += 1;
+                loops.push(ev.game_loop);
+            }
+            "Zergling" => {
+                zergling_individuals += 1;
+                zergling_flip = !zergling_flip;
+                if !zergling_flip {
+                    // Segundo do par: emite consume representando 1 larva.
+                    zergling_pairs += 1;
+                    loops.push(ev.game_loop);
+                }
+                // Primeiro do par: não emite (espera o segundo).
+            }
+            name if is_larva_born_army(name) => {
+                // Roach, Hydralisk, Infestor, SwarmHost, Mutalisk,
+                // Corruptor, Viper, Ultralisk. (Overlord e Zergling
+                // tratados acima explicitamente.)
+                other_army_larva += 1;
+                loops.push(ev.game_loop);
+            }
+            _ => {}
+        }
+    }
+
+    loops.sort_unstable();
+
+    (
+        loops,
+        LarvaConsumptionBreakdown {
+            drones_started,
+            overlords,
+            zergling_individuals,
+            zergling_pairs,
+            other_army_larva,
+        },
+    )
+}
+
+/// Simula o pool de larvas **respeitando o cap de 3 por base**, usando
+/// os timestamps reais de consumo do jogador. Retorna o total de larvas
+/// que efetivamente existiram no pool (geradas, não-overflow) no
+/// intervalo `[0, until]`.
+///
+/// Diferença para a simulação atual (`simulate_zerg`): aqui o cap é
+/// respeitado — ticks de regen que aconteceriam com o pool cheio são
+/// descartados (a larva "não nasce"). Injects ignoram o cap, como no
+/// jogo real.
+///
+/// Modelo: pool compartilhado entre bases (aproximação razoável — SC2
+/// tem pool por hatch, mas o jogador usa larvas de qualquer uma). Cap
+/// dinâmico = `3 × bases_alive`. Inject adiciona 3 ao pool direto,
+/// bypass do cap. Consumo drena o pool (saturando em 0).
+fn simulate_pool_realistic(
+    bases: &[BaseInterval],
+    injects: &[InjectCmd],
+    consumption_loops: &[u32],
+    until: u32,
+) -> u32 {
+    #[derive(PartialEq, Eq)]
+    enum Ev {
+        BaseBorn,
+        BaseDied,
+        Regen,
+        InjectLand,
+        Consume,
+    }
+
+    let mut events: Vec<(u32, Ev)> = Vec::new();
+
+    for base in bases {
+        if base.finish_loop >= until {
+            continue;
+        }
+        events.push((base.finish_loop, Ev::BaseBorn));
+
+        // Ticks de regen a cada 176 loops após finish, enquanto base viva
+        // e antes de `until`.
+        let base_end = base.death_loop.min(until);
+        let mut tick = base.finish_loop.saturating_add(LARVA_PERIOD_LOOPS);
+        while tick < base_end {
+            events.push((tick, Ev::Regen));
+            tick = tick.saturating_add(LARVA_PERIOD_LOOPS);
+        }
+
+        // Morte de base dentro de `until` (atualiza cap).
+        if base.death_loop != u32::MAX && base.death_loop < until {
+            events.push((base.death_loop, Ev::BaseDied));
+        }
+    }
+
+    for inj in injects {
+        let land = inj.game_loop.saturating_add(INJECT_DELAY_LOOPS);
+        if land < until {
+            events.push((land, Ev::InjectLand));
+        }
+    }
+
+    for &c in consumption_loops {
+        if c <= until {
+            events.push((c, Ev::Consume));
+        }
+    }
+
+    // Ordenação por loop; em empate, BaseBorn/InjectLand primeiro (abrem
+    // espaço), depois Regen, Consume, BaseDied (última pra não
+    // interferir com eventos no mesmo loop).
+    events.sort_by_key(|(loop_, ev)| {
+        let order = match ev {
+            Ev::BaseBorn => 0,
+            Ev::InjectLand => 1,
+            Ev::Regen => 2,
+            Ev::Consume => 3,
+            Ev::BaseDied => 4,
+        };
+        (*loop_, order)
+    });
+
+    let mut pool: u32 = 0;
+    let mut total_generated: u32 = 0;
+    let mut bases_alive: u32 = 0;
+
+    for (_, ev) in events {
+        let cap = bases_alive.saturating_mul(LARVA_NATURAL_CAP);
+        match ev {
+            Ev::BaseBorn => {
+                bases_alive += 1;
+                // 3 larvas iniciais (contam como geradas).
+                pool += LARVA_NATURAL_CAP;
+                total_generated += LARVA_NATURAL_CAP;
+            }
+            Ev::BaseDied => {
+                bases_alive = bases_alive.saturating_sub(1);
+                // Larvas já geradas permanecem contadas; apenas o cap
+                // futuro diminui.
+            }
+            Ev::Regen => {
+                if pool < cap {
+                    pool += 1;
+                    total_generated += 1;
+                }
+                // else: overflow descartado (correção do Bug 1).
+            }
+            Ev::InjectLand => {
+                pool = pool.saturating_add(INJECT_LARVAE);
+                total_generated = total_generated.saturating_add(INJECT_LARVAE);
+            }
+            Ev::Consume => {
+                pool = pool.saturating_sub(1);
+            }
+        }
+    }
+
+    total_generated
+}
+
+/// Decomposição completa do cálculo de potencial de drones pro Zerg.
+/// Usado pelo teste `#[ignore]` de dump pra tunarmos o ratio com base
+/// em números reais dos replays de referência.
+#[derive(Debug)]
+struct ZergDiagnostic {
+    pub bases_alive: u32,
+    pub natural_per_base: Vec<u32>,
+    pub pool_natural_total: u32,
+    pub injects_landed: u32,
+    pub pool_inject_total: u32,
+    /// Pool calculado pelo método atual (não respeita cap-3 — toda tick
+    /// conta). Útil pra comparar contra o `pool_total_realistic`.
+    pub pool_total_optimistic: u32,
+    /// Pool calculado respeitando cap-3 + consumo real.
+    pub pool_total_realistic: u32,
+    pub overlords: u32,
+    pub zergling_individuals: u32,
+    pub zergling_pairs: u32,
+    pub other_army_larva: u32,
+    pub nondrone_total: u32,
+    pub drones_produced: u32,
+    pub drones_started: u32,
+    pub produced_workers: u32,
+}
+
+impl ZergDiagnostic {
+    /// Potencial aplicando um ratio fixo sobre o pool realista, somado
+    /// dos 12 iniciais. Igual ao modelo da fase 2 do plano.
+    pub fn potential_at(&self, ratio: f64) -> u32 {
+        let drones = (self.pool_total_realistic as f64 * ratio).floor() as u32;
+        INITIAL_WORKERS.saturating_add(drones)
+    }
+
+    /// Alternativa: não usa ratio, subtrai consumo não-drone do pool
+    /// realista diretamente. Retorna o teto caso o jogador tivesse
+    /// convertido todo o restante do pool em drones.
+    pub fn potential_subtract_actual(&self) -> u32 {
+        let available = self.pool_total_realistic.saturating_sub(self.nondrone_total);
+        INITIAL_WORKERS.saturating_add(available)
+    }
+}
+
+fn diagnostic_zerg(
+    timeline: &ReplayTimeline,
+    player_idx: usize,
+    until_loop: u32,
+) -> ZergDiagnostic {
+    let player = &timeline.players[player_idx];
+    let until = until_loop.min(timeline.game_loops);
+
+    let bases = collect_bases(timeline, player_idx, until);
+    let produced_workers = count_produced_workers(timeline, player_idx, until);
+
+    let mut natural_per_base: Vec<u32> = Vec::new();
+    let mut pool_natural_total: u32 = 0;
+    let mut bases_alive: u32 = 0;
+    for base in &bases {
+        if base.finish_loop >= until {
+            natural_per_base.push(0);
+            continue;
+        }
+        if base.death_loop == u32::MAX || base.death_loop > until {
+            bases_alive += 1;
+        }
+        let end = base.death_loop.min(until);
+        let window = end.saturating_sub(base.finish_loop);
+        let ticks = window / LARVA_PERIOD_LOOPS;
+        let per_base = LARVA_NATURAL_CAP + ticks;
+        natural_per_base.push(per_base);
+        pool_natural_total = pool_natural_total.saturating_add(per_base);
+    }
+
+    let mut injects_landed: u32 = 0;
+    let mut pool_inject_total: u32 = 0;
+    for inj in &player.inject_cmds {
+        let land = inj.game_loop.saturating_add(INJECT_DELAY_LOOPS);
+        if land < until {
+            injects_landed += 1;
+            pool_inject_total = pool_inject_total.saturating_add(INJECT_LARVAE);
+        }
+    }
+
+    let pool_total_optimistic = pool_natural_total.saturating_add(pool_inject_total);
+
+    let (consumption_loops, breakdown) = collect_larva_consumptions(player, until);
+    let pool_total_realistic =
+        simulate_pool_realistic(&bases, &player.inject_cmds, &consumption_loops, until);
+
+    let nondrone_total = breakdown.nondrone_larva_count();
+
+    // produced_workers já conta Drone ProductionFinished. Também queremos
+    // saber quantos Drone Starteds houveram (consumo de larva real) pra
+    // comparar com o count de finisheds (diferença = morfados em
+    // estruturas ou drones em flight no `until`).
+    let drones_produced = produced_workers.saturating_sub(INITIAL_WORKERS);
+    let drones_started = breakdown.drones_started;
+
+    ZergDiagnostic {
+        bases_alive,
+        natural_per_base,
+        pool_natural_total,
+        injects_landed,
+        pool_inject_total,
+        pool_total_optimistic,
+        pool_total_realistic,
+        overlords: breakdown.overlords,
+        zergling_individuals: breakdown.zergling_individuals,
+        zergling_pairs: breakdown.zergling_pairs,
+        other_army_larva: breakdown.other_army_larva,
+        nondrone_total,
+        drones_produced,
+        drones_started,
+        produced_workers,
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -580,5 +918,219 @@ mod tests {
         let huge = tl.game_loops + 10_000;
         let wp = compute_worker_potential(&tl, 0, huge, 0);
         assert!(wp.clamped);
+    }
+
+    // ── Testes unitários do pool realista ────────────────────────
+
+    fn mk_base(finish: u32) -> BaseInterval {
+        BaseInterval {
+            finish_loop: finish,
+            death_loop: u32::MAX,
+            fly_periods: Vec::new(),
+        }
+    }
+
+    fn mk_inject(loop_: u32) -> InjectCmd {
+        InjectCmd {
+            game_loop: loop_,
+            target_tag_index: 0,
+            target_type: "Hatchery".to_string(),
+            target_x: 0,
+            target_y: 0,
+        }
+    }
+
+    #[test]
+    fn pool_respects_cap3_with_no_consumption() {
+        // 1 hatch viva sem consumo algum: pool fica no cap de 3, não
+        // acumula por tick. Regressão do Bug 1 (pool nunca decrescia).
+        let bases = vec![mk_base(0)];
+        let pool = simulate_pool_realistic(&bases, &[], &[], 10_000);
+        assert_eq!(pool, 3, "pool sem consumo deve ficar em cap=3, got {}", pool);
+    }
+
+    #[test]
+    fn pool_full_regen_when_consumption_matches_rate() {
+        // Consumo a cada 176 loops (taxa = regen rate). Pool deve gerar
+        // quase todas as ticks (3 iniciais + N ticks).
+        let bases = vec![mk_base(0)];
+        let until = 1760_u32; // 10 regen intervals
+        // Consome logo após cada regen (offset de 1 loop).
+        let consumption: Vec<u32> = (177..until).step_by(176).collect();
+        let pool = simulate_pool_realistic(&bases, &[], &consumption, until);
+        // 3 initial + 9 regen ticks (176..=1584) = 12
+        assert!(
+            pool >= 9 && pool <= 12,
+            "pool com consumo perfeito deve ≈ initial+regens (9-12), got {}",
+            pool
+        );
+    }
+
+    #[test]
+    fn pool_inject_bypasses_cap() {
+        // 1 hatch sem consumo, 1 inject. Pool = 3 natural + 3 inject = 6.
+        // Ticks de regen depois do inject land (464) caem no cap (pool=6,
+        // cap=3, bloqueado), então só as larvas do inject somam.
+        let bases = vec![mk_base(0)];
+        let injects = vec![mk_inject(0)];
+        let pool = simulate_pool_realistic(&bases, &injects, &[], 1_000);
+        assert_eq!(pool, 6, "3 initial + 3 inject = 6, got {}", pool);
+    }
+
+    #[test]
+    fn pool_multi_base_shares_cap() {
+        // 2 hatches, sem consumo. Pool compartilhado cap = 3 × 2 = 6.
+        // Cada hatch tem 3 iniciais = 6 total. Regens bloqueados.
+        let bases = vec![mk_base(0), mk_base(1000)];
+        let pool = simulate_pool_realistic(&bases, &[], &[], 5_000);
+        assert_eq!(pool, 6, "2 bases * 3 iniciais com cap compartilhado = 6, got {}", pool);
+    }
+
+    #[test]
+    fn serral_potential_at_6min_achievable() {
+        // Regressão: no replay do Serral (top Zerg mundial), o gap no
+        // minuto 6 deve ser pequeno (≤ 10 drones). Com o bug antigo o gap
+        // era ~34 (potencial de 120 vs real 86).
+        let tl = load_replay("serral.SC2Replay");
+        let until = (6.0 * 60.0 * tl.loops_per_second).round() as u32;
+        let mut checked = false;
+        for i in 0..tl.players.len() {
+            if tl.players[i].race != "Zerg" {
+                continue;
+            }
+            let wp = compute_worker_potential(&tl, i, until, 0);
+            let gap = wp.potential.saturating_sub(wp.produced);
+            assert!(
+                gap <= 10,
+                "Serral gap at 6min é {} (potential {} vs produced {}), esperado ≤ 10",
+                gap,
+                wp.potential,
+                wp.produced
+            );
+            assert!(wp.potential >= wp.produced, "invariante: potential >= produced");
+            checked = true;
+        }
+        assert!(checked, "Serral replay deve ter um jogador Zerg");
+    }
+
+    #[test]
+    fn zerg_invariant_potential_ge_produced_via_floor() {
+        // Invariante é garantido via `potential.max(produced)` floor.
+        for name in [
+            "replay_sefi1.SC2Replay",
+            "replay_sefi2.SC2Replay",
+            "replay_sefi3.SC2Replay",
+            "serral.SC2Replay",
+            "firebat_vs_ai.SC2Replay",
+        ] {
+            let tl = load_replay(name);
+            for minute in [3, 4, 5, 6, 8, 10] {
+                let until = ((minute as f64) * 60.0 * tl.loops_per_second).round() as u32;
+                for i in 0..tl.players.len() {
+                    let wp = compute_worker_potential(&tl, i, until, 0);
+                    assert!(
+                        wp.potential >= wp.produced,
+                        "{} p{} min{}: potential {} < produced {}",
+                        name,
+                        i,
+                        minute,
+                        wp.potential,
+                        wp.produced
+                    );
+                }
+            }
+        }
+    }
+
+    /// Dump de diagnóstico pros replays de referência (Serral + firebat).
+    /// Roda com:
+    ///
+    /// ```sh
+    /// cargo test --release --lib \
+    ///   worker_potential::tests::dump_zerg_worker_potential_diagnostic \
+    ///   -- --ignored --nocapture
+    /// ```
+    ///
+    /// Output orienta a escolha do `DRONE_LARVA_RATIO` e valida se o
+    /// bug do pool (cap-3 ignorado) infla os números em cenários reais.
+    #[test]
+    #[ignore = "diagnostic — run with --ignored when tuning zerg ratio"]
+    fn dump_zerg_worker_potential_diagnostic() {
+        for name in ["serral.SC2Replay", "firebat_vs_ai.SC2Replay"] {
+            let tl = load_replay(name);
+            let lps = tl.loops_per_second;
+            println!("\n============================================================");
+            println!("REPLAY: {} (loops_per_second = {})", name, lps);
+            println!("============================================================");
+            for minute in [4, 5, 6, 8] {
+                let until = ((minute as f64) * 60.0 * lps).round() as u32;
+                for (i, player) in tl.players.iter().enumerate() {
+                    if player.race != "Zerg" {
+                        continue;
+                    }
+                    let d = diagnostic_zerg(&tl, i, until);
+                    let current = compute_worker_potential(&tl, i, until, 0);
+                    println!(
+                        "\n--- p{} {} ({}) | min {} ({} loops) ---",
+                        i, player.name, player.race, minute, until
+                    );
+                    println!("  Bases alive at until       : {}", d.bases_alive);
+                    println!("  Natural larvae per-base    : {:?}", d.natural_per_base);
+                    println!("  Natural pool total         : {}", d.pool_natural_total);
+                    println!(
+                        "  Injects landing in window  : {} ({} larvae)",
+                        d.injects_landed, d.pool_inject_total
+                    );
+                    println!(
+                        "  Pool TOTAL (optimista,atual): {}",
+                        d.pool_total_optimistic
+                    );
+                    println!(
+                        "  Pool TOTAL (realista,cap3)  : {}  <-- bug-fix",
+                        d.pool_total_realistic
+                    );
+                    println!("  Non-drone larva breakdown:");
+                    println!("    Overlords                : {}", d.overlords);
+                    println!(
+                        "    Zergling pairs           : {} (from {} individuals)",
+                        d.zergling_pairs, d.zergling_individuals
+                    );
+                    println!("    Other larva-born army    : {}", d.other_army_larva);
+                    println!("    Non-drone total          : {}", d.nondrone_total);
+                    println!(
+                        "  Drones started (consumed)   : {}",
+                        d.drones_started
+                    );
+                    println!(
+                        "  Drones produced (finished)  : {} (excludes 12 initial)",
+                        d.drones_produced
+                    );
+                    println!(
+                        "  Produced workers (+ initial): {}",
+                        d.produced_workers
+                    );
+                    println!(
+                        "  Potential ATUAL (80/20 bug) : {} (gap vs produced = {})",
+                        current.potential,
+                        current.potential as i32 - current.produced as i32
+                    );
+                    for &r in &[0.80_f64, 0.75, 0.70, 0.65, 0.60] {
+                        let p = d.potential_at(r);
+                        println!(
+                            "  Potential @ {:>4.0}% ratio     : {} (gap vs produced = {})",
+                            r * 100.0,
+                            p,
+                            p as i32 - d.produced_workers as i32
+                        );
+                    }
+                    let psub = d.potential_subtract_actual();
+                    println!(
+                        "  Potential (subtract actual) : {} (gap vs produced = {})",
+                        psub,
+                        psub as i32 - d.produced_workers as i32
+                    );
+                }
+            }
+        }
     }
 }

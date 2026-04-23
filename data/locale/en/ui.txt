@@ -361,13 +361,13 @@ rename.status.error_marker = errors
 # ── Insights tab ────────────────────────────────────────────────────────────
 insights.pov_label = Point of view
 insight.worker_potential.title = Worker production potential by minute {minutes}
-insight.worker_potential.help = Compares how many workers you actually **produced** by minute {minutes} against how many you could have produced with non-stop production, respecting base timings, chrono boosts you spent on probes (Protoss), and the 80% larva→drone rule (Zerg). Worker losses are ignored — the goal is to surface macro lapses, not combat outcomes. Starts from 12 initial workers.
+insight.worker_potential.help = Compares how many workers you actually **produced** by minute {minutes} against how many you could have produced with non-stop production, respecting base timings, chrono boosts you spent on probes (Protoss), and the Zerg larva supply minus the non-drone units you produced. Worker losses are ignored — the goal is to surface macro lapses, not combat outcomes. Starts from 12 initial workers.
 insight.worker_potential.produced = You built
 insight.worker_potential.potential = Could have built
 insight.worker_potential.gap_label = Gap
 insight.worker_potential.limited_by_bases = Limited by late expansions
 insight.worker_potential.limited_by_chrono_budget = Limited by the chrono boosts you spent on probes
-insight.worker_potential.limited_by_larva80 = Limited by the 80% drone/larva rule
+insight.worker_potential.limited_by_larva = Limited by larva supply and non-drone unit production
 insight.worker_potential.limited_by_none = Production ran at full capacity
 insight.worker_potential.clamped_caveat = The replay ended before minute {minutes}.
 
