@@ -10,8 +10,8 @@
 use egui::{Color32, ColorImage, Pos2, Rect, RichText, ScrollArea, TextureOptions};
 
 use crate::colors::{
-    race_color, ACCENT_DANGER, ACCENT_SUCCESS, FOCUS_RING, LABEL_DIM, LABEL_SOFT, LABEL_STRONG,
-    SURFACE_ALT,
+    race_color, ACCENT_DANGER, ACCENT_SUCCESS, ACTIVE_FILL, BORDER, BORDER_STRONG, HOVER_FILL,
+    LABEL_DIM, LABEL_SOFT, LABEL_STRONG, SURFACE_ALT, SURFACE_RAISED,
 };
 use crate::library::{LibraryAction, MetaState, ParsedMeta, PlayerMeta};
 use crate::locale::{t, Language};
@@ -423,15 +423,15 @@ fn opening_row(
     let _ = lang; // reservado p/ futuras strings traduzidas no opening
 }
 
-// ── Botão primário pintado à mão ─────────────────────────────────────
+// ── Botão "Abrir análise" pintado à mão ──────────────────────────────
 //
-// Por que não `egui::Button::new(...).fill(FOCUS_RING)`? `Button.fill`
-// só sobrescreve a cor *idle*; o hover/pressed continuam vindo do tema
-// global e devolvem cinzas neutros — perde o destaque que queremos no
-// CTA. Pintar manualmente nos dá controle dos três estados (idle/
-// hover/active) sem mexer no estilo global. O ícone `▶` (BMP, presente
-// em qualquer fonte) sinaliza "siga adiante / vá para a análise" — já
-// usado pelo player da Timeline.
+// Por que não `egui::Button::new(...)` puro? Mesmo com `.fill()`, só o
+// estado idle é sobrescrito — hover/pressed continuam saindo do tema
+// global e o feedback visual fica preso ao mesmo cinza dos outros
+// botões. Pintar à mão nos dá os três estados (idle/hover/active) sem
+// mexer no estilo global. Estilo intencionalmente discreto: tons da
+// escala neutra de superfície, sem cor de marca, sem ícone — o card
+// inteiro já é o foco e o título do botão basta para a affordance.
 
 fn primary_open_button(
     ui: &mut egui::Ui,
@@ -440,7 +440,7 @@ fn primary_open_button(
 ) -> egui::Response {
     use egui::{FontId, Sense, Stroke, StrokeKind};
 
-    let height = 36.0;
+    let height = 32.0;
     let width = ui.available_width();
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
@@ -449,11 +449,11 @@ fn primary_open_button(
     let pressed = response.is_pointer_button_down_on();
 
     let (fill, stroke_col) = if pressed {
-        (lighten(FOCUS_RING, -25), lighten(FOCUS_RING, 30))
+        (ACTIVE_FILL, BORDER_STRONG)
     } else if hovered {
-        (lighten(FOCUS_RING, 15), lighten(FOCUS_RING, 50))
+        (HOVER_FILL, BORDER_STRONG)
     } else {
-        (FOCUS_RING, lighten(FOCUS_RING, -10))
+        (SURFACE_RAISED, BORDER)
     };
 
     ui.painter().rect(
@@ -464,39 +464,23 @@ fn primary_open_button(
         StrokeKind::Inside,
     );
 
-    let label_font = FontId::proportional(size_body(config));
-    let icon_font = FontId::proportional(size_body(config));
-    let text_color = egui::Color32::WHITE;
-
-    let icon_galley = ui
-        .painter()
-        .layout_no_wrap("▶".to_string(), icon_font, text_color);
-    let label_galley = ui
-        .painter()
-        .layout_no_wrap(label.to_string(), label_font, text_color);
-
-    let gap = SPACE_S;
-    let total_w = icon_galley.size().x + gap + label_galley.size().x;
-    let start_x = rect.center().x - total_w / 2.0;
-    let icon_pos = egui::pos2(
-        start_x,
-        rect.center().y - icon_galley.size().y / 2.0,
+    let text_color = if hovered || pressed {
+        egui::Color32::WHITE
+    } else {
+        LABEL_STRONG
+    };
+    let label_galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        FontId::proportional(size_body(config)),
+        text_color,
     );
     let label_pos = egui::pos2(
-        start_x + icon_galley.size().x + gap,
+        rect.center().x - label_galley.size().x / 2.0,
         rect.center().y - label_galley.size().y / 2.0,
     );
-    ui.painter().galley(icon_pos, icon_galley, text_color);
     ui.painter().galley(label_pos, label_galley, text_color);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// Ajusta brilho de uma cor por delta (–255..=255). Negativo escurece,
-/// positivo clareia. Saturação por canal, alpha preservado.
-fn lighten(c: egui::Color32, delta: i32) -> egui::Color32 {
-    let adj = |v: u8| ((v as i32 + delta).clamp(0, 255)) as u8;
-    egui::Color32::from_rgba_unmultiplied(adj(c.r()), adj(c.g()), adj(c.b()), c.a())
 }
 
 // ── Helpers locais ───────────────────────────────────────────────────
