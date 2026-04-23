@@ -30,6 +30,61 @@ pub enum LibraryAction {
     SaveDateRange(DateRange),
 }
 
+/// Renderiza o hero (KPI strip clicável). Extraído da `show` principal
+/// para que o `central.rs` consiga colocá-lo num `Panel::top` que ocupa
+/// toda a largura restante depois do filtro lateral — assim o card de
+/// detalhes (na direita) só rouba largura da lista, nunca do hero.
+///
+/// Devolve `LibraryAction::None` quando o usuário não interagiu, ou a
+/// ação correspondente ao chip clicado (`SaveDateRange` quando limpa
+/// filtros e havia date range ativo, etc.). Nada é renderizado se a
+/// biblioteca ainda não tem stats ou está vazia.
+pub fn show_hero(
+    ui: &mut Ui,
+    library: &ReplayLibrary,
+    config: &AppConfig,
+    filter: &mut LibraryFilter,
+) -> LibraryAction {
+    let mut action = LibraryAction::None;
+    let Some(stats) = library.stats() else { return action };
+    if stats.total_parsed == 0 {
+        return action;
+    }
+    if let Some(ha) = hero::show(ui, stats, config, filter.date_range) {
+        match ha {
+            HeroAction::ClearFilters => {
+                filter.search.clear();
+                filter.race = None;
+                filter.outcome = OutcomeFilter::All;
+                filter.opponent_name = None;
+                filter.matchup_code = None;
+                filter.map_name = None;
+                filter.opening = None;
+                let prev_range = filter.date_range;
+                filter.date_range = DateRange::All;
+                if prev_range != DateRange::All {
+                    action = LibraryAction::SaveDateRange(DateRange::All);
+                }
+            }
+            HeroAction::FilterWins => {
+                filter.outcome = if filter.outcome == OutcomeFilter::Wins {
+                    OutcomeFilter::All
+                } else {
+                    OutcomeFilter::Wins
+                };
+            }
+            HeroAction::SortByDateDesc => {
+                filter.sort = SortOrder::Date;
+                filter.sort_ascending = false;
+            }
+            HeroAction::SetSearch(s) => {
+                filter.search = s;
+            }
+        }
+    }
+    action
+}
+
 pub fn show(
     ui: &mut Ui,
     library: &ReplayLibrary,
@@ -43,47 +98,10 @@ pub fn show(
 
     // Header chrome (title + folder path + reload/pick/rename icons) and
     // the filter sidebar (search/chips/sort) live in app-level panels.
-    // This function renders only: hero KPI strip, status, and the
+    // The hero KPI strip is now rendered by `show_hero` from `central.rs`
+    // (so it can span the full width above the detail card). This
+    // function renders only: status, related-filter chips, and the
     // virtualized entry list.
-
-    // ── Hero KPI strip ───────────────────────────────────────────────
-    if let Some(stats) = library.stats() {
-        if stats.total_parsed > 0 {
-            if let Some(ha) = hero::show(ui, stats, config, filter.date_range) {
-                match ha {
-                    HeroAction::ClearFilters => {
-                        filter.search.clear();
-                        filter.race = None;
-                        filter.outcome = OutcomeFilter::All;
-                        filter.opponent_name = None;
-                        filter.matchup_code = None;
-                        filter.map_name = None;
-                        filter.opening = None;
-                        let prev_range = filter.date_range;
-                        filter.date_range = DateRange::All;
-                        if prev_range != DateRange::All {
-                            action = LibraryAction::SaveDateRange(DateRange::All);
-                        }
-                    }
-                    HeroAction::FilterWins => {
-                        filter.outcome = if filter.outcome == OutcomeFilter::Wins {
-                            OutcomeFilter::All
-                        } else {
-                            OutcomeFilter::Wins
-                        };
-                    }
-                    HeroAction::SortByDateDesc => {
-                        filter.sort = SortOrder::Date;
-                        filter.sort_ascending = false;
-                    }
-                    HeroAction::SetSearch(s) => {
-                        filter.search = s;
-                    }
-                }
-            }
-            ui.add_space(SPACE_S);
-        }
-    }
 
     // ── Status ───────────────────────────────────────────────────────
     if library.scanning {
