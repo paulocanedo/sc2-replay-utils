@@ -242,6 +242,7 @@ build_order.filter.structures = Structures
 build_order.filter.research = Research
 build_order.filter.upgrades = Upgrades
 build_order.filter.injects = Injects
+build_order.filter.icons = Icons
 build_order.salt.title = SALT Encoding — {player}
 build_order.salt.desc = Copy the string below to import in tools like Spawning Tool, Embot Advanced or SC2 Scrapbook.
 build_order.salt.copy = Copy to clipboard

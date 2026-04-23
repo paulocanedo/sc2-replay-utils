@@ -11,6 +11,7 @@ use crate::config::AppConfig;
 use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
+use crate::tabs::timeline::unit_column::{structure_icon, unit_icon};
 use crate::tokens::SPACE_S;
 use crate::widgets::{
     copy_icon_button, copy_labeled_button, player_identity, toggle_chip_bool, NameDensity,
@@ -105,6 +106,12 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         .data(|d| d.get_temp::<BuildOrderFilter>(filter_id))
         .unwrap_or_default();
 
+    let icons_id = Id::new("bo_show_icons");
+    let mut show_icons: bool = ui
+        .ctx()
+        .data(|d| d.get_temp::<bool>(icons_id))
+        .unwrap_or(false);
+
     // ── Campo de busca (lupa dentro do input) ────────────────────
     let resp = ui.add_sized(
         [ui.available_width(), 28.0],
@@ -133,6 +140,8 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
     // ── Filtros de categoria ────────────────────────────────────
     let mut filter_changed = false;
+    let mut icons_changed = false;
+    let prev_icons = show_icons;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = SPACE_S;
         let prev = filter;
@@ -153,9 +162,18 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             || filter.show_research != prev.show_research
             || filter.show_upgrades != prev.show_upgrades
             || filter.show_injects != prev.show_injects;
+
+        ui.add_space(SPACE_S);
+        ui.label(RichText::new("|").weak());
+        ui.add_space(SPACE_S);
+        toggle_chip_bool(ui, t("build_order.filter.icons", lang), &mut show_icons, None);
+        icons_changed = show_icons != prev_icons;
     });
     if filter_changed {
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
+    }
+    if icons_changed {
+        ui.ctx().data_mut(|d| d.insert_temp(icons_id, show_icons));
     }
 
     ui.add_space(SPACE_S);
@@ -185,6 +203,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     is_user,
                     &query_lower,
                     &filter,
+                    show_icons,
                     config,
                     lang,
                 );
@@ -302,6 +321,7 @@ fn player_column(
     is_user: bool,
     query_lower: &str,
     filter: &BuildOrderFilter,
+    show_icons: bool,
     config: &AppConfig,
     lang: locale::Language,
 ) {
@@ -368,6 +388,10 @@ fn player_column(
         return;
     }
 
+    let body_h = ui.text_style_height(&egui::TextStyle::Body);
+    let icon_side = (body_h * 1.5).round();
+    let row_min_h = if show_icons { body_h * 1.5 } else { 0.0 };
+
     ScrollArea::vertical()
         .id_salt(format!("bo_{}", index))
         .auto_shrink([false, false])
@@ -375,6 +399,7 @@ fn player_column(
             Grid::new(format!("bo_grid_{}", index))
                 .num_columns(4)
                 .spacing([12.0, 2.0])
+                .min_row_height(row_min_h)
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label(RichText::new(t("build_order.col.start", lang)).small().strong());
@@ -438,6 +463,18 @@ fn player_column(
                             display_name.to_string()
                         };
                         ui.horizontal(|ui| {
+                            if show_icons {
+                                if let Some(sprite) = unit_icon(&entry.action)
+                                    .or_else(|| structure_icon(&entry.action))
+                                {
+                                    ui.add(
+                                        egui::Image::new(sprite)
+                                            .fit_to_exact_size(egui::vec2(icon_side, icon_side)),
+                                    );
+                                } else {
+                                    ui.add_space(icon_side);
+                                }
+                            }
                             if let (Some(icon), Some(tint)) = (outcome_icon, outcome_tint) {
                                 ui.label(
                                     RichText::new(icon).monospace().strong().color(tint),
