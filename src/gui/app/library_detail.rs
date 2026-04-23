@@ -380,22 +380,26 @@ fn player_row(
                     .color(LABEL_DIM),
             );
         }
+        // Right-to-left: o primeiro widget adicionado vai para a borda
+        // direita. Queremos o MMR colado na direita e o ΔMMR logo à
+        // esquerda dele (ordem visual: `Δ -25   4085`), então o MMR
+        // vai *primeiro*, depois o gap, depois o delta.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Some((dt, dc)) = delta_text.as_ref() {
-                ui.label(
-                    RichText::new(dt)
-                        .size(size_caption(config))
-                        .strong()
-                        .color(*dc),
-                );
-                ui.add_space(SPACE_S);
-            }
             ui.label(
                 RichText::new(mmr_text)
                     .monospace()
                     .size(size_body(config))
                     .color(LABEL_STRONG),
             );
+            if let Some((dt, dc)) = delta_text.as_ref() {
+                ui.add_space(SPACE_S);
+                ui.label(
+                    RichText::new(dt)
+                        .size(size_caption(config))
+                        .strong()
+                        .color(*dc),
+                );
+            }
         });
     });
 }
