@@ -523,6 +523,20 @@ pub(super) fn process_tracker_events(
                         x: cx,
                         y: cy,
                     });
+                    // Mantém `tag_map` em sincronia. `UnitTypeChangeEvent`
+                    // não carrega x/y, então eventos futuros emitidos por
+                    // `apply_type_change` reutilizam `state.pos_x/pos_y`
+                    // do tag_map. Sem esta atualização, o segundo lift-off
+                    // de uma estrutura terran que já pousou uma vez seria
+                    // emitido com a posição de nascimento original. O
+                    // patching via game events (`patch_landing_position`)
+                    // cobre o pouso em si; esta linha cobre o lift-após-
+                    // pouso para que o ciclo lift→land→lift→land se
+                    // mantenha coerente.
+                    if let Some(state) = tag_map.get_mut(&full_tag) {
+                        state.pos_x = cx;
+                        state.pos_y = cy;
+                    }
                 }
             }
 
