@@ -59,11 +59,44 @@ impl AppState {
                             library_action = side_action;
                         }
                     }
+                    // Hero (KPI strip) no topo — renderizado num
+                    // `Panel::top` para ocupar 100% da largura à direita
+                    // do filtro lateral. Reservar a faixa do topo ANTES
+                    // do `Panel::right` faz com que o card de detalhes
+                    // ocupe somente a área *abaixo* do hero, em vez de
+                    // sentar ao lado e amputar a largura disponível
+                    // para os KPIs.
+                    let hero_action = egui::Panel::top("library_hero")
+                        .resizable(false)
+                        .frame(egui::Frame::new())
+                        .show_inside(ui, |ui| {
+                            library::show_hero(
+                                ui,
+                                &self.library,
+                                &self.config,
+                                &mut self.library_filter,
+                            )
+                        })
+                        .inner;
+                    if !matches!(hero_action, LibraryAction::None) {
+                        library_action = hero_action;
+                    }
+
+                    // Card lateral de detalhes — renderizado ANTES da
+                    // lista central para que `Panel::right` reserve sua
+                    // coluna primeiro. Sob o hero, lado a lado com a
+                    // lista. Sempre visível (placeholder quando vazio).
+                    if let Some(action) = self.show_library_detail_card(ui) {
+                        library_action = action;
+                    }
+
                     let current = self.loaded.as_ref().map(|l| l.path.as_path());
+                    let selected = self.library_selection.as_deref();
                     let central_action = library::show(
                         ui,
                         &self.library,
                         current,
+                        selected,
                         &self.config,
                         &mut self.library_filter,
                     );
@@ -126,6 +159,8 @@ impl AppState {
         match action {
             LibraryAction::None => {}
             LibraryAction::Load(p) => self.load_path(p),
+            LibraryAction::Select(p) => self.set_library_selection(Some(p)),
+            LibraryAction::ClearSelection => self.set_library_selection(None),
             LibraryAction::Refresh => self.refresh_library(),
             LibraryAction::PickWorkingDir(p) => {
                 self.config.working_dir = Some(p);
@@ -134,8 +169,9 @@ impl AppState {
                 }
                 self.refresh_library();
             }
-            LibraryAction::SaveDateRange(range) => {
-                self.config.library_date_range = range;
+            LibraryAction::SaveLibraryFilters { date_range, race } => {
+                self.config.library_date_range = date_range;
+                self.config.library_race = race;
                 if let Err(e) = self.config.save() {
                     self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
                 }

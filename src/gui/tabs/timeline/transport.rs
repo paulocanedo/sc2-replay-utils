@@ -11,10 +11,11 @@
 //! para 0 e o tempo nunca andaria). Pausa automaticamente ao atingir
 //! o final do replay.
 
-use egui::{Button, Color32, Id, Response, RichText, Slider, Ui};
+use egui::{Align, Button, Color32, Id, Layout, Response, RichText, Slider, Ui};
 
 use crate::colors::FOCUS_RING;
 use crate::replay::ReplayTimeline;
+use crate::replay_state::fmt_time;
 use crate::tokens::{RADIUS_BUTTON, SPACE_S};
 
 /// Velocidades suportadas pelo botão de speed. Ciclamos nessa ordem ao
@@ -33,29 +34,41 @@ const PLAYBACK_ACCUM_ID: &str = "timeline_playback_accum";
 
 pub(super) fn transport_slider(
     ui: &mut Ui,
-    _tl: &ReplayTimeline,
+    tl: &ReplayTimeline,
     current_loop: &mut u32,
     max_loop: u32,
     playing: &mut bool,
     speed: &mut u8,
 ) {
+    let time_label = format!(
+        "{} / {}",
+        fmt_time(*current_loop, tl.loops_per_second),
+        fmt_time(tl.game_loops, tl.loops_per_second),
+    );
     ui.horizontal(|ui| {
         play_pause_button(ui, playing, current_loop, max_loop);
         speed_button(ui, speed, *playing);
         ui.add_space(SPACE_S);
-        let slider_w = (ui.available_width() - 12.0).max(160.0);
-        ui.spacing_mut().slider_width = slider_w;
-        let slider_resp = ui.add(
-            Slider::new(current_loop, 0..=max_loop)
-                .integer()
-                .show_value(false),
-        );
-        // Scrubbing manual descarta o resíduo fracionário do playback
-        // para não "saltar" um frame extra quando o usuário solta o
-        // mouse.
-        if slider_resp.dragged() {
-            reset_playback_accumulator(ui.ctx());
-        }
+        // Reserva o slot mais à direita pro rótulo de tempo; o slider
+        // consome a largura restante. `right_to_left` encaixa o rótulo
+        // à direita e deixa o slider alinhado pela esquerda dele.
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.monospace(time_label);
+            ui.add_space(SPACE_S);
+            let slider_w = (ui.available_width() - 12.0).max(160.0);
+            ui.spacing_mut().slider_width = slider_w;
+            let slider_resp = ui.add(
+                Slider::new(current_loop, 0..=max_loop)
+                    .integer()
+                    .show_value(false),
+            );
+            // Scrubbing manual descarta o resíduo fracionário do playback
+            // para não "saltar" um frame extra quando o usuário solta o
+            // mouse.
+            if slider_resp.dragged() {
+                reset_playback_accumulator(ui.ctx());
+            }
+        });
     });
 }
 

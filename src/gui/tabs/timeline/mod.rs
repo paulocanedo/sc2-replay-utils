@@ -29,13 +29,14 @@ mod minimap;
 mod overlays;
 mod side_panel;
 mod transport;
+pub(super) mod unit_column;
 
 use egui::{Color32, TextStyle, Ui};
 
 use crate::config::AppConfig;
 use crate::locale::t;
-use crate::replay_state::{fmt_time, LoadedReplay};
-use crate::tokens::{SPACE_L, SPACE_XS};
+use crate::replay_state::LoadedReplay;
+use crate::tokens::SPACE_XS;
 use crate::widgets::toggle_chip_bool;
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
@@ -48,9 +49,21 @@ pub(super) const CAMERA_HEIGHT_TILES: f32 = 14.0;
 /// largura real é derivada do glifo "M" da fonte monospace atual, então
 /// escala com o `font_size_points` do usuário (HiDPI-aware).
 /// Dimensionado para comportar a barra de supply com overlay "200/200"
-/// mais ícones de recursos + barras inline de capacidade. 18 caracteres
-/// dá ~216px com a fonte padrão — suficiente sem ficar largo demais.
-const SIDE_PANEL_CHARS: f32 = 18.0;
+/// mais ícones de recursos + barras inline de capacidade, e ainda
+/// deixar folga pra chips `[ícone] N` dos blocos de unidades/estruturas
+/// caberem 2-3 por linha em vez de quebrar a cada chip.
+const SIDE_PANEL_CHARS: f32 = 28.0;
+
+/// Fator multiplicativo sobre `text_style_height(Body)` pra definir o
+/// lado do ícone de unidade nas colunas verticais do painel central.
+/// ~2.6× dá ícones legíveis (~40 px na fonte padrão) sem engolir o
+/// minimapa. Escala com o zoom do usuário (HiDPI-aware).
+const UNIT_ICON_BODY_FACTOR: f32 = 1.8;
+
+/// Largura das colunas verticais de unidades/estruturas dentro do
+/// painel central, em caracteres monospace. Dimensionado pra acomodar
+/// ícone ~40 px + gap + contagem de 3 dígitos + padding do chip.
+const UNIT_COLUMN_CHARS: f32 = 10.0;
 
 /// Calcula a largura do painel lateral com base no tamanho atual da
 /// fonte monospace + padding do frame do painel. Recomputado a cada
@@ -66,6 +79,20 @@ fn side_panel_width(ui: &Ui) -> f32 {
         .width();
     let frame_padding = ui.style().spacing.window_margin.sum().x;
     glyph_w * SIDE_PANEL_CHARS + frame_padding
+}
+
+/// Largura de uma coluna de ícones dentro do painel central. Mesma
+/// fórmula baseada no glifo "M" monospace que `side_panel_width` —
+/// garante que colunas e painel lateral escalem juntos.
+fn unit_column_width(ui: &Ui) -> f32 {
+    let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+    let glyph_w = ui
+        .painter()
+        .layout_no_wrap("M".to_string(), font_id, Color32::WHITE)
+        .rect
+        .width();
+    let frame_padding = ui.style().spacing.window_margin.sum().x;
+    glyph_w * UNIT_COLUMN_CHARS + frame_padding
 }
 
 pub fn show(
@@ -99,8 +126,8 @@ pub fn show(
     let side_w = side_panel_width(ui);
 
     // Layout em painéis (estilo egui_demo `panels.rs`):
-    // - Top: indicador de tempo + toggle de heatmap
-    // - Bottom: botões de step + slider de scrubbing
+    // - Top: toggles de overlays (heatmap/creep/map)
+    // - Bottom: indicador de tempo + botões de step + slider de scrubbing
     // - Left: stats do P1
     // - Right: stats do P2
     // - Central: minimapa
@@ -109,12 +136,6 @@ pub fn show(
         .show_inside(ui, |ui| {
             ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
-                ui.monospace(format!(
-                    "{} / {}",
-                    fmt_time(*current_loop, tl.loops_per_second),
-                    fmt_time(tl.game_loops, tl.loops_per_second),
-                ));
-                ui.add_space(SPACE_L);
                 toggle_chip_bool(ui, t("timeline.toggle.heatmap", lang), show_heatmap, None);
                 toggle_chip_bool(ui, t("timeline.toggle.creep", lang), show_creep, None);
                 toggle_chip_bool(ui, t("timeline.toggle.map", lang), show_map, None);
@@ -134,27 +155,94 @@ pub fn show(
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            side_panel::player_side_panel(ui, loaded, 0, game_loop, config);
+            egui::ScrollArea::vertical()
+                .id_salt("timeline_p1_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    side_panel::player_side_panel(ui, loaded, 0, game_loop, config);
+                });
         });
 
     egui::Panel::right("timeline_p2")
         .resizable(false)
         .exact_size(side_w)
         .show_inside(ui, |ui| {
-            side_panel::player_side_panel(ui, loaded, 1, game_loop, config);
+            egui::ScrollArea::vertical()
+                .id_salt("timeline_p2_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    side_panel::player_side_panel(ui, loaded, 1, game_loop, config);
+                });
         });
 
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        let aspect = minimap::map_aspect(loaded);
-        let map_size = minimap::fit_aspect(ui.available_size(), aspect);
-        minimap::minimap_with_size(
-            ui,
-            loaded,
-            game_loop,
-            map_size,
-            *show_heatmap,
-            *show_creep,
-            *show_map,
-        );
+        let col_w = unit_column_width(ui);
+        let avail_h = ui.available_height();
+        let avail_w = ui.available_width();
+        // Reserva explícita: 2 colunas (col_w cada) + minimapa no meio,
+        // com `SPACE_XS` entre cada par. Sem isso, `ui.available_size()`
+        // do centro engoliria a largura do gutter direito e empurraria a
+        // coluna do P2 pra fora da viewport.
+        let middle_w = (avail_w - 2.0 * col_w - 2.0 * SPACE_XS).max(0.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_XS;
+            // Coluna esquerda — unidades/estruturas do P1.
+            ui.allocate_ui_with_layout(
+                egui::vec2(col_w, avail_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    if let Some(p) = loaded.timeline.players.first() {
+                        unit_column::render_player_column(
+                            ui,
+                            p,
+                            0,
+                            game_loop,
+                            lang,
+                            UNIT_ICON_BODY_FACTOR,
+                        );
+                    }
+                },
+            );
+            // Coluna central — minimapa com largura explícita.
+            ui.allocate_ui_with_layout(
+                egui::vec2(middle_w, avail_h),
+                egui::Layout::top_down(egui::Align::Center),
+                |ui| {
+                    let aspect = minimap::map_aspect(loaded);
+                    let map_size = minimap::fit_aspect(ui.available_size(), aspect);
+                    minimap::minimap_with_size(
+                        ui,
+                        loaded,
+                        game_loop,
+                        map_size,
+                        *show_heatmap,
+                        *show_creep,
+                        *show_map,
+                    );
+                },
+            );
+            // Coluna direita — unidades/estruturas do P2. Ancorada à
+            // direita (`Align::Max`) pra que o conteúdo cole no painel
+            // lateral do P2, espelhando a coluna esquerda que cola no
+            // painel do P1. Sem isso o slack horizontal do col_w — col_w
+            // > largura real do card — ia todo pro lado do painel,
+            // deixando um gap visível entre a coluna e o side panel.
+            ui.allocate_ui_with_layout(
+                egui::vec2(col_w, avail_h),
+                egui::Layout::top_down(egui::Align::Max),
+                |ui| {
+                    if let Some(p) = loaded.timeline.players.get(1) {
+                        unit_column::render_player_column(
+                            ui,
+                            p,
+                            1,
+                            game_loop,
+                            lang,
+                            UNIT_ICON_BODY_FACTOR,
+                        );
+                    }
+                },
+            );
+        });
     });
 }

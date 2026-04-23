@@ -12,6 +12,15 @@ pub struct ParsedMeta {
     pub datetime: String,
     pub duration_seconds: u32,
     pub game_loops: u32,
+    /// Versão do jogo (formato `5.0.13.92440`) — exibida no card lateral
+    /// de detalhes. `None` para entries cacheadas em versões antigas do
+    /// app (antes do bump de cache que adicionou o campo).
+    pub version: Option<String>,
+    /// `m_cacheHandles` do replay — usado para resolver o arquivo do
+    /// mapa no Battle.net Cache e renderizar o minimapa no card de
+    /// detalhes sem reparsear o replay inteiro. Vazio quando o cache
+    /// veio de versões antigas do app.
+    pub cache_handles: Vec<String>,
     pub players: Vec<PlayerMeta>,
 }
 
@@ -29,6 +38,8 @@ impl ParsedMeta {
             datetime: timeline.datetime.clone(),
             duration_seconds: timeline.duration_seconds,
             game_loops: timeline.game_loops,
+            version: Some(timeline.version.clone()),
+            cache_handles: timeline.cache_handles.clone(),
             players: timeline
                 .players
                 .iter()

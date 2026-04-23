@@ -21,6 +21,7 @@ pub(super) fn mk_timeline(players: Vec<PlayerTimeline>, game_loops: u32) -> Repl
         duration_seconds: game_loops / 16,
         loops_per_second: 22.4,
         base_build: 0,
+        version: String::new(),
         max_time_seconds: 0,
         players,
         chat: Vec::new(),

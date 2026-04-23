@@ -3,7 +3,7 @@
 use crate::config::AppConfig;
 
 use super::date::matches_date_range;
-use super::entry_row::{find_user_player, matchup_code, race_letter};
+use super::entry_row::{find_user_index, find_user_player, matchup_code, race_letter};
 use super::types::{LibraryEntry, MetaState};
 
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
@@ -40,6 +40,14 @@ pub struct LibraryFilter {
     pub date_range: DateRange,
     pub sort: SortOrder,
     pub sort_ascending: bool,
+    /// Filtros de "relacionados" acionados via menu de contexto em
+    /// `entry_row`. Todos compõem AND com os filtros acima. Usam
+    /// matching exato (case-insensitive em nomes e mapas) — `search`
+    /// fuzzy continua orthogonal.
+    pub opponent_name: Option<String>,
+    pub matchup_code: Option<String>,
+    pub map_name: Option<String>,
+    pub opening: Option<String>,
 }
 
 impl Default for LibraryFilter {
@@ -51,6 +59,10 @@ impl Default for LibraryFilter {
             date_range: DateRange::default(),
             sort: SortOrder::Date,
             sort_ascending: false,
+            opponent_name: None,
+            matchup_code: None,
+            map_name: None,
+            opening: None,
         }
     }
 }
@@ -60,6 +72,7 @@ impl LibraryFilter {
     pub fn from_config(config: &crate::config::AppConfig) -> Self {
         Self {
             date_range: config.library_date_range,
+            race: config.library_race,
             ..Self::default()
         }
     }
@@ -73,6 +86,10 @@ pub struct StatsFilterKey {
     pub race: Option<char>,
     pub outcome: OutcomeFilter,
     pub date_range: DateRange,
+    pub opponent_name: Option<String>,
+    pub matchup_code: Option<String>,
+    pub map_name: Option<String>,
+    pub opening: Option<String>,
 }
 
 impl From<&LibraryFilter> for StatsFilterKey {
@@ -82,6 +99,10 @@ impl From<&LibraryFilter> for StatsFilterKey {
             race: f.race,
             outcome: f.outcome,
             date_range: f.date_range,
+            opponent_name: f.opponent_name.clone(),
+            matchup_code: f.matchup_code.clone(),
+            map_name: f.map_name.clone(),
+            opening: f.opening.clone(),
         }
     }
 }
@@ -103,7 +124,11 @@ pub fn matches_filter(
     let any_filter_active = search_active
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
-        || filter.date_range != DateRange::All;
+        || filter.date_range != DateRange::All
+        || filter.opponent_name.is_some()
+        || filter.matchup_code.is_some()
+        || filter.map_name.is_some()
+        || filter.opening.is_some();
 
     match &entry.meta {
         MetaState::Parsed(meta) => {
@@ -121,6 +146,41 @@ pub fn matches_filter(
                         .map_or(false, |o| o.to_ascii_lowercase().contains(&needle))
                 });
                 if !(name_match || map_match || matchup_match || opening_match) {
+                    return false;
+                }
+            }
+            if let Some(wanted) = &filter.opponent_name {
+                let wanted_lc = wanted.to_ascii_lowercase();
+                let user_idx = find_user_index(meta, config);
+                let opp_match = match user_idx {
+                    Some(i) if meta.players.len() == 2 => {
+                        meta.players[1 - i].name.to_ascii_lowercase() == wanted_lc
+                    }
+                    _ => meta
+                        .players
+                        .iter()
+                        .any(|p| p.name.to_ascii_lowercase() == wanted_lc),
+                };
+                if !opp_match {
+                    return false;
+                }
+            }
+            if let Some(wanted) = &filter.matchup_code {
+                if matchup_code(meta, config) != *wanted {
+                    return false;
+                }
+            }
+            if let Some(wanted) = &filter.map_name {
+                if meta.map.to_ascii_lowercase() != wanted.to_ascii_lowercase() {
+                    return false;
+                }
+            }
+            if let Some(wanted) = &filter.opening {
+                let any = meta
+                    .players
+                    .iter()
+                    .any(|p| p.opening.as_deref() == Some(wanted.as_str()));
+                if !any {
                     return false;
                 }
             }
@@ -181,6 +241,8 @@ mod tests {
                 datetime: datetime.into(),
                 duration_seconds: 600,
                 game_loops: 10_000,
+                version: None,
+                cache_handles: Vec::new(),
                 players: vec![
                     PlayerMeta {
                         name: user_name.into(),
@@ -335,5 +397,148 @@ mod tests {
         assert_eq!(StatsFilterKey::from(&a), StatsFilterKey::from(&b));
         b.outcome = OutcomeFilter::Wins;
         assert_ne!(StatsFilterKey::from(&a), StatsFilterKey::from(&b));
+    }
+
+    #[test]
+    fn stats_filter_key_diverges_for_related_fields() {
+        let base = LibraryFilter::default();
+        let mut with_opponent = base.clone();
+        with_opponent.opponent_name = Some("opp".into());
+        assert_ne!(
+            StatsFilterKey::from(&base),
+            StatsFilterKey::from(&with_opponent)
+        );
+        let mut with_map = base.clone();
+        with_map.map_name = Some("Ancient Cistern".into());
+        assert_ne!(StatsFilterKey::from(&base), StatsFilterKey::from(&with_map));
+    }
+
+    #[test]
+    fn opponent_filter_matches_non_user_player() {
+        let cfg = cfg_with("me");
+        let parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        let f = LibraryFilter {
+            opponent_name: Some("opp".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f, &cfg, "2026-04-20"));
+
+        // Matching contra o próprio usuário não deve passar.
+        let f_self = LibraryFilter {
+            opponent_name: Some("me".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &f_self, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn opponent_filter_is_case_insensitive() {
+        let cfg = cfg_with("me");
+        let parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        let f = LibraryFilter {
+            opponent_name: Some("OPP".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn matchup_filter_is_exact_not_substring() {
+        let cfg = cfg_with("me");
+        let parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        let f_hit = LibraryFilter {
+            matchup_code: Some("TvZ".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f_hit, &cfg, "2026-04-20"));
+        let f_miss = LibraryFilter {
+            matchup_code: Some("TvP".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &f_miss, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn map_filter_case_insensitive_exact() {
+        let cfg = cfg_with("me");
+        let parsed = make_parsed(
+            "Ancient Cistern",
+            "2026-04-10T10:00:00",
+            "me",
+            "Terran",
+            "Win",
+            "Zerg",
+        );
+        let f = LibraryFilter {
+            map_name: Some("ancient cistern".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f, &cfg, "2026-04-20"));
+        let f_miss = LibraryFilter {
+            map_name: Some("Ancient".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &f_miss, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn opening_filter_matches_any_player() {
+        let cfg = cfg_with("me");
+        let mut parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        if let MetaState::Parsed(meta) = &mut parsed.meta {
+            meta.players[0].opening = Some("1 Rax FE — Stim Timing".into());
+            meta.players[1].opening = Some("Hatch First — Ling/Queen".into());
+        }
+        let f_user = LibraryFilter {
+            opening: Some("1 Rax FE — Stim Timing".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f_user, &cfg, "2026-04-20"));
+        let f_opp = LibraryFilter {
+            opening: Some("Hatch First — Ling/Queen".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&parsed, &f_opp, &cfg, "2026-04-20"));
+        let f_miss = LibraryFilter {
+            opening: Some("Hatch".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&parsed, &f_miss, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn related_filters_combine_and_with_outcome() {
+        let cfg = cfg_with("me");
+        let win = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        let loss = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Loss", "Zerg");
+        let f = LibraryFilter {
+            opponent_name: Some("opp".into()),
+            outcome: OutcomeFilter::Wins,
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(&win, &f, &cfg, "2026-04-20"));
+        assert!(!matches_filter(&loss, &f, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn pending_drops_when_related_filter_active() {
+        let cfg = cfg_with("me");
+        let f = LibraryFilter {
+            map_name: Some("M".into()),
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&make_pending(), &f, &cfg, "2026-04-20"));
     }
 }

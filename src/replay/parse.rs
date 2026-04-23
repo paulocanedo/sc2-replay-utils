@@ -48,6 +48,13 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
 
     let game_loops = header.m_elapsed_game_loops as u32;
     let base_build = header.m_version.m_base_build;
+    let version = format!(
+        "{}.{}.{}.{}",
+        header.m_version.m_major,
+        header.m_version.m_minor,
+        header.m_version.m_revision,
+        header.m_version.m_build,
+    );
     let loops_per_second = game_speed_to_loops_per_second(&details.game_speed);
 
     // player_id (1-indexado no player_list completo) → índice no
@@ -148,6 +155,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         duration_seconds,
         loops_per_second,
         base_build,
+        version,
         max_time_seconds,
         players,
         chat: Vec::new(),

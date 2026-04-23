@@ -54,12 +54,15 @@ pub struct ProductionCmd {
     /// "ResearchProtossGroundWeaponsLevel1", "MorphToWarpGate").
     pub ability: String,
     /// Tags candidatos a produtor — snapshot da seleção ativa do
-    /// jogador no instante do cmd. Cada elemento é o `unit_tag_index`
-    /// (parte alta de um tag completo, comum entre eventos de game e
-    /// tracker). Vazio quando a seleção não pôde ser resolvida (cmd
-    /// órfão). O build_order escolhe o primeiro disponível pra
-    /// associar via FIFO.
-    pub producer_tag_indexes: Vec<u32>,
+    /// jogador no instante do cmd. Cada elemento é um tag completo
+    /// (`i64`, i.e. `index << 18 | recycle`) — chaveamos pelo tag
+    /// inteiro e não só pelo index porque o SC2 recicla indexes: uma
+    /// Queen com index N e recycle 1 pode morrer e outro unit (Drone,
+    /// Zergling) herdar N com recycle maior. Se bucketarmos por index
+    /// apenas, os cmds da Queen e do Drone colidem. Vazio quando a
+    /// seleção não pôde ser resolvida (cmd órfão). O build_order
+    /// escolhe o primeiro disponível pra associar via FIFO.
+    pub producer_tags: Vec<i64>,
     /// `true` quando este cmd já foi consumido pelo build_order.
     /// Mantido pra permitir varreduras múltiplas (unidades agrupadas
     /// por produtor + upgrades) sem reprocessar.
@@ -417,6 +420,11 @@ pub struct ReplayTimeline {
     /// gerou o arquivo. Usado pelo `balance_data` para selecionar a
     /// tabela de tempos correspondente ao patch do replay.
     pub base_build: u32,
+    /// Versão do jogo (formato `5.0.13.92440`) montada a partir de
+    /// `header.m_version.{m_major,m_minor,m_revision,m_build}`. Mostrada
+    /// na UI como referência humana — `base_build` continua sendo a chave
+    /// usada pela `balance_data`.
+    pub version: String,
     /// Limite de coleta de eventos em segundos. 0 indica sem limite.
     pub max_time_seconds: u32,
     pub players: Vec<PlayerTimeline>,

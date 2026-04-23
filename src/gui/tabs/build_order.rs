@@ -6,13 +6,16 @@
 use egui::{Color32, Grid, Id, RichText, ScrollArea, TextEdit, Ui};
 
 use crate::build_order::{classify_entry, EntryKind, EntryOutcome, PlayerBuildOrder};
-use crate::colors::{player_slot_color, user_fill, CARD_FILL, USER_CHIP_BG, USER_CHIP_FG};
+use crate::colors::{player_slot_color, user_fill, CARD_FILL};
 use crate::config::AppConfig;
 use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
+use crate::tabs::timeline::unit_column::{structure_icon, unit_icon};
 use crate::tokens::SPACE_S;
-use crate::widgets::toggle_chip_bool;
+use crate::widgets::{
+    copy_icon_button, copy_labeled_button, player_identity, toggle_chip_bool, NameDensity,
+};
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
 const ALL_KINDS: [EntryKind; 6] = [
@@ -103,6 +106,12 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         .data(|d| d.get_temp::<BuildOrderFilter>(filter_id))
         .unwrap_or_default();
 
+    let icons_id = Id::new("bo_show_icons");
+    let mut show_icons: bool = ui
+        .ctx()
+        .data(|d| d.get_temp::<bool>(icons_id))
+        .unwrap_or(false);
+
     // ── Campo de busca (lupa dentro do input) ────────────────────
     let resp = ui.add_sized(
         [ui.available_width(), 28.0],
@@ -131,6 +140,8 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
     // ── Filtros de categoria ────────────────────────────────────
     let mut filter_changed = false;
+    let mut icons_changed = false;
+    let prev_icons = show_icons;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = SPACE_S;
         let prev = filter;
@@ -151,9 +162,18 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             || filter.show_research != prev.show_research
             || filter.show_upgrades != prev.show_upgrades
             || filter.show_injects != prev.show_injects;
+
+        ui.add_space(SPACE_S);
+        ui.label(RichText::new("|").weak());
+        ui.add_space(SPACE_S);
+        toggle_chip_bool(ui, t("build_order.filter.icons", lang), &mut show_icons, None);
+        icons_changed = show_icons != prev_icons;
     });
     if filter_changed {
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
+    }
+    if icons_changed {
+        ui.ctx().data_mut(|d| d.insert_temp(icons_id, show_icons));
     }
 
     ui.add_space(SPACE_S);
@@ -175,7 +195,18 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             for (i, player) in players.iter().take(n).enumerate() {
                 let ui = &mut cols[i];
                 let is_user = config.is_user(&player.name);
-                player_column(ui, player, i, lps, is_user, &query_lower, &filter, lang);
+                player_column(
+                    ui,
+                    player,
+                    i,
+                    lps,
+                    is_user,
+                    &query_lower,
+                    &filter,
+                    show_icons,
+                    config,
+                    lang,
+                );
             }
         });
     });
@@ -209,7 +240,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                             .font(egui::TextStyle::Monospace),
                     );
                     ui.add_space(4.0);
-                    if ui.button(t("build_order.salt.copy", lang)).clicked() {
+                    if copy_labeled_button(ui, t("build_order.salt.copy", lang)).clicked() {
                         ui.ctx().copy_text(encoded);
                     }
                 });
@@ -290,13 +321,14 @@ fn player_column(
     is_user: bool,
     query_lower: &str,
     filter: &BuildOrderFilter,
+    show_icons: bool,
+    config: &AppConfig,
     lang: locale::Language,
 ) {
     let slot_color = player_slot_color(index);
     let fill = if is_user { user_fill(index) } else { CARD_FILL };
 
     // ── Cabeçalho estilo sidebar card ───────────────────────────
-    let race_letter = race_initial(&player.race);
     let header_resp = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(0.5, Color32::from_gray(50)))
@@ -306,27 +338,19 @@ fn player_column(
             ui.set_width(ui.available_width());
 
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("({race_letter}) {}", player.name))
-                        .size(15.0)
-                        .strong()
-                        .color(Color32::WHITE),
+                ui.spacing_mut().item_spacing.x = SPACE_S;
+                player_identity(
+                    ui,
+                    &player.name,
+                    &player.race,
+                    index,
+                    is_user,
+                    NameDensity::Normal,
+                    config,
+                    lang,
                 );
-                if is_user {
-                    ui.label(
-                        RichText::new(format!("{} ", t("common.you_chip", lang)))
-                            .small()
-                            .strong()
-                            .color(USER_CHIP_FG)
-                            .background_color(USER_CHIP_BG),
-                    );
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button("📋")
-                        .on_hover_text(t("build_order.copy_tooltip", lang))
-                        .clicked()
-                    {
+                    if copy_icon_button(ui, t("build_order.copy_tooltip", lang)).clicked() {
                         let text = format_clipboard_single(player, lps, lang);
                         ui.ctx().copy_text(text);
                     }
@@ -364,6 +388,10 @@ fn player_column(
         return;
     }
 
+    let body_h = ui.text_style_height(&egui::TextStyle::Body);
+    let icon_side = (body_h * 1.5).round();
+    let row_min_h = if show_icons { body_h * 1.5 } else { 0.0 };
+
     ScrollArea::vertical()
         .id_salt(format!("bo_{}", index))
         .auto_shrink([false, false])
@@ -371,6 +399,7 @@ fn player_column(
             Grid::new(format!("bo_grid_{}", index))
                 .num_columns(4)
                 .spacing([12.0, 2.0])
+                .min_row_height(row_min_h)
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label(RichText::new(t("build_order.col.start", lang)).small().strong());
@@ -434,6 +463,18 @@ fn player_column(
                             display_name.to_string()
                         };
                         ui.horizontal(|ui| {
+                            if show_icons {
+                                if let Some(sprite) = unit_icon(&entry.action)
+                                    .or_else(|| structure_icon(&entry.action))
+                                {
+                                    ui.add(
+                                        egui::Image::new(sprite)
+                                            .fit_to_exact_size(egui::vec2(icon_side, icon_side)),
+                                    );
+                                } else {
+                                    ui.add_space(icon_side);
+                                }
+                            }
                             if let (Some(icon), Some(tint)) = (outcome_icon, outcome_tint) {
                                 ui.label(
                                     RichText::new(icon).monospace().strong().color(tint),

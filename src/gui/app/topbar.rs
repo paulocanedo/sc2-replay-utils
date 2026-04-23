@@ -5,12 +5,10 @@
 // See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
 #![allow(deprecated)]
 
-use std::path::PathBuf;
-
 use egui::{Color32, Panel, RichText};
 
 use crate::colors::{
-    player_slot_color, LABEL_DIM, LABEL_SOFT, SURFACE_ALT, USER_CHIP_BG, USER_CHIP_FG,
+    player_slot_color, player_slot_color_bright, LABEL_DIM, LABEL_SOFT, SURFACE_ALT,
 };
 use crate::config::AppConfig;
 use crate::locale::{t, tf, Language};
@@ -19,7 +17,7 @@ use crate::tabs::Tab;
 use crate::tokens::{
     size_body, size_caption, size_subtitle, SPACE_M, SPACE_S, SPACE_XS, TOPBAR_HEIGHT,
 };
-use crate::widgets::{icon_button, labeled_value};
+use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label, NameDensity};
 
 use super::state::{AppState, Screen};
 
@@ -27,8 +25,6 @@ impl AppState {
     pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
-        let mut pick_dir: Option<PathBuf> = None;
-        let mut rename_clicked = false;
         let mut toggle_sidebar = false;
         let working_dir_display = self
             .library
@@ -43,6 +39,15 @@ impl AppState {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
+                    // Sidebar toggle sits left-most — right next to the
+                    // panel it actually controls. Keeping it on the far
+                    // right created a cross-window pointer trip.
+                    if icon_button(ui, "☰", t("library.sidebar.toggle_tooltip", lang))
+                        .clicked()
+                    {
+                        toggle_sidebar = true;
+                    }
+                    ui.add_space(SPACE_S);
                     ui.label(
                         RichText::new(t("library.title", lang))
                             .size(size_subtitle(&self.config))
@@ -69,37 +74,15 @@ impl AppState {
                         }
                     }
 
+                    // Reload stays on the right (screen-level action).
+                    // Working dir → Settings, rename → menu View.
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if icon_button(ui, "📂", t("library.pick_dir_tooltip", lang))
-                                .clicked()
-                            {
-                                if let Some(p) = rfd::FileDialog::new().pick_folder() {
-                                    pick_dir = Some(p);
-                                }
-                            }
-                            ui.add_space(SPACE_XS);
-                            if icon_button(ui, "✏", t("library.rename_tooltip", lang))
-                                .clicked()
-                            {
-                                rename_clicked = true;
-                            }
-                            ui.add_space(SPACE_XS);
                             if icon_button(ui, "↻", t("library.reload_tooltip", lang))
                                 .clicked()
                             {
                                 reload_clicked = true;
-                            }
-                            ui.add_space(SPACE_XS);
-                            if icon_button(
-                                ui,
-                                "☰",
-                                t("library.sidebar.toggle_tooltip", lang),
-                            )
-                            .clicked()
-                            {
-                                toggle_sidebar = true;
                             }
                         },
                     );
@@ -107,19 +90,6 @@ impl AppState {
             });
         if reload_clicked {
             self.refresh_library();
-        }
-        if let Some(p) = pick_dir {
-            self.config.working_dir = Some(p);
-            if let Err(e) = self.config.save() {
-                self.set_toast(tf("toast.save_error", lang, &[("err", &e)]));
-            }
-            self.refresh_library();
-        }
-        if rename_clicked {
-            self.rename_previews =
-                crate::rename::generate_previews(&self.library, &self.rename_template);
-            self.rename_status = None;
-            self.screen = Screen::Rename;
         }
         if toggle_sidebar {
             self.library_sidebar_open = !self.library_sidebar_open;
@@ -152,8 +122,6 @@ impl AppState {
     pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut back_clicked = false;
-        let mut open_clicked = false;
-        let mut rename_clicked = false;
         if let Some(loaded) = self.loaded.as_ref() {
             let user_idx = self
                 .loaded
@@ -173,27 +141,11 @@ impl AppState {
                         user_idx,
                         lang,
                         &mut back_clicked,
-                        &mut open_clicked,
-                        &mut rename_clicked,
                     );
                 });
         }
         if back_clicked {
             self.screen = Screen::Library;
-        }
-        if open_clicked {
-            if let Some(p) = rfd::FileDialog::new()
-                .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
-                .pick_file()
-            {
-                self.load_path(p);
-            }
-        }
-        if rename_clicked {
-            self.rename_previews =
-                crate::rename::generate_previews(&self.library, &self.rename_template);
-            self.rename_status = None;
-            self.screen = Screen::Rename;
         }
 
         Panel::top("tabs").show(ctx, |ui| {
@@ -209,9 +161,9 @@ impl AppState {
 }
 
 /// Renders the rich analysis top bar: back-to-library affordance, map
-/// summary, per-player chips, details popover, rename/open shortcuts.
-/// Fills what used to be the right-side `match_info` sidebar so the
-/// tab content below can keep 100% of the viewport width.
+/// summary, per-player chips and a details popover. Open/rename live
+/// in the menu bar (File → Open replay…, View → Rename), so this bar
+/// stays focused on the loaded replay's identity.
 fn analysis_topbar(
     ui: &mut egui::Ui,
     loaded: &LoadedReplay,
@@ -219,8 +171,6 @@ fn analysis_topbar(
     user_idx: Option<usize>,
     lang: Language,
     back_clicked: &mut bool,
-    open_clicked: &mut bool,
-    rename_clicked: &mut bool,
 ) {
     let tl = &loaded.timeline;
     let matchup = build_matchup(&tl.players);
@@ -286,20 +236,13 @@ fn analysis_topbar(
                 });
         });
 
-        // ── Flex spacer + right cluster ─────────────────────────
+        // ── Flex spacer + right cluster (apenas chips) ──────────
+        // Open/rename foram movidos para a menu bar (File → Open replay
+        // e View → Rename) — a topbar de análise agora só carrega
+        // identidade do replay carregado.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button(ui, "📂", t("topbar.open", lang)).clicked() {
-                *open_clicked = true;
-            }
-            ui.add_space(SPACE_XS);
-            // `✏` (BMP variant) renders with the default font; `✎` does not.
-            if icon_button(ui, "✏", t("topbar.rename_tooltip", lang)).clicked() {
-                *rename_clicked = true;
-            }
-            ui.add_space(SPACE_M);
-
-            // Player chips flow right-to-left so P2 sits next to the
-            // action buttons. We draw P2 first, then "vs", then P1.
+            // Player chips flow right-to-left so P2 sits at the far
+            // right edge. We draw P2 first, then "vs", then P1.
             let players = &tl.players;
             if players.len() >= 2 {
                 player_chip_topbar(ui, &players[1], 1, user_idx == Some(1), config, lang);
@@ -322,16 +265,17 @@ fn player_chip_topbar(
     config: &AppConfig,
     lang: Language,
 ) {
-    let slot = player_slot_color(idx);
-    let race_letter = crate::utils::race_letter(&player.race);
-    let mmr_text = match player.mmr {
-        Some(v) => v.to_string(),
-        None => "—".to_string(),
-    };
+    let slot_stripe = player_slot_color(idx);
+    let name_color = player_slot_color_bright(idx);
 
+    // Inner margin slightly maior (`SPACE_S` no eixo Y vs. `SPACE_XS`
+    // anteriormente) e nome em `size_body` (vs. `size_caption`) para
+    // dar um pouco mais de presença ao chip agora que ele só carrega
+    // raça + nome + opcional YOU. O MMR migrou para o card lateral
+    // de detalhes; a topbar fica mais limpa para foco em "quem".
     let frame = egui::Frame::new()
         .fill(Color32::from_gray(36))
-        .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_XS as i8))
+        .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8))
         .corner_radius(crate::tokens::RADIUS_CHIP);
 
     let inner = frame.show(ui, |ui| {
@@ -339,38 +283,20 @@ fn player_chip_topbar(
         // but it inherits the parent placer's direction (egui 0.34
         // ui.rs:2623) — and our parent is right-to-left. So we add
         // widgets in REVERSE of the desired visual order.
-        // Visual we want: race · name · YOU? · MMR
-        // Code order:     MMR · YOU? · name · race
+        // Visual we want: race · name · YOU?
+        // Code order:     YOU? · name · race
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = SPACE_S;
-            ui.label(
-                RichText::new(mmr_text)
-                    .size(size_body(config))
-                    .monospace()
-                    .strong()
-                    .color(LABEL_SOFT),
-            );
             if is_user {
-                ui.label(
-                    RichText::new(t("common.you_chip", lang))
-                        .size(size_caption(config))
-                        .strong()
-                        .color(USER_CHIP_FG)
-                        .background_color(USER_CHIP_BG),
-                );
+                ui.label(you_chip_label(config, lang));
             }
             ui.label(
                 RichText::new(&player.name)
-                    .size(size_caption(config))
+                    .size(size_body(config))
                     .strong()
-                    .color(slot),
+                    .color(name_color),
             );
-            ui.label(
-                RichText::new(format!("({race_letter})"))
-                    .size(size_caption(config))
-                    .strong()
-                    .color(slot),
-            );
+            race_badge(ui, &player.race, NameDensity::Compact, config);
         });
     });
 
@@ -388,6 +314,6 @@ fn player_chip_topbar(
             ne: 0,
             se: 0,
         },
-        slot,
+        slot_stripe,
     );
 }

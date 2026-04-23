@@ -20,6 +20,7 @@ menu.view = Exibir
 menu.view.library = Biblioteca
 menu.view.analysis = Análise
 menu.view.rename = Renomear
+menu.view.refresh = Atualizar biblioteca
 menu.view.settings = Configurações…
 menu.help = Ajuda
 menu.help.about = Sobre
@@ -39,6 +40,23 @@ about.tech_label = Tecnologias
 about.tech_value = Rust · egui · s2protocol
 about.version = v{version}
 about.close = Fechar
+about.disclaimer_heading = Avisos
+
+# ── Diálogo de Avisos (inicialização + Sobre) ───────────────────────────────
+# O texto de cada item é deliberadamente formal e em forma extensa. Ele
+# aparece tanto na modal de primeira execução quanto na janela "Sobre",
+# permitindo que o usuário revisite as informações a qualquer momento.
+disclaimer.title = Avisos importantes
+disclaimer.intro = Antes de prosseguir, por favor leia com atenção as informações abaixo a respeito desta aplicação.
+disclaimer.unofficial = Esta aplicação é um projeto independente. Ela não é oficial, não é afiliada, não é endossada nem patrocinada pela Blizzard Entertainment, Inc., e não possui qualquer vínculo com a empresa. StarCraft e StarCraft II são marcas comerciais ou marcas registradas da Blizzard Entertainment; toda a propriedade intelectual relacionada é regida pelo respectivo Contrato de Licença de Usuário Final e permanece de titularidade exclusiva de seus respectivos detentores.
+disclaimer.in_development = Este software encontra-se em fase ativa de desenvolvimento. As métricas, estatísticas e análises apresentadas ainda não foram completamente revisadas e podem conter imprecisões. Não trate os valores exibidos como definitivos e não tome decisões competitivas baseando-se exclusivamente neles.
+disclaimer.supply_block = A detecção de supply block adotada por esta aplicação utiliza uma abordagem diferente da lógica empregada pelo próprio jogo. Por esse motivo, os valores exibidos dificilmente coincidirão com aqueles reportados pelo jogo. A intenção é oferecer uma representação que permaneça realista e útil, e seu feedback sobre essa abordagem é muito bem-vindo.
+disclaimer.feedback = Caso encontre problemas, identifique comportamentos incorretos ou tenha sugestões de melhoria, fica desde já o convite para registrar uma issue no repositório do projeto no GitHub.
+disclaimer.open_source = Este é um projeto de código aberto. O código-fonte completo está disponível no GitHub e contribuições da comunidade são bem-vindas.
+disclaimer.issues_link = Abrir página de issues no GitHub
+disclaimer.repo_link = Acessar o projeto no GitHub
+disclaimer.dont_show_again = Não exibir este aviso nas próximas execuções
+disclaimer.acknowledge = Entendi — continuar
 
 # ── Toasts / erros ──────────────────────────────────────────────────────────
 toast.no_working_dir = Diretório de trabalho não definido (veja Configurações).
@@ -71,8 +89,6 @@ topbar.detail.start = Início
 topbar.detail.loops = Loops
 topbar.detail.speed = Veloc.
 topbar.speed_value = {value} loops/s
-topbar.rename_tooltip = Renomear replays…
-topbar.open = Abrir replay…
 
 # Nomes completos das raças exibidos abaixo do nome do jogador.
 race.terran = Terran
@@ -121,8 +137,6 @@ settings.file_path = Arquivo: {path}
 library.title = Biblioteca
 library.reload_tooltip = Recarregar lista
 library.zoom_tooltip = Zoom / configurações
-library.rename_tooltip = Renomear replays em lote
-library.pick_dir_tooltip = Escolher diretório de trabalho
 library.dir_unset = Diretório não definido
 library.search_placeholder = Buscar jogador, mapa, matchup ou build…
 library.sort.date = Data
@@ -156,6 +170,21 @@ library.entry.parsing = lendo metadados…
 library.entry.unsupported = ⚠ não suportado: {reason}
 library.entry.failed = falha: {err}
 library.entry.open = abrir
+library.outcome.win = VIT
+library.outcome.loss = DER
+# ── Card lateral de detalhes (clique simples na entry) ──
+library.detail.close_tooltip = Fechar detalhes
+library.detail.open_analysis = Abrir análise
+library.detail.section.match = Partida
+library.detail.section.players = Jogadores
+library.detail.section.openings = Build orders
+library.detail.played_at = Jogado em
+library.detail.duration = Duração
+library.detail.version = Versão
+library.detail.you_chip = você
+library.detail.minimap_unavailable = Minimapa indisponível
+library.detail.empty.title = Nenhum replay selecionado
+library.detail.empty.hint = Clique num replay para ver detalhes · clique duplo para abrir análise
 # Rótulo de abertura — nomes estratégicos ("Hatch First", "3 Rax",
 # "Gate Expand") ficam em inglês em ambos os locales porque é o
 # vocabulário usado pela comunidade brasileira. Traduzimos só os
@@ -185,6 +214,15 @@ library.sidebar.insights_matchup = Winrate por matchup
 library.sidebar.insights_maps = Mapas mais jogados
 library.sidebar.toggle_tooltip = Mostrar/ocultar filtros
 library.filter.clear_all = Limpar filtros
+library.related.menu.title = Encontrar relacionados
+library.related.menu.vs_opponent = Jogos contra {name}
+library.related.menu.same_matchup = Mesmo matchup: {code}
+library.related.menu.same_map = Mesmo mapa: {map}
+library.related.menu.same_opening = Mesma abertura: {opening}
+library.related.chip.vs_opponent = vs {name}
+library.related.chip.matchup = {code}
+library.related.chip.map = Mapa: {map}
+library.related.chip.opening = Abertura: {opening}
 
 # ── Abas ────────────────────────────────────────────────────────────────────
 tab.timeline = Timeline
@@ -201,9 +239,10 @@ build_order.filter.structures = Estruturas
 build_order.filter.research = Pesquisa
 build_order.filter.upgrades = Upgrades
 build_order.filter.injects = Injects
+build_order.filter.icons = Ícones
 build_order.salt.title = SALT Encoding — {player}
 build_order.salt.desc = Copie a string abaixo para importar em ferramentas como Spawning Tool, Embot Advanced ou SC2 Scrapbook.
-build_order.salt.copy = 📋 Copiar para área de transferência
+build_order.salt.copy = Copiar para área de transferência
 build_order.legend.chrono = chrono
 build_order.legend.cancelled = cancelado
 build_order.legend.destroyed = destruído
@@ -273,6 +312,25 @@ timeline.stats.bldg_focus = {pct}% foco prédios
 timeline.stats.idle_worker = ⏱ {secs}s workers ociosos
 timeline.stats.idle_army = ⚔ {secs}s army ocioso
 timeline.stats.blocks = ⚠ {count} blocks · {secs}s
+timeline.stats.units_none = — sem unidades vivas
+timeline.stats.structures_none = — sem estruturas vivas
+timeline.stats.researches_none = — sem pesquisas
+timeline.tt.supply = Supply usado / cap de supply neste instante.
+timeline.tt.supply_blocked = Supply-blocked: usado igual ao cap, não dá pra treinar mais unidades até aumentar o supply.
+timeline.tt.minerals = Minerals em banco. À direita, taxa de renda por minuto.
+timeline.tt.vespene = Gas em banco. À direita, taxa de renda por minuto.
+timeline.tt.workers = Workers ativos. A barra preenche em direção à saturação ideal (~22 por base, limitada a 80).
+timeline.tt.army_value = Valor total em recursos das unidades army vivas (minerals + gas).
+timeline.tt.army_split = Valor do army separado por gasto em mineral (m) e gas (g).
+timeline.tt.atk_upgrade = Nível de upgrade de ataque.
+timeline.tt.arm_upgrade = Nível de upgrade de armadura / shields.
+timeline.tt.bldg_focus = Fração do tempo em que a câmera esteve em estruturas (vigilância de macro).
+timeline.tt.bldg_focus_none = Ainda sem dados de câmera para este instante.
+timeline.tt.idle_worker = Tempo em que slots de produção de workers ficaram ociosos com capacidade livre. Conta até a posição atual do slider.
+timeline.tt.idle_army = Tempo em que produtores army ficaram ociosos com capacidade livre. Zerg: cada Hatch/Lair/Hive conta como 1 slot de larva. Conta até a posição atual do slider.
+timeline.tt.blocks = Períodos supply-blocked até o instante atual — quantidade total e duração acumulada.
+timeline.tt.unit_chip = {name} × {count}
+timeline.tt.research_chip = {name} · concluído em {mm}:{ss}
 
 # ── Tela Renomear ───────────────────────────────────────────────────────────
 rename.heading = Renomear Replays em Lote

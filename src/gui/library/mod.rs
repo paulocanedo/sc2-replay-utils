@@ -28,4 +28,4 @@ pub use filter::{DateRange, LibraryFilter};
 pub use scanner::ReplayLibrary;
 pub use sidebar::show as show_sidebar;
 pub use types::{MetaState, ParsedMeta, PlayerMeta};
-pub use ui::{LibraryAction, keep_alive, show};
+pub use ui::{LibraryAction, keep_alive, show, show_hero};

@@ -26,7 +26,8 @@ use egui::{ScrollArea, Ui};
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::LoadedReplay;
-use crate::tokens::SPACE_M;
+use crate::tokens::{SPACE_M, SPACE_S};
+use crate::widgets::player_pov_pill;
 
 /// Retorna `Some(target_loop)` quando algum card pediu seek pra aba
 /// Timeline (hoje, apenas o card Turning Point). Caller (central.rs)
@@ -58,23 +59,26 @@ pub fn show(
     let selected = pov.unwrap_or(0);
 
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_S;
         ui.label(t("insights.pov_label", lang));
-        let selected_name = loaded
-            .timeline
-            .players
-            .get(selected)
-            .map(|p| p.name.clone())
-            .unwrap_or_default();
-        egui::ComboBox::from_id_salt("insights_pov")
-            .selected_text(selected_name)
-            .show_ui(ui, |ui| {
-                for (idx, p) in loaded.timeline.players.iter().enumerate() {
-                    let mut cur = selected;
-                    if ui.selectable_value(&mut cur, idx, &p.name).clicked() {
-                        *pov = Some(idx);
-                    }
-                }
-            });
+        for (idx, p) in loaded.timeline.players.iter().enumerate() {
+            let is_user = config.is_user(&p.name);
+            let is_selected = idx == selected;
+            if player_pov_pill(
+                ui,
+                &p.name,
+                &p.race,
+                idx,
+                is_user,
+                is_selected,
+                config,
+                lang,
+            )
+            .clicked()
+            {
+                *pov = Some(idx);
+            }
+        }
     });
     ui.add_space(SPACE_M);
 

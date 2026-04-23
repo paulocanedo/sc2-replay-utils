@@ -1,17 +1,45 @@
 // Renderização de uma entrada individual da biblioteca + helpers de
 // metadados usados para filtragem, ordenação e exibição.
+//
+// O row é uma *lista enxuta*: nomes dos jogadores tingidos pela cor da
+// raça, nome do mapa e (quando o usuário tem nickname registrado) o
+// resultado WIN/LOSS. Detalhes ricos (datetime, MMR, opening, minimapa,
+// versão) ficam no card lateral alimentado por `library_selection`.
+//
+// Interação:
+// - Clique simples → `RowOutcome::Select` (alimenta o card)
+// - Duplo clique  → `RowOutcome::Load`   (abre na aba Analysis)
+// - Botão direito → menu "encontrar relacionados"
 
-use egui::{Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Ui};
+use egui::{Color32, RichText, Sense, Ui};
 
-use crate::colors::{
-    race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM, LABEL_SOFT, LABEL_STRONG, RACE_PROTOSS,
-    RACE_TERRAN, RACE_ZERG,
-};
+use crate::colors::{race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM};
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
-use crate::tokens::{size_body, size_caption, SPACE_S, SPACE_XS};
+use crate::tokens::{size_caption, SPACE_S};
 
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
+
+/// O que aconteceu ao interagir com uma linha da biblioteca.
+///
+/// `Select` vem do clique simples — apenas alimenta o card lateral.
+/// `Load` vem do duplo clique (ou do botão "Abrir análise" no card) —
+/// carrega o replay e troca para a tela `Analysis`.
+/// `ApplyRelated` vem do menu de contexto (clique direito).
+pub(super) enum RowOutcome {
+    None,
+    Select,
+    Load,
+    ApplyRelated(RelatedFilter),
+}
+
+/// Dimensão escolhida pelo usuário no menu "encontrar relacionados".
+pub(super) enum RelatedFilter {
+    Opponent(String),
+    Matchup(String),
+    Map(String),
+    Opening(String),
+}
 
 // ── Helpers de filtro/sort ────────────────────────────────────────────
 
@@ -81,72 +109,49 @@ pub(super) fn get_map(entry: &LibraryEntry) -> &str {
 
 // ── UI components ────────────────────────────────────────────────────
 
-/// Altura de cada linha da lista virtualizada.
-///
-/// Composição da zona esquerda (fonte única de verdade para manter a
-/// lista em sincronia com o render):
-/// - 1× Body (título "vs")
-/// - 3× Small (🗺/⏱, MMR, opening label)
-/// - 3× gap entre elas
-/// Qualquer mudança aqui precisa casar com `render_parsed`.
+/// Altura compacta da linha — uma única strip com nomes + mapa + W/L.
+/// O conteúdo cabe em uma label `Body`; somamos o chrome do frame.
 pub(super) fn row_height(ui: &Ui) -> f32 {
     use egui::TextStyle;
     let body = ui.text_style_height(&TextStyle::Body);
-    let small = ui.text_style_height(&TextStyle::Small);
-    let gap = ui.spacing().item_spacing.y;
-    body + small * 3.0 + gap * 3.0 + FRAME_CHROME_V
+    body + FRAME_CHROME_V
 }
 
-const FRAME_CHROME_V: f32 = 13.0;
+const FRAME_CHROME_V: f32 = 14.0;
 
-// Race colours — distinct from the P1/P2 slot palette (red/blue) so
-// "race" and "player" never collide visually. Single source of truth
-// in `crate::colors` — this module re-exports under the Library's
-// legacy names for grep-friendliness at call sites.
-pub(super) const RACE_COLOR_TERRAN: Color32 = RACE_TERRAN;
-pub(super) const RACE_COLOR_PROTOSS: Color32 = RACE_PROTOSS;
-pub(super) const RACE_COLOR_ZERG: Color32 = RACE_ZERG;
+/// Largura fixa da zona direita (matchup code + W/L). Garante que a
+/// coluna fique alinhada entre linhas, independentemente do comprimento
+/// dos nomes dos jogadores. Calibrada para caber "TvZ" + gap + "LOSS"
+/// confortavelmente, sem cortar em fontes maiores do slider de tamanho.
+const RIGHT_ZONE_W: f32 = 110.0;
 
-/// Cor da borda esquerda baseada na raça.
-fn race_border_color(race: &str) -> Color32 {
-    race_color(race)
-}
-
-/// Zona central (fixa) do entry row. Hospeda W/L dot, badge de matchup
-/// e ΔMMR. Largura escolhida para caber o badge (~64px) e paddings sem
-/// quebrar em fontes maiores do slider de tamanho.
-const CENTER_ZONE_W: f32 = 220.0;
-/// Zona direita (fixa): hora, data e botão "abrir".
-const RIGHT_ZONE_W: f32 = 140.0;
-
-/// Paleta da linha atualmente aberta no painel de análise. Azul aço
-/// apagado — convenção de "item ativo" que não compete com o verde
-/// de WIN nem com o vermelho de LOSS.
+// Paleta dos estados visuais do row.
 const SELECTED_FILL: Color32 = Color32::from_rgb(32, 44, 60);
 const SELECTED_STROKE: Color32 = Color32::from_rgb(110, 150, 200);
-const SELECTED_LABEL: Color32 = Color32::from_rgb(170, 200, 235);
+const CURRENT_STROKE: Color32 = Color32::from_rgb(80, 110, 150);
 
 pub(super) fn entry_row(
     ui: &mut Ui,
     entry: &LibraryEntry,
     is_current: bool,
+    is_selected: bool,
     config: &AppConfig,
     row_h: f32,
-) -> bool {
+) -> RowOutcome {
     let lang = config.language;
     let loadable = entry.meta.is_loadable();
-    // "Selected" = azul aço apagado, padrão convencional de item ativo.
-    // Verde ficava reservado para o sentido WIN (ACCENT_SUCCESS) e
-    // saturava a linha quando o usuário clicava numa vitória.
-    let fill = if is_current {
+
+    let fill = if is_selected {
         SELECTED_FILL
     } else if matches!(entry.meta, MetaState::Unsupported(_)) {
         Color32::from_gray(22)
     } else {
         Color32::from_gray(28)
     };
-    let stroke = if is_current {
+    let stroke = if is_selected {
         egui::Stroke::new(1.0, SELECTED_STROKE)
+    } else if is_current {
+        egui::Stroke::new(1.0, CURRENT_STROKE)
     } else if matches!(entry.meta, MetaState::Unsupported(_)) {
         egui::Stroke::new(0.5, Color32::from_gray(50))
     } else {
@@ -159,14 +164,14 @@ pub(super) fn entry_row(
         .fill(fill)
         .stroke(stroke)
         .corner_radius(4.0)
-        .inner_margin(egui::Margin::symmetric(8, 6))
+        .inner_margin(egui::Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.set_min_height(content_h);
 
             match &entry.meta {
                 MetaState::Parsed(meta) => {
-                    render_parsed(ui, meta, config, is_current, content_h);
+                    render_parsed(ui, meta, config, content_h);
                 }
                 MetaState::Pending => {
                     ui.label(RichText::new(&entry.filename).monospace());
@@ -199,331 +204,213 @@ pub(super) fn entry_row(
             }
         });
 
-    // Pinta a borda esquerda colorida por raça (sobre o frame já renderizado).
-    if let MetaState::Parsed(meta) = &entry.meta {
-        let user_idx = find_user_index(meta, config).unwrap_or(0);
-        let border_color = race_border_color(&meta.players[user_idx].race);
-        let rect = inner.response.rect;
-        let border_rect = egui::Rect::from_min_max(
-            rect.left_top(),
-            egui::pos2(rect.left() + 3.5, rect.bottom()),
-        );
-        ui.painter().rect_filled(border_rect, 4.0, border_color);
-    }
-
-    loadable && inner.response.interact(Sense::click()).clicked()
-}
-
-/// Internal split of `entry_row` for `MetaState::Parsed` entries — the
-/// three-zone layout: left (flex, match summary), center (fixed, outcome
-/// e matchup badge e ΔMMR), right (fixed, time e date).
-fn render_parsed(
-    ui: &mut Ui,
-    meta: &ParsedMeta,
-    config: &AppConfig,
-    is_current: bool,
-    content_h: f32,
-) {
-    let user_idx = find_user_index(meta, config);
-    let has_user = user_idx.is_some();
-    let mc = matchup_code(meta, config);
-
-    let vs_label = if meta.players.len() == 2 {
-        format!("{} vs {}", meta.players[0].name, meta.players[1].name)
+    let row_resp = inner.response.interact(Sense::click());
+    let mut outcome = if loadable && row_resp.double_clicked() {
+        RowOutcome::Load
+    } else if loadable && row_resp.clicked() {
+        RowOutcome::Select
     } else {
-        meta.players
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect::<Vec<_>>()
-            .join(" vs ")
+        RowOutcome::None
     };
 
-    let dur = format!(
-        "{:02}:{:02}",
-        meta.duration_seconds / 60,
-        meta.duration_seconds % 60
-    );
+    // Menu de contexto: "encontrar relacionados" (1v1 parseado).
+    if let MetaState::Parsed(meta) = &entry.meta {
+        if meta.players.len() == 2 {
+            row_resp.context_menu(|ui| {
+                let user_idx = find_user_index(meta, config);
+                ui.label(
+                    RichText::new(t("library.related.menu.title", lang))
+                        .small()
+                        .color(LABEL_DIM),
+                );
 
-    let mmr_line = mmr_line_text(meta, user_idx);
-    let (short_date, time_part) = split_datetime(&meta.datetime);
+                if let Some(ui_idx) = user_idx {
+                    let opp_name = meta.players[1 - ui_idx].name.clone();
+                    if ui
+                        .button(tf(
+                            "library.related.menu.vs_opponent",
+                            lang,
+                            &[("name", &opp_name)],
+                        ))
+                        .clicked()
+                    {
+                        outcome = RowOutcome::ApplyRelated(RelatedFilter::Opponent(opp_name));
+                        ui.close();
+                    }
+                }
 
-    // Posicionamento por rects absolutos: `ui.horizontal` + `allocate_ui_with_layout`
-    // deixavam cada zona variar de X quando o conteúdo da esquerda era largo
-    // (o `allocate_*` cresce com o conteúdo e empurra os siblings). Com rects
-    // explícitos, as três zonas ficam pixel-perfect alinhadas entre linhas.
-    //
-    // Âncora da zona central: meio real da strip — não o "meio do que sobra
-    // depois da esquerda". Com a esquerda sendo flex, ancorar via offset
-    // deixava a badge colada na direita em janelas largas.
+                let mc = matchup_code(meta, config);
+                if !mc.is_empty()
+                    && ui
+                        .button(tf(
+                            "library.related.menu.same_matchup",
+                            lang,
+                            &[("code", &mc)],
+                        ))
+                        .clicked()
+                {
+                    outcome = RowOutcome::ApplyRelated(RelatedFilter::Matchup(mc));
+                    ui.close();
+                }
+
+                if ui
+                    .button(tf(
+                        "library.related.menu.same_map",
+                        lang,
+                        &[("map", &meta.map)],
+                    ))
+                    .clicked()
+                {
+                    outcome = RowOutcome::ApplyRelated(RelatedFilter::Map(meta.map.clone()));
+                    ui.close();
+                }
+
+                if let Some(op) = find_user_player(meta, config).and_then(|p| p.opening.clone()) {
+                    if ui
+                        .button(tf(
+                            "library.related.menu.same_opening",
+                            lang,
+                            &[("opening", &op)],
+                        ))
+                        .clicked()
+                    {
+                        outcome = RowOutcome::ApplyRelated(RelatedFilter::Opening(op));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    }
+
+    outcome
+}
+
+/// Layout do row 1v1 parseado: à esquerda apenas "{P1} vs {P2}"; à
+/// direita o código do matchup (com letras tingidas pela raça) e o
+/// resultado WIN/LOSS quando há usuário identificado. Tudo em uma
+/// única strip horizontal — mapa e demais detalhes ficam no card.
+fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: f32) {
+    let user_idx = find_user_index(meta, config);
+
     let total_w = ui.available_width();
     let (strip_rect, _) = ui.allocate_exact_size(
         egui::vec2(total_w, content_h),
         Sense::hover(),
     );
 
-    let center_x_start =
-        ((total_w - CENTER_ZONE_W) / 2.0).clamp(180.0, total_w - CENTER_ZONE_W - RIGHT_ZONE_W);
-
-    let left_rect = egui::Rect::from_min_size(
-        strip_rect.left_top(),
-        egui::vec2(center_x_start, content_h),
-    );
-    let center_rect = egui::Rect::from_min_size(
-        strip_rect.left_top() + egui::vec2(center_x_start, 0.0),
-        egui::vec2(CENTER_ZONE_W, content_h),
-    );
     let right_rect = egui::Rect::from_min_size(
         strip_rect.right_top() - egui::vec2(RIGHT_ZONE_W, 0.0),
         egui::vec2(RIGHT_ZONE_W, content_h),
     );
+    let left_rect = egui::Rect::from_min_max(
+        strip_rect.left_top(),
+        egui::pos2(strip_rect.right() - RIGHT_ZONE_W, strip_rect.bottom()),
+    );
 
-    // ── LEFT ZONE (flex) ─────────────────────────────────────
+    // ── LEFT: "Player1 vs Player2" ───────────────────────────
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(left_rect)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
-            // `shrink_clip_rect` (intersect) — NOT `set_clip_rect` (replace).
-            // `left_rect` is derived from `allocate_exact_size`, which doesn't
-            // bounds-check against the parent ui's clip. For the last visible
-            // row in a ScrollArea, `left_rect` can spill below the
-            // ScrollArea's `content_clip_rect`. A `set_clip_rect(left_rect)`
-            // call would REPLACE the narrower scroll clip with this broader
-            // rect — letting the row's name/map/MMR text bleed into whatever
-            // is rendered below the ScrollArea (in our case, the bottom
-            // status bar). Intersecting preserves the scroll-area clip.
             ui.shrink_clip_rect(left_rect);
-            ui.label(RichText::new(&vs_label).strong().color(if is_current {
-                SELECTED_LABEL
+            ui.spacing_mut().item_spacing.x = SPACE_S;
+
+            if meta.players.len() == 2 {
+                player_label(ui, &meta.players[0], user_idx == Some(0));
+                ui.label(RichText::new(t("common.vs", config.language)).color(LABEL_DIM));
+                player_label(ui, &meta.players[1], user_idx == Some(1));
             } else {
-                Color32::WHITE
-            }));
-            ui.small(
-                RichText::new(format!("🗺 {} • ⏱ {dur}", meta.map)).color(LABEL_DIM),
-            );
-            let mmr_color = if has_user { LABEL_SOFT } else { LABEL_DIM };
-            ui.small(RichText::new(mmr_line).color(mmr_color));
-            ui.small(RichText::new(opening_line_text(meta, user_idx)).color(LABEL_DIM));
+                for (i, p) in meta.players.iter().enumerate() {
+                    if i > 0 {
+                        ui.label(RichText::new(t("common.vs", config.language)).color(LABEL_DIM));
+                    }
+                    player_label(ui, p, user_idx == Some(i));
+                }
+            }
         },
     );
 
-    // ── CENTER ZONE (fixed) ──────────────────────────────────
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(center_rect)
-            .layout(egui::Layout::top_down(egui::Align::Center)),
-        |ui| {
-            draw_outcome_dot(ui, meta, user_idx, config);
-            draw_matchup_badge(ui, meta, user_idx, &mc, config);
-            draw_mmr_delta(ui, meta, user_idx, config);
-        },
-    );
-
-    // ── RIGHT ZONE (fixed) ───────────────────────────────────
+    // ── RIGHT: matchup code · WIN/LOSS ───────────────────────
+    // Layout right-to-left: WIN/LOSS encosta na borda direita; o
+    // código do matchup vem logo antes. Ordem posicional (Race[0] vs
+    // Race[1]), independente de quem é o usuário — casa com a ordem
+    // dos nomes na zona esquerda. Spacing zero aqui mantém as três
+    // letras do matchup (`ZvT`) grudadas; o gap entre matchup e W/L
+    // é injetado manualmente via `add_space`, condicional à existência
+    // do rótulo W/L.
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(right_rect)
-            .layout(egui::Layout::top_down(egui::Align::Max)),
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
         |ui| {
-            ui.label(
-                RichText::new(&time_part)
-                    .strong()
-                    .size(size_body(config))
-                    .color(LABEL_STRONG),
-            );
-            ui.small(RichText::new(&short_date).color(LABEL_DIM));
-        },
-    );
-}
+            ui.spacing_mut().item_spacing.x = 0.0;
 
-/// Linha compacta com a abertura de cada jogador:
-///   "PlayerA: 14 Pool — Speedling · PlayerB: 1 Rax FE — Stim Timing"
-/// Quando há usuário identificado, ele vem primeiro. Jogadores sem
-/// `opening` (falha de extração) recebem "—" para manter o formato.
-fn opening_line_text(meta: &ParsedMeta, user_idx: Option<usize>) -> String {
-    if meta.players.len() != 2 {
-        return meta
-            .players
-            .iter()
-            .map(|p| format!("{}: {}", p.name, p.opening.as_deref().unwrap_or("—")))
-            .collect::<Vec<_>>()
-            .join(" · ");
-    }
-    let (first, second) = match user_idx {
-        Some(0) => (0, 1),
-        Some(1) => (1, 0),
-        _ => (0, 1),
-    };
-    let a = &meta.players[first];
-    let b = &meta.players[second];
-    format!(
-        "{}: {} · {}: {}",
-        a.name,
-        a.opening.as_deref().unwrap_or("—"),
-        b.name,
-        b.opening.as_deref().unwrap_or("—"),
-    )
-}
-
-fn mmr_line_text(meta: &ParsedMeta, user_idx: Option<usize>) -> String {
-    let mmrs: Vec<String> = meta
-        .players
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let v = match p.mmr {
-                Some(v) => v.to_string(),
-                None => "—".into(),
+            // (1) WIN/LOSS — só quando há usuário identificado.
+            let result = user_idx
+                .and_then(|i| meta.players.get(i))
+                .map(|p| p.result.as_str());
+            let has_result = match result {
+                Some("Win") => {
+                    ui.label(
+                        RichText::new(t("library.outcome.win", config.language))
+                            .size(size_caption(config))
+                            .strong()
+                            .color(ACCENT_SUCCESS),
+                    );
+                    true
+                }
+                Some("Loss") => {
+                    ui.label(
+                        RichText::new(t("library.outcome.loss", config.language))
+                            .size(size_caption(config))
+                            .strong()
+                            .color(ACCENT_DANGER),
+                    );
+                    true
+                }
+                _ => false,
             };
-            if user_idx == Some(i) {
-                format!("‹{v}›")
-            } else {
-                v
+
+            // (2) Matchup code "ZvT" — letras tingidas pela raça,
+            // sem espaço entre elas (spacing zerado acima).
+            if meta.players.len() == 2 {
+                if has_result {
+                    ui.add_space(SPACE_S);
+                }
+                let r1 = race_letter(&meta.players[1].race);
+                ui.label(
+                    RichText::new(r1.to_string())
+                        .strong()
+                        .monospace()
+                        .size(size_caption(config))
+                        .color(race_color(&meta.players[1].race)),
+                );
+                ui.label(
+                    RichText::new("v")
+                        .monospace()
+                        .size(size_caption(config))
+                        .color(LABEL_DIM),
+                );
+                let r0 = race_letter(&meta.players[0].race);
+                ui.label(
+                    RichText::new(r0.to_string())
+                        .strong()
+                        .monospace()
+                        .size(size_caption(config))
+                        .color(race_color(&meta.players[0].race)),
+                );
             }
-        })
-        .collect();
-    format!("MMR {}", mmrs.join(" / "))
-}
-
-/// W/L outcome dot in the center zone. Hidden (empty spacer) when the
-/// user isn't identified — keeps the row height constant across rows
-/// to preserve virtualization.
-fn draw_outcome_dot(ui: &mut Ui, meta: &ParsedMeta, user_idx: Option<usize>, config: &AppConfig) {
-    let height = size_body(config);
-    let result = user_idx.and_then(|i| meta.players.get(i)).map(|p| p.result.as_str());
-    match result {
-        Some("Win") => {
-            ui.label(
-                RichText::new("WIN")
-                    .size(size_caption(config))
-                    .strong()
-                    .color(ACCENT_SUCCESS),
-            );
-        }
-        Some("Loss") => {
-            ui.label(
-                RichText::new("LOSS")
-                    .size(size_caption(config))
-                    .strong()
-                    .color(ACCENT_DANGER),
-            );
-        }
-        _ => {
-            // Blank line of same height preserves vertical layout.
-            ui.allocate_exact_size(egui::vec2(1.0, height), Sense::hover());
-        }
-    }
-}
-
-/// Painted two-half matchup badge. Left half uses the user's race colour
-/// (or player-0's race if no user), right half the opponent's. Centered
-/// white text displays the matchup code (e.g. "TvZ").
-fn draw_matchup_badge(
-    ui: &mut Ui,
-    meta: &ParsedMeta,
-    user_idx: Option<usize>,
-    code: &str,
-    config: &AppConfig,
-) {
-    let badge_w = 70.0;
-    let badge_h = size_body(config) + 8.0;
-    let (rect, _resp) = ui.allocate_exact_size(egui::vec2(badge_w, badge_h), Sense::hover());
-
-    if meta.players.len() < 2 {
-        ui.painter()
-            .rect_filled(rect, 4.0, Color32::from_gray(40));
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            code,
-            FontId::proportional(size_caption(config)),
-            LABEL_STRONG,
-        );
-        return;
-    }
-
-    let (first_idx, second_idx) = match user_idx {
-        Some(0) => (0, 1),
-        Some(1) => (1, 0),
-        _ => (0, 1),
-    };
-    let left_color = dim(race_color(&meta.players[first_idx].race));
-    let right_color = dim(race_color(&meta.players[second_idx].race));
-    let mid = rect.center().x;
-    let left_rect = Rect::from_min_max(rect.left_top(), egui::pos2(mid, rect.bottom()));
-    let right_rect = Rect::from_min_max(egui::pos2(mid, rect.top()), rect.right_bottom());
-
-    ui.painter().rect_filled(
-        left_rect,
-        CornerRadius {
-            nw: 4,
-            sw: 4,
-            ne: 0,
-            se: 0,
         },
-        left_color,
     );
-    ui.painter().rect_filled(
-        right_rect,
-        CornerRadius {
-            nw: 0,
-            sw: 0,
-            ne: 4,
-            se: 4,
-        },
-        right_color,
-    );
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        code,
-        FontId::proportional(size_body(config)),
-        Color32::WHITE,
-    );
-    ui.add_space(SPACE_XS);
 }
 
-/// ±ΔMMR line. Positive = green with '+', negative = red, zero = dim.
-/// Hidden (blank spacer) when either MMR is missing or no user.
-fn draw_mmr_delta(ui: &mut Ui, meta: &ParsedMeta, user_idx: Option<usize>, config: &AppConfig) {
-    let height = size_caption(config);
-    let delta: Option<(i32, Color32, String)> = (|| {
-        let user_idx = user_idx?;
-        if meta.players.len() < 2 {
-            return None;
-        }
-        let user_mmr = meta.players.get(user_idx)?.mmr?;
-        let opp_idx = 1 - user_idx;
-        let opp_mmr = meta.players.get(opp_idx)?.mmr?;
-        let d = user_mmr - opp_mmr;
-        let (color, text) = if d > 0 {
-            (ACCENT_SUCCESS, format!("Δ +{d}"))
-        } else if d < 0 {
-            (ACCENT_DANGER, format!("Δ {d}"))
-        } else {
-            (LABEL_DIM, "Δ 0".to_string())
-        };
-        Some((d, color, text))
-    })();
-    match delta {
-        Some((_, color, text)) => {
-            ui.label(RichText::new(text).size(size_caption(config)).color(color));
-        }
-        None => {
-            ui.allocate_exact_size(egui::vec2(1.0, height + SPACE_S), Sense::hover());
-        }
-    }
-}
-
-/// Slightly dims a race colour so the white overlay text keeps contrast
-/// on the matchup badge. The raw race palette is tuned for the left
-/// accent stripe (a 3 px bar), which doesn't need text on top of it.
-fn dim(c: Color32) -> Color32 {
-    Color32::from_rgb(
-        (c.r() as u16 * 7 / 10) as u8,
-        (c.g() as u16 * 7 / 10) as u8,
-        (c.b() as u16 * 7 / 10) as u8,
-    )
+/// Apenas o nome do jogador. Usuário registrado recebe peso `strong`
+/// para destacá-lo de relance entre as linhas.
+fn player_label(ui: &mut Ui, p: &PlayerMeta, is_user: bool) {
+    let name = RichText::new(&p.name).color(Color32::WHITE);
+    let name = if is_user { name.strong() } else { name };
+    ui.label(name);
 }
 
 pub(super) fn race_letter(race: &str) -> char {

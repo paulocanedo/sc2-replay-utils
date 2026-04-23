@@ -23,7 +23,12 @@ use crate::library::{MetaState, ParsedMeta, PlayerMeta};
 // `time_local_offset` e ficava a 2×offset do horário local correto).
 // Entries cacheadas com a string antiga precisam ser descartadas para
 // que o parser re-rode e grave o horário local correto.
-const CACHE_VERSION: u32 = 4;
+//
+// CACHE_VERSION bump 4→5: adicionados `version` (string `5.0.13.92440`)
+// e `cache_handles` (Vec<String>) ao `CachedParsedMeta` para alimentar o
+// card lateral de detalhes da biblioteca (versão do replay + minimapa
+// resolvível pelo cache do Battle.net) sem reparsear o MPQ.
+const CACHE_VERSION: u32 = 5;
 const CACHE_FILE: &str = "library_meta.bin";
 
 // ── Tipos serializáveis (desacoplados dos tipos da UI) ───────────────
@@ -54,6 +59,11 @@ struct CachedParsedMeta {
     datetime: String,
     duration_seconds: u32,
     game_loops: u32,
+    /// Versão do jogo (`5.0.13.92440`) — exibida no card lateral.
+    version: Option<String>,
+    /// `m_cacheHandles` necessário para resolver o minimapa do replay
+    /// pelo Battle.net Cache sem reparsear o MPQ.
+    cache_handles: Vec<String>,
     players: Vec<CachedPlayerMeta>,
 }
 
@@ -86,6 +96,8 @@ fn to_cached_meta(meta: &ParsedMeta) -> CachedParsedMeta {
         datetime: meta.datetime.clone(),
         duration_seconds: meta.duration_seconds,
         game_loops: meta.game_loops,
+        version: meta.version.clone(),
+        cache_handles: meta.cache_handles.clone(),
         players: meta
             .players
             .iter()
@@ -106,6 +118,8 @@ fn from_cached_meta(c: CachedParsedMeta) -> ParsedMeta {
         datetime: c.datetime,
         duration_seconds: c.duration_seconds,
         game_loops: c.game_loops,
+        version: c.version,
+        cache_handles: c.cache_handles,
         players: c
             .players
             .into_iter()

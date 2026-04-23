@@ -39,6 +39,7 @@
 //   - `modals`     — janelas modais (language prompt, about).
 
 mod central;
+mod library_detail;
 mod menu_bar;
 mod modals;
 mod state;
@@ -82,6 +83,24 @@ impl eframe::App for AppState {
 
         let lang = self.config.language;
 
+        // -------- Startup disclaimer (modal) --------
+        // Shown on every launch until the user explicitly opts out via
+        // the "don't show again" checkbox. While open, we paint nothing
+        // else — the user must acknowledge before reaching the rest of
+        // the UI. The same content is mirrored in Help → About so it
+        // remains accessible after dismissal.
+        if !self.config.disclaimer_acknowledged && !self.disclaimer_dismissed_session {
+            modals::disclaimer_prompt(
+                &ctx,
+                lang,
+                &mut self.disclaimer_dont_show_again,
+                &mut self.disclaimer_dismissed_session,
+                &mut self.config,
+            );
+            ctx.request_repaint();
+            return;
+        }
+
         // Polling do watcher ANTES de qualquer painel.
         self.poll_watcher(&ctx);
         // Drena resultados do worker da biblioteca.
@@ -105,6 +124,14 @@ impl eframe::App for AppState {
         // motivo o estado divergir, força fallback para a biblioteca.
         if self.screen == Screen::Analysis && self.loaded.is_none() {
             self.screen = Screen::Library;
+        }
+
+        // F5 atalha o "Refresh library" do menu View. Só dispara na tela
+        // de biblioteca para não surpreender em Analysis/Rename.
+        if self.screen == Screen::Library
+            && ctx.input(|i| i.key_pressed(egui::Key::F5))
+        {
+            self.refresh_library();
         }
 
         // Top-level panels: use `.show(ctx, ...)` so each call updates the
