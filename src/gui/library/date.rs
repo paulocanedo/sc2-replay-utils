@@ -8,7 +8,7 @@
 
 use super::filter::DateRange;
 
-pub(super) fn today_str() -> String {
+pub fn today_str() -> String {
     #[cfg(target_os = "windows")]
     {
         use std::mem::MaybeUninit;

@@ -120,6 +120,36 @@ impl eframe::App for AppState {
             }
         }
 
+        // Auto-detect do DateRange no primeiro launch (config sem
+        // `library_date_range` persistido). Só roda depois que o scan
+        // termina e todas as entries viraram `Parsed`. Se nenhum replay
+        // for encontrado, não persistimos nada — o próximo launch tenta
+        // de novo. A flag garante execução única por sessão.
+        if self.pending_date_range_autodetect
+            && !self.library.scanning
+            && self.library.pending_count() == 0
+        {
+            self.pending_date_range_autodetect = false;
+            let today = library::today_str();
+            if let Some(chosen) =
+                library::detect_best_date_range(&self.library.entries, &today)
+            {
+                self.library_filter.date_range = chosen;
+                self.config.library_date_range = Some(chosen);
+                if let Err(e) = self.config.save() {
+                    self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
+                } else {
+                    let range_label = library::date_range_label(chosen, &self.config);
+                    self.set_toast(tf(
+                        "toast.date_range_autodetect",
+                        lang,
+                        &[("range", &range_label)],
+                    ));
+                }
+                ctx.request_repaint();
+            }
+        }
+
         // Guarda: Tela Análise exige replay carregado. Se por qualquer
         // motivo o estado divergir, força fallback para a biblioteca.
         if self.screen == Screen::Analysis && self.loaded.is_none() {

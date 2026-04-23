@@ -49,7 +49,10 @@ pub struct AppConfig {
     /// Help → About). The same content is mirrored in the About window.
     pub disclaimer_acknowledged: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
-    pub library_date_range: DateRange,
+    /// `None` até o usuário (ou o auto-detect do primeiro launch) fixar
+    /// uma escolha. Configs antigos que já tinham o valor serializado
+    /// deserializam como `Some(...)` e pulam o auto-detect.
+    pub library_date_range: Option<DateRange>,
     /// Filtro de raça do usuário na biblioteca (salvo entre sessões).
     /// `None` = todas as raças. Valores válidos: `'T'`, `'P'`, `'Z'`.
     pub library_race: Option<char>,
@@ -81,7 +84,7 @@ impl Default for AppConfig {
             language: Language::default(),
             language_selected: false,
             disclaimer_acknowledged: false,
-            library_date_range: DateRange::default(),
+            library_date_range: None,
             library_race: None,
             insight_worker_minutes: default_insight_worker_minutes(),
         }

@@ -358,7 +358,7 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn date_range_label(r: DateRange, config: &AppConfig) -> String {
+pub fn date_range_label(r: DateRange, config: &AppConfig) -> String {
     let lang = config.language;
     match r {
         DateRange::All => t("library.date.always_full", lang).to_string(),
