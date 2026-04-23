@@ -111,7 +111,7 @@ fn render_body(ui: &mut Ui, config: &AppConfig, wp: WorkerPotential, minutes: u3
     let key = match wp.limited_by {
         LimitingFactor::Bases => "insight.worker_potential.limited_by_bases",
         LimitingFactor::ChronoBudget => "insight.worker_potential.limited_by_chrono_budget",
-        LimitingFactor::LarvaSupply80 => "insight.worker_potential.limited_by_larva80",
+        LimitingFactor::LarvaSupply => "insight.worker_potential.limited_by_larva",
         LimitingFactor::NoLimit => "insight.worker_potential.limited_by_none",
     };
     ui.label(RichText::new(t(key, lang)).italics());

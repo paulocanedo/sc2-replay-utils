@@ -358,13 +358,13 @@ rename.status.error_marker = erros
 # ── Aba Insights ────────────────────────────────────────────────────────────
 insights.pov_label = Ponto de vista
 insight.worker_potential.title = Potencial de produção de workers até o minuto {minutes}
-insight.worker_potential.help = Compara quantos workers você realmente **produziu** até o minuto {minutes} contra quantos poderia ter produzido com produção ininterrupta, respeitando o timing das bases, os chronos que você gastou em probes (Protoss) e a regra de 80% das larvas viram drones (Zerg). Perdas de workers são ignoradas — o foco é expor lapsos de macro, não combate. Parte de 12 workers iniciais.
+insight.worker_potential.help = Compara quantos workers você realmente **produziu** até o minuto {minutes} contra quantos poderia ter produzido com produção ininterrupta, respeitando o timing das bases, os chronos que você gastou em probes (Protoss) e, para Zerg, a oferta de larvas descontadas as unidades não-drone que você produziu. Perdas de workers são ignoradas — o foco é expor lapsos de macro, não combate. Parte de 12 workers iniciais.
 insight.worker_potential.produced = Você fez
 insight.worker_potential.potential = Poderia fazer
 insight.worker_potential.gap_label = Diferença
 insight.worker_potential.limited_by_bases = Limitado por expansões tardias
 insight.worker_potential.limited_by_chrono_budget = Limitado pelos chronos que você gastou em probes
-insight.worker_potential.limited_by_larva80 = Limitado pela regra de 80% drones/larva
+insight.worker_potential.limited_by_larva = Limitado pela oferta de larvas e unidades não-drone produzidas
 insight.worker_potential.limited_by_none = Produção rodou na capacidade máxima
 insight.worker_potential.clamped_caveat = O replay terminou antes do minuto {minutes}.
 
