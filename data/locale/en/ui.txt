@@ -88,8 +88,6 @@ topbar.detail.start = Started
 topbar.detail.loops = Loops
 topbar.detail.speed = Speed
 topbar.speed_value = {value} loops/s
-topbar.rename_tooltip = Rename replays…
-topbar.open = Open replay…
 
 # Race full names shown below the player name.
 race.terran = Terran

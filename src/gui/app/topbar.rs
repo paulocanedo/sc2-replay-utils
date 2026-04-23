@@ -122,8 +122,6 @@ impl AppState {
     pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut back_clicked = false;
-        let mut open_clicked = false;
-        let mut rename_clicked = false;
         if let Some(loaded) = self.loaded.as_ref() {
             let user_idx = self
                 .loaded
@@ -143,27 +141,11 @@ impl AppState {
                         user_idx,
                         lang,
                         &mut back_clicked,
-                        &mut open_clicked,
-                        &mut rename_clicked,
                     );
                 });
         }
         if back_clicked {
             self.screen = Screen::Library;
-        }
-        if open_clicked {
-            if let Some(p) = rfd::FileDialog::new()
-                .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
-                .pick_file()
-            {
-                self.load_path(p);
-            }
-        }
-        if rename_clicked {
-            self.rename_previews =
-                crate::rename::generate_previews(&self.library, &self.rename_template);
-            self.rename_status = None;
-            self.screen = Screen::Rename;
         }
 
         Panel::top("tabs").show(ctx, |ui| {
@@ -179,9 +161,9 @@ impl AppState {
 }
 
 /// Renders the rich analysis top bar: back-to-library affordance, map
-/// summary, per-player chips, details popover, rename/open shortcuts.
-/// Fills what used to be the right-side `match_info` sidebar so the
-/// tab content below can keep 100% of the viewport width.
+/// summary, per-player chips and a details popover. Open/rename live
+/// in the menu bar (File → Open replay…, View → Rename), so this bar
+/// stays focused on the loaded replay's identity.
 fn analysis_topbar(
     ui: &mut egui::Ui,
     loaded: &LoadedReplay,
@@ -189,8 +171,6 @@ fn analysis_topbar(
     user_idx: Option<usize>,
     lang: Language,
     back_clicked: &mut bool,
-    open_clicked: &mut bool,
-    rename_clicked: &mut bool,
 ) {
     let tl = &loaded.timeline;
     let matchup = build_matchup(&tl.players);
@@ -256,20 +236,13 @@ fn analysis_topbar(
                 });
         });
 
-        // ── Flex spacer + right cluster ─────────────────────────
+        // ── Flex spacer + right cluster (apenas chips) ──────────
+        // Open/rename foram movidos para a menu bar (File → Open replay
+        // e View → Rename) — a topbar de análise agora só carrega
+        // identidade do replay carregado.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if icon_button(ui, "📂", t("topbar.open", lang)).clicked() {
-                *open_clicked = true;
-            }
-            ui.add_space(SPACE_XS);
-            // `✏` (BMP variant) renders with the default font; `✎` does not.
-            if icon_button(ui, "✏", t("topbar.rename_tooltip", lang)).clicked() {
-                *rename_clicked = true;
-            }
-            ui.add_space(SPACE_M);
-
-            // Player chips flow right-to-left so P2 sits next to the
-            // action buttons. We draw P2 first, then "vs", then P1.
+            // Player chips flow right-to-left so P2 sits at the far
+            // right edge. We draw P2 first, then "vs", then P1.
             let players = &tl.players;
             if players.len() >= 2 {
                 player_chip_topbar(ui, &players[1], 1, user_idx == Some(1), config, lang);
