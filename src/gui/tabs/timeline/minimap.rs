@@ -33,6 +33,12 @@ const MARKER_DURATION_LOOPS: u32 = 23;
 /// Lado do marcador (X/Ø) em pixels.
 const MARKER_SIZE: f32 = 8.0;
 
+/// Tamanho mínimo (lado em px) a partir do qual um ícone é sobreposto
+/// ao quadrado colorido da entidade. Abaixo disso (workers pequenos, 4
+/// px), a imagem vira pixel mush ilegível — só o fill sólido. 6 px já
+/// resolve silhuetas razoáveis (unidades ≥2 supply e todas estruturas).
+const MIN_ICON_SIZE_PX: f32 = 6.0;
+
 pub(super) fn minimap_with_size(
     ui: &mut Ui,
     loaded: &LoadedReplay,
@@ -112,14 +118,16 @@ pub(super) fn minimap_with_size(
             for (i, entities) in entities_per_player.iter().enumerate() {
                 let color = player_slot_color_bright(i);
                 for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
-                    draw_unit(&painter, rect, e.x, e.y, bounds, e.side, color, false);
+                    let icon = unit_icon(&e.entity_type);
+                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, e.side, color, false, icon);
                 }
                 // Estruturas renderizadas por cima das unidades, com
                 // borda branca para destacar. Bases (townhalls) usam
                 // `TOWNHALL_BASE_SIZE` (2× uma estrutura normal) —
                 // âncora visual das bases dos jogadores no minimapa.
                 for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
-                    draw_unit(&painter, rect, e.x, e.y, bounds, e.side, color, true);
+                    let icon = structure_icon(&e.entity_type);
+                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, e.side, color, true, icon);
                 }
             }
 
@@ -334,6 +342,7 @@ fn draw_resource(painter: &egui::Painter, rect: Rect, node: ResourceNode, bounds
 }
 
 fn draw_unit(
+    ui: &mut Ui,
     painter: &egui::Painter,
     rect: Rect,
     x: f32,
@@ -342,6 +351,7 @@ fn draw_unit(
     side: f32,
     color: Color32,
     structure: bool,
+    icon: Option<egui::ImageSource<'static>>,
 ) {
     let center = to_screen(rect, x, y, bounds);
     let half = side * 0.5;
@@ -349,7 +359,22 @@ fn draw_unit(
         pos2(center.x - half, center.y - half),
         pos2(center.x + half, center.y + half),
     );
+    // Fill colorido primeiro: serve de background pra pixels
+    // transparentes do ícone e, com o inset abaixo, fica visível como
+    // anel fino — preserva a identificação do jogador mesmo com o
+    // sprite por cima. Entidades muito pequenas (workers de 4 px) ficam
+    // só com o quadrado sólido.
     painter.rect_filled(r, 0.0, color);
+    if side >= MIN_ICON_SIZE_PX {
+        if let Some(icon) = icon {
+            let inset = (side * 0.1).max(0.5);
+            let icon_r = Rect::from_min_max(
+                pos2(r.min.x + inset, r.min.y + inset),
+                pos2(r.max.x - inset, r.max.y - inset),
+            );
+            Image::new(icon).paint_at(ui, icon_r);
+        }
+    }
     if structure {
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE), StrokeKind::Outside);
     }
