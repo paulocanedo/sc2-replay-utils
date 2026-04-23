@@ -25,8 +25,6 @@ pub struct AppConfig {
     pub user_nicknames: Vec<String>,
     /// Limite padrão de tempo em segundos para os extracts (0 = sem limite).
     pub default_max_time: u32,
-    /// Tema escuro (true) ou claro (false).
-    pub dark_mode: bool,
     /// Carregar o replay mais recente automaticamente ao abrir o app.
     pub auto_load_latest: bool,
     /// Habilitar o file watcher na pasta do SC2.
@@ -76,7 +74,6 @@ impl Default for AppConfig {
             working_dir: None,
             user_nicknames: Vec::new(),
             default_max_time: 0,
-            dark_mode: true,
             auto_load_latest: false,
             watch_replays: true,
             auto_load_on_new_replay: true,

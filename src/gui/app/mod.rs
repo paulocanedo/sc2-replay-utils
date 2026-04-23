@@ -206,14 +206,8 @@ impl eframe::App for AppState {
 }
 
 pub fn apply_style(ctx: &Context, config: &AppConfig) {
-    let mut visuals = if config.dark_mode {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-    if config.dark_mode {
-        apply_dark_palette(&mut visuals);
-    }
+    let mut visuals = egui::Visuals::dark();
+    apply_dark_palette(&mut visuals);
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.global_style()).clone();
