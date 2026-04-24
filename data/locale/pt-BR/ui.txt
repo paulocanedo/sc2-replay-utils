@@ -119,6 +119,8 @@ settings.nicknames.empty = (nenhum nickname cadastrado)
 settings.nicknames.remove_tooltip = Remover
 settings.nicknames.add_placeholder = Adicionar nickname…
 settings.nicknames.add = Adicionar
+settings.nicknames.suggested = Sugeridos da biblioteca:
+settings.nicknames.suggested.tooltip = Clique para adicionar este nickname
 settings.section.behavior = Comportamento
 settings.max_time.label = max_time padrão (s, 0 = sem limite):
 settings.auto_load_latest = Carregar replay mais recente ao abrir

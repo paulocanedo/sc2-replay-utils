@@ -118,6 +118,8 @@ settings.nicknames.empty = (no nickname registered)
 settings.nicknames.remove_tooltip = Remove
 settings.nicknames.add_placeholder = Add nickname…
 settings.nicknames.add = Add
+settings.nicknames.suggested = Suggested from library:
+settings.nicknames.suggested.tooltip = Click to add this nickname
 settings.section.behavior = Behavior
 settings.max_time.label = Default max_time (s, 0 = no limit):
 settings.auto_load_latest = Load latest replay on startup

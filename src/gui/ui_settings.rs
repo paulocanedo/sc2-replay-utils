@@ -25,6 +25,7 @@ pub fn show(
     open: &mut bool,
     config: &mut AppConfig,
     nickname_buf: &mut String,
+    nickname_suggestions: &[(String, u32)],
 ) -> SettingsOutcome {
     let mut outcome = SettingsOutcome::default();
     if !*open {
@@ -94,6 +95,28 @@ pub fn show(
                     nickname_buf.clear();
                 }
             });
+
+            let suggestions: Vec<&str> = nickname_suggestions
+                .iter()
+                .filter(|(name, _)| !config.is_user(name))
+                .take(3)
+                .map(|(name, _)| name.as_str())
+                .collect();
+            if !suggestions.is_empty() {
+                ui.add_space(4.0);
+                ui.small(t("settings.nicknames.suggested", lang));
+                ui.horizontal_wrapped(|ui| {
+                    for name in suggestions {
+                        if ui
+                            .small_button(format!("+ {name}"))
+                            .on_hover_text(t("settings.nicknames.suggested.tooltip", lang))
+                            .clicked()
+                        {
+                            config.user_nicknames.push(name.to_string());
+                        }
+                    }
+                });
+            }
 
             ui.separator();
             ui.heading(t("settings.section.behavior", lang));
