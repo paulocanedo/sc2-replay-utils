@@ -48,6 +48,13 @@ pub struct AppConfig {
     /// is shown on every launch (the user can always re-read it via
     /// Help → About). The same content is mirrored in the About window.
     pub disclaimer_acknowledged: bool,
+    /// `true` once the user clicked Save on the first-run settings
+    /// screen. While `false`, the settings window is shown as a
+    /// blocking modal on launch with no dismiss path other than Save.
+    /// New field with serde default `false` — existing configs load
+    /// with this unset and go through the flow, but keep all their
+    /// other values.
+    pub settings_confirmed: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
     /// `None` até o usuário (ou o auto-detect do primeiro launch) fixar
     /// uma escolha. Configs antigos que já tinham o valor serializado
@@ -84,6 +91,7 @@ impl Default for AppConfig {
             language: Language::default(),
             language_selected: false,
             disclaimer_acknowledged: false,
+            settings_confirmed: false,
             library_date_range: None,
             library_race: None,
             insight_worker_minutes: default_insight_worker_minutes(),
