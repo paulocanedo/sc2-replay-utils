@@ -41,7 +41,7 @@ struct BuildOrderFilter {
 impl Default for BuildOrderFilter {
     fn default() -> Self {
         Self {
-            show_workers: true,
+            show_workers: false,
             show_units: true,
             show_structures: true,
             show_research: true,
@@ -110,7 +110,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let mut show_icons: bool = ui
         .ctx()
         .data(|d| d.get_temp::<bool>(icons_id))
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     // ── Campo de busca (lupa dentro do input) ────────────────────
     let resp = ui.add_sized(
