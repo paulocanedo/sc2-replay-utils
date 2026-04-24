@@ -200,6 +200,7 @@ impl eframe::App for AppState {
             &mut self.show_settings,
             &mut self.config,
             &mut self.nickname_input,
+            self.library.nickname_frequencies().unwrap_or(&[]),
         );
         if outcome.saved {
             match self.config.save() {

@@ -145,6 +145,35 @@ where
     }
 }
 
+/// Aggregate player-name frequencies across all parsed entries.
+///
+/// Case-insensitive bucketing (`to_lowercase` as key) with display casing
+/// preserved from the first occurrence. Output is sorted by count desc,
+/// then name asc for deterministic presentation. Unsupported/pending/
+/// failed entries are skipped. Does not filter against any nickname list —
+/// callers (e.g. the settings modal) apply `is_user` filtering themselves
+/// so the cache stays independent of `AppConfig::user_nicknames`.
+pub fn compute_nickname_frequencies<'a, I>(entries: I) -> Vec<(String, u32)>
+where
+    I: IntoIterator<Item = &'a LibraryEntry>,
+{
+    let mut counts: HashMap<String, (String, u32)> = HashMap::new();
+    for entry in entries {
+        if let MetaState::Parsed(meta) = &entry.meta {
+            for p in &meta.players {
+                let key = p.name.to_lowercase();
+                counts
+                    .entry(key)
+                    .and_modify(|e| e.1 += 1)
+                    .or_insert_with(|| (p.name.clone(), 1));
+            }
+        }
+    }
+    let mut out: Vec<(String, u32)> = counts.into_values().collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::types::{ParsedMeta, PlayerMeta};
@@ -386,5 +415,28 @@ mod tests {
         assert_eq!(s.top_maps[0], ("MapA".into(), 3));
         assert_eq!(s.top_maps[1], ("MapB".into(), 3));
         assert_eq!(s.top_maps[2], ("MapC".into(), 1));
+    }
+
+    #[test]
+    fn nickname_frequencies_aggregates_case_insensitively() {
+        // "Alpha" 2× + "alpha" 1× collapse to 3 with the first-seen casing.
+        // "opponent" accumulates 4× (p2 in every parsed entry).
+        // Unsupported/pending are skipped.
+        let entries = vec![
+            make_parsed("M", "2026-04-10T10:00:00", "Alpha", "Terran", None, "Win", "Zerg", None),
+            make_parsed("M", "2026-04-10T11:00:00", "Alpha", "Terran", None, "Win", "Zerg", None),
+            make_parsed("M", "2026-04-10T12:00:00", "alpha", "Terran", None, "Loss", "Zerg", None),
+            make_parsed("M", "2026-04-10T13:00:00", "Beta", "Terran", None, "Win", "Zerg", None),
+            make_unsupported(),
+            make_pending(),
+        ];
+        let freq = compute_nickname_frequencies(&entries);
+        assert_eq!(freq.len(), 3);
+        assert_eq!(freq[0].0, "opponent");
+        assert_eq!(freq[0].1, 4);
+        assert_eq!(freq[1].0, "Alpha");
+        assert_eq!(freq[1].1, 3);
+        assert_eq!(freq[2].0, "Beta");
+        assert_eq!(freq[2].1, 1);
     }
 }
