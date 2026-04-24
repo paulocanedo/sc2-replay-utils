@@ -101,7 +101,10 @@ impl eframe::App for AppState {
             return;
         }
 
-        // Polling do watcher ANTES de qualquer painel.
+        // Polling do watcher ANTES de qualquer painel. Também roda antes
+        // do gate de settings forçado para que o scan da biblioteca
+        // progrida enquanto o usuário está na tela inicial (populando
+        // as sugestões de nickname).
         self.poll_watcher(&ctx);
         // Drena resultados do worker da biblioteca.
         if self.library.poll() {
@@ -112,11 +115,83 @@ impl eframe::App for AppState {
         // visible list.
         self.library
             .ensure_stats(&self.config, &self.library_filter);
+
+        // -------- First-run forced settings (modal) --------
+        // Mostrado quando `settings_confirmed` é false — inclui todos
+        // os usuários existentes na primeira execução após esta feature
+        // (via `#[serde(default)]` o campo ausente vira false). A única
+        // saída é clicar em Save; ao salvar, a flag é persistida e o
+        // gate não aparece mais. Blocos de auto-load / autodetect ficam
+        // adiante para não disparar durante o setup.
+        if !self.config.settings_confirmed {
+            let prev_effective_dir = self.config.effective_working_dir();
+            let mut dummy_open = true;
+            let outcome = ui_settings::show(
+                &ctx,
+                &mut dummy_open,
+                &mut self.config,
+                &mut self.nickname_input,
+                self.library.nickname_frequencies().unwrap_or(&[]),
+                /* force_initial */ true,
+            );
+            if outcome.saved {
+                self.config.settings_confirmed = true;
+                match self.config.save() {
+                    Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
+                    Err(e) => {
+                        self.set_toast(tf("toast.save_error", lang, &[("err", &e)]))
+                    }
+                }
+                apply_style(&ctx, &self.config);
+                self.restart_watcher();
+                if self.config.effective_working_dir() != prev_effective_dir {
+                    self.refresh_library();
+                }
+            } else if outcome.reset_defaults {
+                // Reset Defaults está oculto no modo force_initial, mas
+                // se vier (defensivo), reaplica o estilo sem marcar
+                // settings_confirmed.
+                apply_style(&ctx, &self.config);
+            }
+            ctx.request_repaint();
+            return;
+        }
+
         // Carrega o replay mais recente quando o scanner terminar.
         if self.pending_load_latest && !self.library.scanning {
             self.pending_load_latest = false;
             if let Some(path) = self.library.scan_latest.clone() {
                 self.load_path(path);
+            }
+        }
+
+        // Auto-detect do DateRange no primeiro launch (config sem
+        // `library_date_range` persistido). Só roda depois que o scan
+        // termina e todas as entries viraram `Parsed`. Se nenhum replay
+        // for encontrado, não persistimos nada — o próximo launch tenta
+        // de novo. A flag garante execução única por sessão.
+        if self.pending_date_range_autodetect
+            && !self.library.scanning
+            && self.library.pending_count() == 0
+        {
+            self.pending_date_range_autodetect = false;
+            let today = library::today_str();
+            if let Some(chosen) =
+                library::detect_best_date_range(&self.library.entries, &today)
+            {
+                self.library_filter.date_range = chosen;
+                self.config.library_date_range = Some(chosen);
+                if let Err(e) = self.config.save() {
+                    self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
+                } else {
+                    let range_label = library::date_range_label(chosen, &self.config);
+                    self.set_toast(tf(
+                        "toast.date_range_autodetect",
+                        lang,
+                        &[("range", &range_label)],
+                    ));
+                }
+                ctx.request_repaint();
             }
         }
 
@@ -170,6 +245,8 @@ impl eframe::App for AppState {
             &mut self.show_settings,
             &mut self.config,
             &mut self.nickname_input,
+            self.library.nickname_frequencies().unwrap_or(&[]),
+            /* force_initial */ false,
         );
         if outcome.saved {
             match self.config.save() {
@@ -206,14 +283,8 @@ impl eframe::App for AppState {
 }
 
 pub fn apply_style(ctx: &Context, config: &AppConfig) {
-    let mut visuals = if config.dark_mode {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    };
-    if config.dark_mode {
-        apply_dark_palette(&mut visuals);
-    }
+    let mut visuals = egui::Visuals::dark();
+    apply_dark_palette(&mut visuals);
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.global_style()).clone();

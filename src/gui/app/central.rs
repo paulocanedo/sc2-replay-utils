@@ -117,6 +117,7 @@ impl AppState {
                             &mut self.timeline_show_heatmap,
                             &mut self.timeline_show_creep,
                             &mut self.timeline_show_map,
+                            &mut self.timeline_hovered_entity,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
                         Tab::Charts => tabs::charts::show(
@@ -170,7 +171,7 @@ impl AppState {
                 self.refresh_library();
             }
             LibraryAction::SaveLibraryFilters { date_range, race } => {
-                self.config.library_date_range = date_range;
+                self.config.library_date_range = Some(date_range);
                 self.config.library_race = race;
                 if let Err(e) = self.config.save() {
                     self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));

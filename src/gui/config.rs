@@ -25,8 +25,6 @@ pub struct AppConfig {
     pub user_nicknames: Vec<String>,
     /// Limite padrão de tempo em segundos para os extracts (0 = sem limite).
     pub default_max_time: u32,
-    /// Tema escuro (true) ou claro (false).
-    pub dark_mode: bool,
     /// Carregar o replay mais recente automaticamente ao abrir o app.
     pub auto_load_latest: bool,
     /// Habilitar o file watcher na pasta do SC2.
@@ -50,8 +48,18 @@ pub struct AppConfig {
     /// is shown on every launch (the user can always re-read it via
     /// Help → About). The same content is mirrored in the About window.
     pub disclaimer_acknowledged: bool,
+    /// `true` once the user clicked Save on the first-run settings
+    /// screen. While `false`, the settings window is shown as a
+    /// blocking modal on launch with no dismiss path other than Save.
+    /// New field with serde default `false` — existing configs load
+    /// with this unset and go through the flow, but keep all their
+    /// other values.
+    pub settings_confirmed: bool,
     /// Filtro de período padrão da biblioteca (salvo entre sessões).
-    pub library_date_range: DateRange,
+    /// `None` até o usuário (ou o auto-detect do primeiro launch) fixar
+    /// uma escolha. Configs antigos que já tinham o valor serializado
+    /// deserializam como `Some(...)` e pulam o auto-detect.
+    pub library_date_range: Option<DateRange>,
     /// Filtro de raça do usuário na biblioteca (salvo entre sessões).
     /// `None` = todas as raças. Valores válidos: `'T'`, `'P'`, `'Z'`.
     pub library_race: Option<char>,
@@ -76,7 +84,6 @@ impl Default for AppConfig {
             working_dir: None,
             user_nicknames: Vec::new(),
             default_max_time: 0,
-            dark_mode: true,
             auto_load_latest: false,
             watch_replays: true,
             auto_load_on_new_replay: true,
@@ -84,7 +91,8 @@ impl Default for AppConfig {
             language: Language::default(),
             language_selected: false,
             disclaimer_acknowledged: false,
-            library_date_range: DateRange::default(),
+            settings_confirmed: false,
+            library_date_range: None,
             library_race: None,
             insight_worker_minutes: default_insight_worker_minutes(),
         }

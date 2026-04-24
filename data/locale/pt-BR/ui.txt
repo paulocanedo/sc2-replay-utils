@@ -66,6 +66,7 @@ toast.new_replay_available = Novo replay disponível: {file} — Arquivo → Car
 toast.settings_saved = Configurações salvas.
 toast.save_error = Erro ao salvar: {err}
 toast.save_config_error = Erro ao salvar config: {err}
+toast.date_range_autodetect = Mostrando replays: {range}
 error.load_failed = Erro ao carregar {path}: {err}
 
 # ── Estado vazio ────────────────────────────────────────────────────────────
@@ -102,6 +103,8 @@ language_prompt.confirm = Continue / Continuar
 
 # ── Janela de Configurações ─────────────────────────────────────────────────
 settings.title = Configurações
+settings.first_run.title = Bem-vindo — vamos configurar
+settings.first_run.subtitle = Revise suas preferências e clique em Salvar para continuar.
 settings.section.folders = Pastas
 settings.working_dir.label = Diretório de trabalho:
 settings.working_dir.desc = Pasta onde o app procura, lista e observa seus replays. Se vazio, o app usa o diretório do SC2 detectado automaticamente.
@@ -118,6 +121,8 @@ settings.nicknames.empty = (nenhum nickname cadastrado)
 settings.nicknames.remove_tooltip = Remover
 settings.nicknames.add_placeholder = Adicionar nickname…
 settings.nicknames.add = Adicionar
+settings.nicknames.suggested = Sugeridos da biblioteca:
+settings.nicknames.suggested.tooltip = Clique para adicionar este nickname
 settings.section.behavior = Comportamento
 settings.max_time.label = max_time padrão (s, 0 = sem limite):
 settings.auto_load_latest = Carregar replay mais recente ao abrir
@@ -126,7 +131,6 @@ settings.auto_load_new = Carregar automaticamente quando surgir novo replay
 settings.section.language = Idioma
 settings.language.label = Idioma do aplicativo:
 settings.section.appearance = Aparência
-settings.dark_mode = Tema escuro
 settings.font_size.label = Tamanho da fonte (pt):
 settings.font_size.desc = Tamanho em pontos lógicos. HiDPI é tratado automaticamente pelo sistema.
 settings.save = Salvar
@@ -358,13 +362,13 @@ rename.status.error_marker = erros
 # ── Aba Insights ────────────────────────────────────────────────────────────
 insights.pov_label = Ponto de vista
 insight.worker_potential.title = Potencial de produção de workers até o minuto {minutes}
-insight.worker_potential.help = Compara quantos workers você realmente **produziu** até o minuto {minutes} contra quantos poderia ter produzido com produção ininterrupta, respeitando o timing das bases, os chronos que você gastou em probes (Protoss) e a regra de 80% das larvas viram drones (Zerg). Perdas de workers são ignoradas — o foco é expor lapsos de macro, não combate. Parte de 12 workers iniciais.
+insight.worker_potential.help = Compara quantos workers você realmente **produziu** até o minuto {minutes} contra quantos poderia ter produzido com produção ininterrupta, respeitando o timing das bases, os chronos que você gastou em probes (Protoss) e, para Zerg, a oferta de larvas descontadas as unidades não-drone que você produziu. Perdas de workers são ignoradas — o foco é expor lapsos de macro, não combate. Parte de 12 workers iniciais.
 insight.worker_potential.produced = Você fez
 insight.worker_potential.potential = Poderia fazer
 insight.worker_potential.gap_label = Diferença
 insight.worker_potential.limited_by_bases = Limitado por expansões tardias
 insight.worker_potential.limited_by_chrono_budget = Limitado pelos chronos que você gastou em probes
-insight.worker_potential.limited_by_larva80 = Limitado pela regra de 80% drones/larva
+insight.worker_potential.limited_by_larva = Limitado pela oferta de larvas e unidades não-drone produzidas
 insight.worker_potential.limited_by_none = Produção rodou na capacidade máxima
 insight.worker_potential.clamped_caveat = O replay terminou antes do minuto {minutes}.
 

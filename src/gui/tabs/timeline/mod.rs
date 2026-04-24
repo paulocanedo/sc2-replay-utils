@@ -105,7 +105,18 @@ pub fn show(
     show_heatmap: &mut bool,
     show_creep: &mut bool,
     show_map: &mut bool,
+    hovered_entity: &mut Option<(usize, String)>,
 ) {
+    // Hover dos chips do `unit_column` é cross-frame com lag de 1 frame:
+    // o minimap (renderizado no meio do horizontal) consome o valor
+    // PERSISTIDO do frame anterior, enquanto as colunas P1/P2 escrevem
+    // em `new_hover` que é commit-ado no fim deste frame. Sem o lag, o
+    // hover do P2 (renderizado depois do minimap) nunca apareceria —
+    // o `set` ocorreria após o minimap já ter pintado. `request_repaint`
+    // ao detectar mudança garante que o lag se traduza em ≤16 ms na
+    // prática.
+    let prev_hover = hovered_entity.clone();
+    let mut new_hover: Option<(usize, String)> = None;
     let lang = config.language;
     let tl = &loaded.timeline;
     let max_loop = tl.game_loops.max(1);
@@ -199,6 +210,7 @@ pub fn show(
                             game_loop,
                             lang,
                             UNIT_ICON_BODY_FACTOR,
+                            &mut new_hover,
                         );
                     }
                 },
@@ -218,6 +230,8 @@ pub fn show(
                         *show_heatmap,
                         *show_creep,
                         *show_map,
+                        prev_hover.as_ref(),
+                        lang,
                     );
                 },
             );
@@ -239,10 +253,19 @@ pub fn show(
                             game_loop,
                             lang,
                             UNIT_ICON_BODY_FACTOR,
+                            &mut new_hover,
                         );
                     }
                 },
             );
         });
     });
+
+    // Commit do hover do frame: se mudou em relação ao frame anterior,
+    // pede repaint imediato pra que o lag de 1 frame se traduza em
+    // ≤16 ms (em vez de esperar a próxima interação acordar o egui).
+    if new_hover != prev_hover {
+        ui.ctx().request_repaint();
+    }
+    *hovered_entity = new_hover;
 }

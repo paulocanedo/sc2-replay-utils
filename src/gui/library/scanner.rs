@@ -38,7 +38,7 @@ use crate::replay::parse_replay;
 
 use super::date::today_str;
 use super::filter::{LibraryFilter, StatsFilterKey, matches_filter};
-use super::stats::{LibraryStats, compute_library_stats};
+use super::stats::{LibraryStats, compute_library_stats, compute_nickname_frequencies};
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
 /// Quantos segundos de game time parseamos *no pool de enriquecimento*
@@ -149,6 +149,12 @@ pub struct ReplayLibrary {
     cached_stats: Option<LibraryStats>,
     stats_dirty: bool,
     cached_nicknames: Vec<String>,
+    /// Nickname frequency aggregation over *all* entries (not filtered).
+    /// Used by the settings modal to suggest nicks the user hasn't
+    /// registered yet. Lives outside `LibraryStats` on purpose: that one
+    /// runs over the filtered view, whereas suggestions must reflect the
+    /// entire library regardless of the user's active filters.
+    cached_nickname_frequencies: Option<Vec<(String, u32)>>,
     /// Snapshot of the filter used to compute `cached_stats`. Invalidates
     /// the cache when the user toggles a filter in the sidebar so the
     /// hero KPIs stay in sync with the visible list.
@@ -219,6 +225,7 @@ impl ReplayLibrary {
             cached_stats: None,
             stats_dirty: true,
             cached_nicknames: Vec::new(),
+            cached_nickname_frequencies: None,
             cached_filter_key: None,
         }
     }
@@ -640,6 +647,8 @@ impl ReplayLibrary {
                 .iter()
                 .filter(|e| matches_filter(e, filter, config, &today));
             self.cached_stats = Some(compute_library_stats(filtered, config));
+            self.cached_nickname_frequencies =
+                Some(compute_nickname_frequencies(&self.entries));
             self.stats_dirty = false;
             if nicknames_changed {
                 self.cached_nicknames = config.user_nicknames.clone();
@@ -652,6 +661,13 @@ impl ReplayLibrary {
     /// the same frame first — otherwise the snapshot may be stale.
     pub fn stats(&self) -> Option<&LibraryStats> {
         self.cached_stats.as_ref()
+    }
+
+    /// Returns player-name frequencies across the whole library (not
+    /// filter-aware). Populated by `ensure_stats`. Used by the settings
+    /// modal to suggest nicks the user hasn't registered yet.
+    pub fn nickname_frequencies(&self) -> Option<&[(String, u32)]> {
+        self.cached_nickname_frequencies.as_deref()
     }
 }
 

@@ -65,6 +65,7 @@ toast.new_replay_available = New replay available: {file} — File → Load late
 toast.settings_saved = Settings saved.
 toast.save_error = Save error: {err}
 toast.save_config_error = Config save error: {err}
+toast.date_range_autodetect = Showing replays: {range}
 error.load_failed = Error loading {path}: {err}
 
 # ── Empty state ─────────────────────────────────────────────────────────────
@@ -101,6 +102,8 @@ language_prompt.confirm = Continue / Continuar
 
 # ── Settings window ─────────────────────────────────────────────────────────
 settings.title = Settings
+settings.first_run.title = Welcome — let's set up
+settings.first_run.subtitle = Review your preferences and click Save to continue.
 settings.section.folders = Folders
 settings.working_dir.label = Working directory:
 settings.working_dir.desc = Folder where the app searches, lists and watches your replays. If empty, the app uses the automatically detected SC2 directory.
@@ -117,6 +120,8 @@ settings.nicknames.empty = (no nickname registered)
 settings.nicknames.remove_tooltip = Remove
 settings.nicknames.add_placeholder = Add nickname…
 settings.nicknames.add = Add
+settings.nicknames.suggested = Suggested from library:
+settings.nicknames.suggested.tooltip = Click to add this nickname
 settings.section.behavior = Behavior
 settings.max_time.label = Default max_time (s, 0 = no limit):
 settings.auto_load_latest = Load latest replay on startup
@@ -125,7 +130,6 @@ settings.auto_load_new = Automatically load new replays
 settings.section.language = Language
 settings.language.label = App language:
 settings.section.appearance = Appearance
-settings.dark_mode = Dark theme
 settings.font_size.label = Font size (pt):
 settings.font_size.desc = Size in logical points. HiDPI is handled automatically by the system.
 settings.save = Save
@@ -361,13 +365,13 @@ rename.status.error_marker = errors
 # ── Insights tab ────────────────────────────────────────────────────────────
 insights.pov_label = Point of view
 insight.worker_potential.title = Worker production potential by minute {minutes}
-insight.worker_potential.help = Compares how many workers you actually **produced** by minute {minutes} against how many you could have produced with non-stop production, respecting base timings, chrono boosts you spent on probes (Protoss), and the 80% larva→drone rule (Zerg). Worker losses are ignored — the goal is to surface macro lapses, not combat outcomes. Starts from 12 initial workers.
+insight.worker_potential.help = Compares how many workers you actually **produced** by minute {minutes} against how many you could have produced with non-stop production, respecting base timings, chrono boosts you spent on probes (Protoss), and the Zerg larva supply minus the non-drone units you produced. Worker losses are ignored — the goal is to surface macro lapses, not combat outcomes. Starts from 12 initial workers.
 insight.worker_potential.produced = You built
 insight.worker_potential.potential = Could have built
 insight.worker_potential.gap_label = Gap
 insight.worker_potential.limited_by_bases = Limited by late expansions
 insight.worker_potential.limited_by_chrono_budget = Limited by the chrono boosts you spent on probes
-insight.worker_potential.limited_by_larva80 = Limited by the 80% drone/larva rule
+insight.worker_potential.limited_by_larva = Limited by larva supply and non-drone unit production
 insight.worker_potential.limited_by_none = Production ran at full capacity
 insight.worker_potential.clamped_caveat = The replay ended before minute {minutes}.
 
