@@ -464,9 +464,7 @@ fn player_column(
                         };
                         ui.horizontal(|ui| {
                             if show_icons {
-                                if let Some(sprite) = unit_icon(&entry.action)
-                                    .or_else(|| structure_icon(&entry.action))
-                                {
+                                if let Some(sprite) = build_order_icon(&entry.action) {
                                     ui.add(
                                         egui::Image::new(sprite)
                                             .fit_to_exact_size(egui::vec2(icon_side, icon_side)),
@@ -524,6 +522,19 @@ fn player_column(
                     }
                 });
         });
+}
+
+/// Seleciona o sprite para uma entrada do build order. Entradas
+/// `InjectLarva@...` ancoram visualmente na Larva — é o produto
+/// do comando, mais intuitivo que o sprite da Queen. Demais ações
+/// caem no lookup compartilhado de unidade/estrutura do timeline.
+fn build_order_icon(action: &str) -> Option<egui::ImageSource<'static>> {
+    if action.starts_with("InjectLarva") {
+        return Some(egui::include_image!(
+            "../../../assets/units/zerg/Larva.png"
+        ));
+    }
+    unit_icon(action).or_else(|| structure_icon(action))
 }
 
 /// Formata o nome de exibição de uma entrada. Para injects, parseia o
