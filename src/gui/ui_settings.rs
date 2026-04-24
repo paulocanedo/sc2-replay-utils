@@ -26,152 +26,178 @@ pub fn show(
     config: &mut AppConfig,
     nickname_buf: &mut String,
     nickname_suggestions: &[(String, u32)],
+    force_initial: bool,
 ) -> SettingsOutcome {
     let mut outcome = SettingsOutcome::default();
-    if !*open {
+    if !*open && !force_initial {
         return outcome;
     }
     let lang = config.language;
 
-    Window::new(t("settings.title", lang))
-        .open(open)
+    let mut window = Window::new(t("settings.title", lang))
         .resizable(true)
-        .default_width(520.0)
-        .show(ctx, |ui| {
-            ui.heading(t("settings.section.folders", lang));
-            working_dir_row(ui, config);
-            ui.small(t("settings.working_dir.desc", lang));
-            ui.add_space(4.0);
-
-            ui.separator();
-            ui.heading(t("settings.section.nicknames", lang));
-            ui.small(t("settings.nicknames.desc", lang));
-
-            // Lista atual de nicks
-            let mut to_remove: Option<usize> = None;
-            ScrollArea::vertical()
-                .max_height(120.0)
-                .show(ui, |ui| {
-                    if config.user_nicknames.is_empty() {
-                        ui.label(
-                            RichText::new(t("settings.nicknames.empty", lang)).italics(),
-                        );
-                    }
-                    for (i, nick) in config.user_nicknames.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .small_button("×")
-                                .on_hover_text(t("settings.nicknames.remove_tooltip", lang))
-                                .clicked()
-                            {
-                                to_remove = Some(i);
-                            }
-                            ui.monospace(nick);
-                        });
-                    }
-                });
-            if let Some(i) = to_remove {
-                config.user_nicknames.remove(i);
-            }
-
-            ui.horizontal(|ui| {
-                let resp = ui.add(
-                    egui::TextEdit::singleline(nickname_buf)
-                        .hint_text(t("settings.nicknames.add_placeholder", lang))
-                        .desired_width(200.0),
-                );
-                let enter =
-                    resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button(t("settings.nicknames.add", lang)).clicked() || enter {
-                    let trimmed = nickname_buf.trim().to_string();
-                    if !trimmed.is_empty()
-                        && !config
-                            .user_nicknames
-                            .iter()
-                            .any(|n| n.eq_ignore_ascii_case(&trimmed))
-                    {
-                        config.user_nicknames.push(trimmed);
-                    }
-                    nickname_buf.clear();
-                }
+        .default_width(520.0);
+    if force_initial {
+        // First-run mode: no X, no click-outside-to-close, centered.
+        // Matches the language/disclaimer modal chrome in `modals.rs`.
+        window = window
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]);
+    } else {
+        window = window.open(open);
+    }
+    window.show(ctx, |ui| {
+        if force_initial {
+            ui.vertical_centered(|ui| {
+                ui.heading(t("settings.first_run.title", lang));
+                ui.small(t("settings.first_run.subtitle", lang));
             });
+            ui.separator();
+        }
+        ui.heading(t("settings.section.folders", lang));
+        working_dir_row(ui, config);
+        ui.small(t("settings.working_dir.desc", lang));
+        ui.add_space(4.0);
 
-            let suggestions: Vec<&str> = nickname_suggestions
-                .iter()
-                .filter(|(name, _)| !config.is_user(name))
-                .take(3)
-                .map(|(name, _)| name.as_str())
-                .collect();
-            if !suggestions.is_empty() {
-                ui.add_space(4.0);
-                ui.small(t("settings.nicknames.suggested", lang));
-                ui.horizontal_wrapped(|ui| {
-                    for name in suggestions {
+        ui.separator();
+        ui.heading(t("settings.section.nicknames", lang));
+        ui.small(t("settings.nicknames.desc", lang));
+
+        // Lista atual de nicks
+        let mut to_remove: Option<usize> = None;
+        ScrollArea::vertical()
+            .max_height(120.0)
+            .show(ui, |ui| {
+                if config.user_nicknames.is_empty() {
+                    ui.label(
+                        RichText::new(t("settings.nicknames.empty", lang)).italics(),
+                    );
+                }
+                for (i, nick) in config.user_nicknames.iter().enumerate() {
+                    ui.horizontal(|ui| {
                         if ui
-                            .small_button(format!("+ {name}"))
-                            .on_hover_text(t("settings.nicknames.suggested.tooltip", lang))
+                            .small_button("×")
+                            .on_hover_text(t("settings.nicknames.remove_tooltip", lang))
                             .clicked()
                         {
-                            config.user_nicknames.push(name.to_string());
+                            to_remove = Some(i);
+                        }
+                        ui.monospace(nick);
+                    });
+                }
+            });
+        if let Some(i) = to_remove {
+            config.user_nicknames.remove(i);
+        }
+
+        ui.horizontal(|ui| {
+            let resp = ui.add(
+                egui::TextEdit::singleline(nickname_buf)
+                    .hint_text(t("settings.nicknames.add_placeholder", lang))
+                    .desired_width(200.0),
+            );
+            let enter =
+                resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(t("settings.nicknames.add", lang)).clicked() || enter {
+                let trimmed = nickname_buf.trim().to_string();
+                if !trimmed.is_empty()
+                    && !config
+                        .user_nicknames
+                        .iter()
+                        .any(|n| n.eq_ignore_ascii_case(&trimmed))
+                {
+                    config.user_nicknames.push(trimmed);
+                }
+                nickname_buf.clear();
+            }
+        });
+
+        let suggestions: Vec<&str> = nickname_suggestions
+            .iter()
+            .filter(|(name, _)| !config.is_user(name))
+            .take(3)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        if !suggestions.is_empty() {
+            ui.add_space(4.0);
+            ui.small(t("settings.nicknames.suggested", lang));
+            ui.horizontal_wrapped(|ui| {
+                for name in suggestions {
+                    if ui
+                        .small_button(format!("+ {name}"))
+                        .on_hover_text(t("settings.nicknames.suggested.tooltip", lang))
+                        .clicked()
+                    {
+                        config.user_nicknames.push(name.to_string());
+                    }
+                }
+            });
+        }
+
+        ui.separator();
+        ui.heading(t("settings.section.behavior", lang));
+
+        ui.horizontal(|ui| {
+            ui.label(t("settings.max_time.label", lang));
+            ui.add(egui::DragValue::new(&mut config.default_max_time).speed(1.0));
+        });
+
+        ui.checkbox(
+            &mut config.auto_load_latest,
+            t("settings.auto_load_latest", lang),
+        );
+
+        ui.checkbox(&mut config.watch_replays, t("settings.watch_replays", lang));
+        ui.add_enabled_ui(config.watch_replays, |ui| {
+            ui.indent("auto_load_new", |ui| {
+                ui.checkbox(
+                    &mut config.auto_load_on_new_replay,
+                    t("settings.auto_load_new", lang),
+                );
+            });
+        });
+
+        ui.separator();
+        ui.heading(t("settings.section.language", lang));
+        ui.horizontal(|ui| {
+            ui.label(t("settings.language.label", lang));
+            egui::ComboBox::from_id_salt("lang_combo")
+                .selected_text(config.language.label())
+                .show_ui(ui, |ui| {
+                    for &lang_opt in Language::all() {
+                        if ui
+                            .selectable_value(&mut config.language, lang_opt, lang_opt.label())
+                            .clicked()
+                        {
+                            // Changing the language here counts as
+                            // an explicit selection — suppress the
+                            // first-run modal forever after.
+                            config.language_selected = true;
                         }
                     }
                 });
-            }
+        });
 
-            ui.separator();
-            ui.heading(t("settings.section.behavior", lang));
+        ui.separator();
+        ui.heading(t("settings.section.appearance", lang));
 
-            ui.horizontal(|ui| {
-                ui.label(t("settings.max_time.label", lang));
-                ui.add(egui::DragValue::new(&mut config.default_max_time).speed(1.0));
+        ui.horizontal(|ui| {
+            ui.label(t("settings.font_size.label", lang));
+            ui.add(Slider::new(&mut config.font_size, 8.0..=28.0).fixed_decimals(0));
+        });
+        ui.small(t("settings.font_size.desc", lang));
+
+        ui.separator();
+        if force_initial {
+            ui.vertical_centered(|ui| {
+                if ui
+                    .add_sized([160.0, 32.0], egui::Button::new(t("settings.save", lang)))
+                    .clicked()
+                {
+                    outcome.saved = true;
+                }
             });
-
-            ui.checkbox(
-                &mut config.auto_load_latest,
-                t("settings.auto_load_latest", lang),
-            );
-
-            ui.checkbox(&mut config.watch_replays, t("settings.watch_replays", lang));
-            ui.add_enabled_ui(config.watch_replays, |ui| {
-                ui.indent("auto_load_new", |ui| {
-                    ui.checkbox(
-                        &mut config.auto_load_on_new_replay,
-                        t("settings.auto_load_new", lang),
-                    );
-                });
-            });
-
-            ui.separator();
-            ui.heading(t("settings.section.language", lang));
-            ui.horizontal(|ui| {
-                ui.label(t("settings.language.label", lang));
-                egui::ComboBox::from_id_salt("lang_combo")
-                    .selected_text(config.language.label())
-                    .show_ui(ui, |ui| {
-                        for &lang_opt in Language::all() {
-                            if ui
-                                .selectable_value(&mut config.language, lang_opt, lang_opt.label())
-                                .clicked()
-                            {
-                                // Changing the language here counts as
-                                // an explicit selection — suppress the
-                                // first-run modal forever after.
-                                config.language_selected = true;
-                            }
-                        }
-                    });
-            });
-
-            ui.separator();
-            ui.heading(t("settings.section.appearance", lang));
-
-            ui.horizontal(|ui| {
-                ui.label(t("settings.font_size.label", lang));
-                ui.add(Slider::new(&mut config.font_size, 8.0..=28.0).fixed_decimals(0));
-            });
-            ui.small(t("settings.font_size.desc", lang));
-
-            ui.separator();
+        } else {
             ui.horizontal(|ui| {
                 if ui
                     .add_sized([100.0, 28.0], egui::Button::new(t("settings.save", lang)))
@@ -195,7 +221,8 @@ pub fn show(
                     ));
                 }
             });
-        });
+        }
+    });
 
     outcome
 }

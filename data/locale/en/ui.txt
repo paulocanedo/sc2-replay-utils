@@ -102,6 +102,8 @@ language_prompt.confirm = Continue / Continuar
 
 # ── Settings window ─────────────────────────────────────────────────────────
 settings.title = Settings
+settings.first_run.title = Welcome — let's set up
+settings.first_run.subtitle = Review your preferences and click Save to continue.
 settings.section.folders = Folders
 settings.working_dir.label = Working directory:
 settings.working_dir.desc = Folder where the app searches, lists and watches your replays. If empty, the app uses the automatically detected SC2 directory.

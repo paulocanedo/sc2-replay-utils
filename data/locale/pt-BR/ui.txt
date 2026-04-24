@@ -103,6 +103,8 @@ language_prompt.confirm = Continue / Continuar
 
 # ── Janela de Configurações ─────────────────────────────────────────────────
 settings.title = Configurações
+settings.first_run.title = Bem-vindo — vamos configurar
+settings.first_run.subtitle = Revise suas preferências e clique em Salvar para continuar.
 settings.section.folders = Pastas
 settings.working_dir.label = Diretório de trabalho:
 settings.working_dir.desc = Pasta onde o app procura, lista e observa seus replays. Se vazio, o app usa o diretório do SC2 detectado automaticamente.
