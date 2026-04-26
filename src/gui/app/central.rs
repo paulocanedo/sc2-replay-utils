@@ -125,6 +125,7 @@ impl AppState {
                             loaded,
                             &self.config,
                             &mut self.charts_army_opts,
+                            &mut self.charts_worker_prod_opts,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                         Tab::Insights => {

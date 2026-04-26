@@ -19,6 +19,9 @@
 
 mod army;
 mod classify;
+mod worker_production;
+
+pub use worker_production::WorkerProductionOptions;
 
 use egui::Ui;
 
@@ -69,10 +72,13 @@ pub fn show(
     loaded: &LoadedReplay,
     config: &AppConfig,
     army_opts: &mut ArmyChartOptions,
+    worker_prod_opts: &mut WorkerProductionOptions,
 ) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             army::army_value_plot(ui, loaded, config, army_opts);
+            ui.separator();
+            worker_production::show(ui, loaded, config, worker_prod_opts);
         });
 }
