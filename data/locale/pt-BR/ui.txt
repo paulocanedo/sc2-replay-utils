@@ -330,11 +330,17 @@ charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
-charts.worker_production.title = Produção de workers
-charts.worker_production.player = Jogador:
-charts.worker_production.empty = Nenhuma estrutura produtora de worker encontrada.
-charts.worker_production.reset_view = Redefinir
-charts.worker_production.reset_view.hint = Redefinir zoom e pan. Dica: scroll para zoom, arraste para pan, duplo-clique para redefinir.
+charts.production.title = Produção
+charts.production.view.workers = Workers
+charts.production.view.army = Army
+charts.production.view.research = Pesquisas
+charts.production.view.upgrades = Upgrades
+charts.production.coming_soon = Em breve.
+charts.production.player = Jogador:
+charts.production.empty.workers = Nenhuma estrutura produtora de worker encontrada.
+charts.production.empty.army = Nenhuma estrutura produtora de army encontrada.
+charts.production.reset_view = Redefinir
+charts.production.reset_view.hint = Redefinir zoom e pan. Dica: scroll para zoom, arraste para pan, duplo-clique para redefinir.
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap

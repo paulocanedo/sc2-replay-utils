@@ -29,8 +29,8 @@ mod loss_analysis;
 mod supply_block;
 #[path = "../worker_potential.rs"]
 mod worker_potential;
-#[path = "../worker_production_chart.rs"]
-mod worker_production_chart;
+#[path = "../production_lanes.rs"]
+mod production_lanes;
 #[path = "../utils.rs"]
 mod utils;
 #[path = "../map_image/mod.rs"]

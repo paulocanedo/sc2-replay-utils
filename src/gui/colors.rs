@@ -95,6 +95,12 @@ pub const ACCENT_SUCCESS: Color32 = Color32::from_rgb(140, 200, 110);
 pub const ACCENT_WARNING: Color32 = Color32::from_rgb(230, 170, 60);
 pub const ACCENT_DANGER: Color32 = Color32::from_rgb(220, 90, 90);
 
+/// Cor para blocos "impeditivos" — estrutura existe mas não pode
+/// produzir (ex.: Barracks construindo addon). Acinzentado-avermelhado
+/// pra ficar distinto do `ACCENT_WARNING` (morph in-place) e do tom
+/// puro de player.
+pub const ACCENT_IMPEDED: Color32 = Color32::from_rgb(140, 80, 80);
+
 // ── Race colours ─────────────────────────────────────────────────────
 //
 // Distinct from the P1/P2 slot palette (red/blue) so "race" and

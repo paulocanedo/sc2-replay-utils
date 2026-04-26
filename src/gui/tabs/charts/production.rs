@@ -1,66 +1,107 @@
-// Gráfico de "lanes" de produção de worker — uma linha por townhall do
-// jogador selecionado, com retângulos coloridos marcando os intervalos
-// em que a estrutura estava produzindo (cor do jogador) ou em morph
-// in-place (laranja, "impedimento"). Idle = só baseline fina.
+// Gráfico de "lanes" de produção. Substitui o antigo gráfico exclusivo
+// de workers — agora seleciona entre quatro views via pills no topo:
 //
-// Render via `ui.painter_at()` clipado dentro de um rect alocado com
-// `Sense::click_and_drag` — não usa `egui_plot` porque a estrutura é
-// um Gantt simples e queremos controle preciso sobre as faixas de 8pt
-// e o overlay de duração nos blocos largos. O retângulo de captura
-// também é o que recebe scroll (zoom) e drag (pan).
+//   Workers | Army | Pesquisas | Upgrades
+//
+// `Workers` e `Army` compartilham o pipeline de extração e render
+// (`production_lanes`), variando apenas o `LaneMode` consumido. As lanes
+// se desenham igual: ícone da estrutura à esquerda + Gantt horizontal
+// com baseline fina + blocos de produção/morph/impeded.
+//
+// `Army` adiciona o bloco `Impeded` (Terran com addon em construção,
+// cor `ACCENT_IMPEDED`) e, no modo Protoss pós-WarpGateResearch, troca
+// o estilo de render por sub-trilhas thin estilo Hatchery — uma vez
+// que warpgates podem warpinar várias unidades em rajadas paralelas
+// entre estruturas distintas.
+//
+// `Pesquisas` e `Upgrades` ficam como stubs por enquanto — só o seletor
+// fica visível com label "Em breve".
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::colors::{
-    player_slot_color_bright, ACCENT_WARNING, BORDER, FOCUS_RING, LABEL_DIM, SURFACE_RAISED,
+    player_slot_color_bright, ACCENT_IMPEDED, ACCENT_WARNING, BORDER, FOCUS_RING, LABEL_DIM,
+    SURFACE_RAISED,
 };
 use crate::config::AppConfig;
 use crate::locale::t;
+use crate::production_lanes::{extract, BlockKind, LaneMode, StructureLane};
+use crate::replay::is_zerg_hatch;
 use crate::replay_state::{fmt_time, LoadedReplay};
-use crate::tabs::timeline::structure_icon;
+use crate::tabs::timeline::{structure_icon, unit_icon};
 use crate::widgets::{chip, player_pov_pill, PlayerPickerSize};
-use crate::worker_production_chart::{extract, BlockKind, ProductionBlock, StructureLane};
 
-/// Estado UI persistente da seção (não volta pro `AppConfig`).
-pub struct WorkerProductionOptions {
-    pub selected_player: usize,
-    /// Janela de tempo visível em game loops. `None` = auto-fit
-    /// (`[0, effective_end]`). Setado pela primeira interação de
-    /// zoom/pan ou pelo "Reset" (que volta a `None`).
-    pub view: Option<(u32, u32)>,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProductionView {
+    Workers,
+    Army,
+    Research,
+    Upgrades,
 }
 
-impl Default for WorkerProductionOptions {
+impl Default for ProductionView {
+    fn default() -> Self {
+        ProductionView::Workers
+    }
+}
+
+/// Estado UI persistente da seção (não volta pro `AppConfig`).
+pub struct ProductionChartOptions {
+    pub view: ProductionView,
+    pub selected_player: usize,
+    /// Janela de tempo visível em game loops. `None` = auto-fit.
+    pub viewport: Option<(u32, u32)>,
+}
+
+impl Default for ProductionChartOptions {
     fn default() -> Self {
         Self {
+            view: ProductionView::Workers,
             selected_player: 0,
-            view: None,
+            viewport: None,
         }
     }
 }
 
 const ICON_SIZE: f32 = 28.0;
-const ROW_HEIGHT: f32 = 32.0;
+const ROW_HEIGHT_WORKERS: f32 = 32.0;
+const ROW_HEIGHT_ARMY: f32 = 36.0;
 const ROW_GAP: f32 = 4.0;
-const BLOCK_HEIGHT: f32 = 11.0; // ~8pt em DPI 1.0 + folga visual
+const BLOCK_HEIGHT_WORKERS: f32 = 11.0;
+const BLOCK_HEIGHT_ARMY: f32 = 22.0;
 const RIGHT_PAD: f32 = 8.0;
 const LEFT_GUTTER: f32 = 8.0;
 const MIN_LABEL_WIDTH: f32 = 36.0;
+/// Largura mínima (px) para desenhar o ícone do produzido dentro do
+/// bloco — abaixo disso fica só o retângulo colorido.
+const ICON_INLINE_MIN_WIDTH: f32 = 22.0;
 const TIME_AXIS_HEIGHT: f32 = 18.0;
-/// Limite mínimo de janela visível (em loops) para evitar que o usuário
-/// dê zoom até converter o gráfico num único pixel. ~5s em Faster.
 const MIN_VIEW_LOOPS: u32 = 112;
 
 pub fn show(
     ui: &mut Ui,
     loaded: &LoadedReplay,
     config: &AppConfig,
-    opts: &mut WorkerProductionOptions,
+    opts: &mut ProductionChartOptions,
 ) {
     let lang = config.language;
 
     ui.add_space(12.0);
-    ui.heading(t("charts.worker_production.title", lang));
+    ui.heading(t("charts.production.title", lang));
+
+    // Seletor de view (Workers / Army / Pesquisas / Upgrades).
+    ui.horizontal(|ui| {
+        for (view, key) in [
+            (ProductionView::Workers, "charts.production.view.workers"),
+            (ProductionView::Army, "charts.production.view.army"),
+            (ProductionView::Research, "charts.production.view.research"),
+            (ProductionView::Upgrades, "charts.production.view.upgrades"),
+        ] {
+            if chip(ui, t(key, lang), opts.view == view, None).clicked() {
+                opts.view = view;
+            }
+        }
+    });
 
     let players = &loaded.timeline.players;
     if players.is_empty() {
@@ -71,9 +112,26 @@ pub fn show(
         opts.selected_player = 0;
     }
 
-    // Cabeçalho: seletor + reset.
+    match opts.view {
+        ProductionView::Research | ProductionView::Upgrades => {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(t("charts.production.coming_soon", lang)).italics(),
+            );
+            return;
+        }
+        _ => {}
+    }
+
+    let mode = match opts.view {
+        ProductionView::Workers => LaneMode::Workers,
+        ProductionView::Army => LaneMode::Army,
+        _ => unreachable!(),
+    };
+
+    // Cabeçalho: seletor de jogador + reset.
     ui.horizontal(|ui| {
-        ui.label(t("charts.worker_production.player", lang));
+        ui.label(t("charts.production.player", lang));
         for (idx, p) in players.iter().enumerate() {
             if player_pov_pill(
                 ui,
@@ -94,50 +152,61 @@ pub fn show(
         ui.separator();
         if chip(
             ui,
-            t("charts.worker_production.reset_view", lang),
-            opts.view.is_none(),
+            t("charts.production.reset_view", lang),
+            opts.viewport.is_none(),
             None,
         )
-        .on_hover_text(t("charts.worker_production.reset_view.hint", lang))
+        .on_hover_text(t("charts.production.reset_view.hint", lang))
         .clicked()
         {
-            opts.view = None;
+            opts.viewport = None;
         }
     });
 
-    let lanes_per_player = extract(&loaded.timeline);
+    let lanes_per_player = extract(&loaded.timeline, mode);
     let lanes = &lanes_per_player[opts.selected_player];
     if lanes.lanes.is_empty() {
-        ui.label(egui::RichText::new(t("charts.worker_production.empty", lang)).italics());
+        let key = match mode {
+            LaneMode::Workers => "charts.production.empty.workers",
+            LaneMode::Army => "charts.production.empty.army",
+        };
+        ui.label(egui::RichText::new(t(key, lang)).italics());
         return;
     }
 
     let lps = loaded.timeline.loops_per_second;
     let game_end_loop = effective_end_loop(loaded);
 
-    // Resolve a view atual (auto-fit quando None).
-    let (view_start, view_end) = opts.view.unwrap_or((0, game_end_loop));
+    let (view_start, view_end) = opts.viewport.unwrap_or((0, game_end_loop));
     let view_start = view_start.min(game_end_loop.saturating_sub(MIN_VIEW_LOOPS));
     let view_end = view_end.min(game_end_loop).max(view_start + MIN_VIEW_LOOPS);
 
     let player_color = player_slot_color_bright(opts.selected_player);
 
-    // Aloca um rect único para todo o gráfico (axis + lanes). Esse rect
-    // serve dois propósitos: (1) capturar drag/scroll para zoom/pan,
-    // (2) clip do painter para que blocos fora da view não vazem.
+    let row_height = match mode {
+        LaneMode::Workers => ROW_HEIGHT_WORKERS,
+        LaneMode::Army => ROW_HEIGHT_ARMY,
+    };
+    let block_height = match mode {
+        LaneMode::Workers => BLOCK_HEIGHT_WORKERS,
+        LaneMode::Army => BLOCK_HEIGHT_ARMY,
+    };
+
     let total_w = ui.available_width();
     let n_lanes = lanes.lanes.len();
-    let total_h = TIME_AXIS_HEIGHT
-        + n_lanes as f32 * (ROW_HEIGHT + ROW_GAP)
-        + ROW_GAP;
+    let total_h = TIME_AXIS_HEIGHT + n_lanes as f32 * (row_height + ROW_GAP) + ROW_GAP;
     let (chart_rect, response) =
         ui.allocate_exact_size(Vec2::new(total_w, total_h), Sense::click_and_drag());
 
     let track_x_start = ICON_SIZE + LEFT_GUTTER * 2.0;
+    // Não aplicamos `round()` aqui: o egui renderiza com sub-pixel,
+    // então pequenas variações fracionárias em `chart_rect.width()`
+    // (causadas, p.ex., pelo fade da scrollbar do `ScrollArea` pai)
+    // se traduzem em jitter sub-pixel invisível. Arredondar amplifica
+    // essas variações para saltos visíveis de 1 pixel.
     let track_left = chart_rect.left() + track_x_start;
     let track_width = (chart_rect.width() - track_x_start - RIGHT_PAD).max(50.0);
 
-    // Aplica input. Mutate em `opts.view` se houver mudança.
     apply_zoom_pan(
         &response,
         ui,
@@ -146,17 +215,15 @@ pub fn show(
         game_end_loop,
         view_start,
         view_end,
-        &mut opts.view,
+        &mut opts.viewport,
     );
 
-    // Recalcula a view (apply_zoom_pan pode tê-la atualizado).
-    let (view_start, view_end) = opts.view.unwrap_or((0, game_end_loop));
+    let (view_start, view_end) = opts.viewport.unwrap_or((0, game_end_loop));
     let view_start = view_start.min(game_end_loop.saturating_sub(MIN_VIEW_LOOPS));
     let view_end = view_end.min(game_end_loop).max(view_start + MIN_VIEW_LOOPS);
 
     let painter = ui.painter_at(chart_rect);
 
-    // Eixo de tempo no topo.
     let axis_top = chart_rect.top();
     draw_time_axis(
         &painter,
@@ -168,11 +235,12 @@ pub fn show(
         lps,
     );
 
-    // Lanes.
     let mut row_top = chart_rect.top() + TIME_AXIS_HEIGHT + ROW_GAP;
     for lane in &lanes.lanes {
-        let row_rect =
-            Rect::from_min_size(Pos2::new(chart_rect.left(), row_top), Vec2::new(total_w, ROW_HEIGHT));
+        let row_rect = Rect::from_min_size(
+            Pos2::new(chart_rect.left(), row_top),
+            Vec2::new(total_w, row_height),
+        );
         draw_lane(
             ui,
             &painter,
@@ -185,12 +253,13 @@ pub fn show(
             game_end_loop,
             lps,
             player_color,
+            row_height,
+            block_height,
+            mode,
         );
-        row_top += ROW_HEIGHT + ROW_GAP;
+        row_top += row_height + ROW_GAP;
     }
 
-    // Cursor crosshair: linha vertical no hover, com tempo formatado
-    // junto ao topo do eixo.
     if let Some(hover_pos) = response.hover_pos() {
         if hover_pos.x >= track_left && hover_pos.x <= track_left + track_width {
             painter.line_segment(
@@ -201,7 +270,8 @@ pub fn show(
                 Stroke::new(1.0, FOCUS_RING.gamma_multiply(0.6)),
             );
             let frac = (hover_pos.x - track_left) / track_width;
-            let loop_at = view_start + (frac.clamp(0.0, 1.0) * (view_end - view_start) as f32) as u32;
+            let loop_at = view_start
+                + (frac.clamp(0.0, 1.0) * (view_end - view_start) as f32) as u32;
             painter.text(
                 Pos2::new(hover_pos.x + 4.0, axis_top + 1.0),
                 Align2::LEFT_TOP,
@@ -237,25 +307,22 @@ fn apply_zoom_pan(
 ) {
     let view_w = (view_end - view_start) as f64;
 
-    // Pan: drag horizontal converte pixel em loops via fator atual.
     let drag_dx = response.drag_delta().x;
     if drag_dx.abs() > 0.01 && track_width > 0.0 {
         let loops_per_pixel = view_w / track_width as f64;
         let delta_loops = -(drag_dx as f64 * loops_per_pixel);
-        let new_start = (view_start as f64 + delta_loops)
-            .clamp(0.0, (full_end as f64 - view_w).max(0.0));
+        let new_start =
+            (view_start as f64 + delta_loops).clamp(0.0, (full_end as f64 - view_w).max(0.0));
         let new_start = new_start as u32;
         let new_end = new_start + view_w as u32;
         *view = Some((new_start, new_end.min(full_end)));
     }
 
-    // Double-click: reset auto-fit.
     if response.double_clicked() {
         *view = None;
         return;
     }
 
-    // Zoom: scroll wheel centrado no cursor.
     if response.hovered() {
         let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_y.abs() > 0.1 {
@@ -267,14 +334,11 @@ fn apply_zoom_pan(
                 ((cursor_x - track_left) / track_width).clamp(0.0, 1.0) as f64;
             let cursor_loop = view_start as f64 + cursor_frac * view_w;
 
-            // 1 unit de scroll = ~10% de zoom. Negativo (scroll down) =
-            // zoom out; positivo = zoom in.
             let zoom_factor = (-scroll_y as f64 * 0.0015).exp();
-            let new_w = (view_w * zoom_factor)
-                .clamp(MIN_VIEW_LOOPS as f64, full_end as f64);
+            let new_w =
+                (view_w * zoom_factor).clamp(MIN_VIEW_LOOPS as f64, full_end as f64);
             let new_start = (cursor_loop - cursor_frac * new_w).max(0.0);
             let new_end = (new_start + new_w).min(full_end as f64);
-            // Reajusta start se end estourou (preserva largura).
             let new_start = (new_end - new_w).max(0.0);
             *view = Some((new_start as u32, new_end as u32));
         }
@@ -318,7 +382,6 @@ fn draw_time_axis(
     let font = FontId::proportional(11.0);
     let start_secs = (view_start as f64 / lps.max(1.0)) as u32;
     let end_secs = (view_end as f64 / lps.max(1.0)) as u32;
-    // Primeiro tick alinhado ao múltiplo de step_secs.
     let first_tick = ((start_secs + step_secs - 1) / step_secs) * step_secs;
     let mut t_secs = first_tick;
     while t_secs <= end_secs {
@@ -353,9 +416,12 @@ fn draw_lane(
     end_loop: u32,
     lps: f64,
     player_color: Color32,
+    row_height: f32,
+    block_height: f32,
+    mode: LaneMode,
 ) {
-    // Ícone à esquerda — fica fixo (não escala com zoom).
-    let icon_top = row_rect.top() + (ROW_HEIGHT - ICON_SIZE) * 0.5;
+    // Ícone da estrutura à esquerda — fixo, não escala com zoom.
+    let icon_top = row_rect.top() + (row_height - ICON_SIZE) * 0.5;
     let icon_rect = Rect::from_min_size(
         Pos2::new(row_rect.left() + LEFT_GUTTER, icon_top),
         Vec2::splat(ICON_SIZE),
@@ -379,11 +445,10 @@ fn draw_lane(
         );
     }
 
-    let block_top = row_rect.center().y - BLOCK_HEIGHT * 0.5;
-    let block_bot = row_rect.center().y + BLOCK_HEIGHT * 0.5;
+    let block_top = row_rect.center().y - block_height * 0.5;
+    let block_bot = row_rect.center().y + block_height * 0.5;
 
-    // Faixa de vida da estrutura: baseline fina do born até died/end,
-    // mas só dentro da view.
+    // Faixa de vida da estrutura (baseline + tick no born).
     let lane_end_loop = lane.died_loop.unwrap_or(end_loop).min(end_loop);
     if lane_end_loop > lane.born_loop {
         let s = lane.born_loop.max(view_start);
@@ -398,7 +463,6 @@ fn draw_lane(
                 ],
                 Stroke::new(1.0, BORDER),
             );
-            // Tick vertical no born (apenas se visível).
             if lane.born_loop >= view_start && lane.born_loop <= view_end {
                 painter.line_segment(
                     [
@@ -411,71 +475,13 @@ fn draw_lane(
         }
     }
 
-    let font = FontId::proportional(10.0);
-    let center_y = row_rect.center().y;
-    let is_zerg = matches!(lane.canonical_type, "Hatchery" | "Lair" | "Hive");
+    let lane_is_zerg_hatch = is_zerg_hatch(lane.canonical_type);
 
-    // Para Zerg, desenhamos cada produção de Drone como uma linha fina
-    // numa sub-trilha paralela (até 3+ Drones podem nascer
-    // simultaneamente de uma Hatchery via larva + inject). Para
-    // Terran/Protoss, CC/Nexus produzem 1 worker por vez — bloco cheio
-    // ocupando toda a altura da faixa funciona bem.
-    if is_zerg {
-        let producing: Vec<&ProductionBlock> = lane
-            .blocks
-            .iter()
-            .filter(|b| matches!(b.kind, BlockKind::Producing))
-            .collect();
-        let track_assignments = assign_tracks(&producing);
-        let n_tracks = track_assignments.iter().copied().max().map(|m| m + 1).unwrap_or(1);
-        // Distribui as N trilhas dentro de BLOCK_HEIGHT com 1px entre
-        // linhas. Cada linha tem altura = (BLOCK_HEIGHT - (N-1)) / N
-        // saturada em mínimo 2px.
-        let line_h =
-            ((BLOCK_HEIGHT - (n_tracks.saturating_sub(1)) as f32) / n_tracks.max(1) as f32)
-                .max(2.0);
-        for (block, track_idx) in producing.iter().zip(track_assignments.iter()) {
-            let s = block.start_loop.max(view_start).min(view_end);
-            let e = block.end_loop.max(view_start).min(view_end);
-            if e <= s {
-                continue;
-            }
-            let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
-            let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
-            let top = block_top + *track_idx as f32 * (line_h + 1.0);
-            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + line_h));
-            painter.rect_filled(rect, 1.0, player_color);
-        }
-
-        // Morphs (Hatch→Lair, Lair→Hive) continuam como blocos cheios:
-        // a estrutura inteira está ocupada e nenhuma larva pode treinar
-        // worker — semantica de "impedimento total" que merece destaque.
-        for block in lane.blocks.iter().filter(|b| matches!(b.kind, BlockKind::Morphing)) {
-            let s = block.start_loop.max(view_start).min(view_end);
-            let e = block.end_loop.max(view_start).min(view_end);
-            if e <= s {
-                continue;
-            }
-            let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
-            let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
-            let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
-            painter.rect_filled(rect, 1.5, ACCENT_WARNING);
-            if rect.width() >= MIN_LABEL_WIDTH {
-                let total_dur = block.end_loop.saturating_sub(block.start_loop);
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    fmt_time(total_dur, lps),
-                    font.clone(),
-                    contrast_text_color(ACCENT_WARNING),
-                );
-            }
-        }
-        let _ = center_y;
-        return;
-    }
-
-    // Terran/Protoss: bloco cheio.
+    // Decide o estilo do bloco. Em modo Workers, Hatch/Lair/Hive usa
+    // sub-trilhas para Producing (drones paralelos via larvas). Em modo
+    // Army, é igual; e em Protoss pós-WarpGate, cada bloco produzido
+    // *após* o morph para WarpGate também usa sub-trilhas — isso dá o
+    // visual "estilo Zerg" para warp-ins em rajada.
     for block in &lane.blocks {
         let s = block.start_loop.max(view_start).min(view_end);
         let e = block.end_loop.max(view_start).min(view_end);
@@ -484,59 +490,98 @@ fn draw_lane(
         }
         let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
         let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
-        let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
+
+        let use_thin_track = match block.kind {
+            BlockKind::Producing => {
+                lane_is_zerg_hatch
+                    || lane
+                        .warpgate_since_loop
+                        .map(|wg| block.start_loop >= wg)
+                        .unwrap_or(false)
+            }
+            // Morphing (CC→Orbital/PF) e Impeded (addon Terran) sempre
+            // ocupam toda a faixa — semantica de "estrutura inteira
+            // bloqueada", merece destaque visual cheio.
+            _ => false,
+        };
+
         let color = match block.kind {
             BlockKind::Producing => player_color,
             BlockKind::Morphing => ACCENT_WARNING,
+            BlockKind::Impeded => ACCENT_IMPEDED,
         };
-        painter.rect_filled(rect, 1.5, color);
 
-        if rect.width() >= MIN_LABEL_WIDTH {
-            let total_dur = block.end_loop.saturating_sub(block.start_loop);
-            let label = fmt_time(total_dur, lps);
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                label,
-                font.clone(),
-                contrast_text_color(color),
-            );
-        }
-    }
-}
-
-/// Atribui cada bloco a uma sub-trilha (track) paralela usando o
-/// algoritmo clássico de interval scheduling: percorre os blocos por
-/// `start_loop` e coloca em qualquer trilha cujo último intervalo já
-/// terminou; cria nova trilha se nenhuma estiver livre. Os blocos já
-/// vêm ordenados em `extract.rs`, mas refazemos a ordem aqui para
-/// resiliência. Output paralelo a `blocks` (mesmo length).
-fn assign_tracks(blocks: &[&ProductionBlock]) -> Vec<usize> {
-    let mut tracks_end: Vec<u32> = Vec::new();
-    let mut assigned = vec![0usize; blocks.len()];
-    let mut order: Vec<usize> = (0..blocks.len()).collect();
-    order.sort_by_key(|&i| blocks[i].start_loop);
-    for &i in &order {
-        let b = blocks[i];
-        if let Some(idx) = tracks_end.iter().position(|&e| e <= b.start_loop) {
-            tracks_end[idx] = b.end_loop;
-            assigned[i] = idx;
+        if use_thin_track {
+            // Em sub-trilha, achatamos verticalmente para representar
+            // paralelismo. Sem assign_tracks aqui: como blocos vêm
+            // ordenados e a `merge_continuous` de modo paralelo já
+            // preservou overlaps, basta desenhar os blocos um sobre o
+            // outro num retângulo central thin.
+            let line_h = (block_height * 0.5).max(3.0);
+            let top = block_top + (block_height - line_h) * 0.5;
+            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + line_h));
+            painter.rect_filled(rect, 1.0, color);
+            // Ícone só faz sentido em sub-trilha quando block_height é
+            // suficiente — pulamos aqui (sub-track é fina por design).
         } else {
-            assigned[i] = tracks_end.len();
-            tracks_end.push(b.end_loop);
+            let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
+            painter.rect_filled(rect, 1.5, color);
+
+            // Decisão de mostrar ícone/texto usa uma largura derivada
+            // dos game loops do bloco, não de `rect.width()`. Como
+            // `loop_to_x` aplica `round()` independentemente em x0 e
+            // x1, a diferença pode oscilar ±1px entre frames quando os
+            // loops do bloco caem perto de meia-fração de pixel — isso
+            // causa flicker no threshold de ícone (22px). A largura
+            // derivada de loops é estável: depende só de `block_loops`,
+            // `view_loops` e `track_w` (todos snapped/inteiros).
+            let block_loops = block.end_loop.saturating_sub(block.start_loop) as f64;
+            let view_loops = view_end.saturating_sub(view_start).max(1) as f64;
+            let block_w_stable = (block_loops / view_loops * track_w as f64) as f32;
+
+            let mut drew_icon = false;
+
+            if mode == LaneMode::Army && block_w_stable >= ICON_INLINE_MIN_WIDTH {
+                if let Some(name) = block.produced_type {
+                    if let Some(src) = unit_icon(name) {
+                        let icon_h = (block_height - 2.0).min(20.0);
+                        let icon_size = Vec2::splat(icon_h);
+                        let icon_rect =
+                            Rect::from_center_size(rect.center(), icon_size);
+                        egui::Image::new(src)
+                            .fit_to_exact_size(icon_size)
+                            .paint_at(ui, icon_rect);
+                        drew_icon = true;
+                    }
+                }
+            }
+
+            if !drew_icon && block_w_stable >= MIN_LABEL_WIDTH {
+                let total_dur = block.end_loop.saturating_sub(block.start_loop);
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    fmt_time(total_dur, lps),
+                    FontId::proportional(10.0),
+                    contrast_text_color(color),
+                );
+            }
         }
     }
-    assigned
 }
 
-fn loop_to_x(game_loop: u32, view_start: u32, view_end: u32, track_left: f32, track_w: f32) -> f32 {
+fn loop_to_x(
+    game_loop: u32,
+    view_start: u32,
+    view_end: u32,
+    track_left: f32,
+    track_w: f32,
+) -> f32 {
     let view_w = view_end.saturating_sub(view_start).max(1);
     let frac = (game_loop.saturating_sub(view_start)) as f32 / view_w as f32;
     track_left + frac.clamp(0.0, 1.0) * track_w
 }
 
-/// Texto preto sobre cores claras / branco sobre cores escuras.
-/// Heurística simples baseada na luminância percebida.
 fn contrast_text_color(bg: Color32) -> Color32 {
     let r = bg.r() as f32;
     let g = bg.g() as f32;

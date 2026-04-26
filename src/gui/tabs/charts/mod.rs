@@ -19,9 +19,9 @@
 
 mod army;
 mod classify;
-mod worker_production;
+mod production;
 
-pub use worker_production::WorkerProductionOptions;
+pub use production::ProductionChartOptions;
 
 use egui::Ui;
 
@@ -72,13 +72,19 @@ pub fn show(
     loaded: &LoadedReplay,
     config: &AppConfig,
     army_opts: &mut ArmyChartOptions,
-    worker_prod_opts: &mut WorkerProductionOptions,
+    production_opts: &mut ProductionChartOptions,
 ) {
+    // Scrollbar sempre visível: caso contrário, ela aparece/some
+    // dependendo do hover e da altura total do conteúdo, e a animação
+    // de fade reduz/restaura a largura disponível por frações de pixel
+    // a cada frame — o que faz os blocos do gráfico de produção
+    // oscilarem visivelmente em largura mesmo com o mouse parado.
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
             army::army_value_plot(ui, loaded, config, army_opts);
             ui.separator();
-            worker_production::show(ui, loaded, config, worker_prod_opts);
+            production::show(ui, loaded, config, production_opts);
         });
 }

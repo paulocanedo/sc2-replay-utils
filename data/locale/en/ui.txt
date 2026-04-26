@@ -333,11 +333,17 @@ charts.tooltip.army_anon = Time: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTime: {mm}:{ss}\nCount: {value}
 charts.tooltip.count_anon = Time: {mm}:{ss}\nCount: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
-charts.worker_production.title = Worker production
-charts.worker_production.player = Player:
-charts.worker_production.empty = No worker-producing structures found.
-charts.worker_production.reset_view = Reset view
-charts.worker_production.reset_view.hint = Reset zoom and pan. Tip: scroll to zoom, drag to pan, double-click to reset.
+charts.production.title = Production
+charts.production.view.workers = Workers
+charts.production.view.army = Army
+charts.production.view.research = Research
+charts.production.view.upgrades = Upgrades
+charts.production.coming_soon = Coming soon.
+charts.production.player = Player:
+charts.production.empty.workers = No worker-producing structures found.
+charts.production.empty.army = No army-producing structures found.
+charts.production.reset_view = Reset view
+charts.production.reset_view.hint = Reset zoom and pan. Tip: scroll to zoom, drag to pan, double-click to reset.
 
 # ── Timeline tab ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap

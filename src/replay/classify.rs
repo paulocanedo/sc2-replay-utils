@@ -48,7 +48,7 @@ pub(super) fn is_worker_producer(name: &str) -> bool {
 /// Estruturas que produzem unidades army (Terran e Protoss). Zerg usa
 /// larvas em Hatchery/Lair/Hive — tratamento específico fica fora
 /// dessa lista, consumers pulam a raça inteira.
-pub(super) fn is_army_producer(name: &str) -> bool {
+pub fn is_army_producer(name: &str) -> bool {
     matches!(
         name,
         // Terran
@@ -63,6 +63,22 @@ pub(super) fn is_army_producer(name: &str) -> bool {
 /// por `derive_capacity_indices` para alimentar `army_capacity`.
 pub(super) fn is_army_producer_all(name: &str) -> bool {
     is_army_producer(name) || is_zerg_hatch(name)
+}
+
+/// Addons Terran cuja construção bloqueia a estrutura-mãe de produzir
+/// army enquanto o addon está sendo construído. Usado pelo gráfico de
+/// produção (modo Army Terran) para emitir blocos `Impeded` e por
+/// `army_production_by_battle` para descontar capacidade.
+pub fn is_incapacitating_addon(name: &str) -> bool {
+    matches!(
+        name,
+        "BarracksReactor"
+            | "BarracksTechLab"
+            | "FactoryReactor"
+            | "FactoryTechLab"
+            | "StarportReactor"
+            | "StarportTechLab"
+    )
 }
 
 /// Hatcheries do Zerg (inclui morphs Lair/Hive) — cada uma contribui

@@ -51,7 +51,10 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use classify::{is_larva_born_army, is_structure_name, is_worker_name, is_zerg_hatch};
+pub use classify::{
+    is_army_producer, is_incapacitating_addon, is_larva_born_army, is_structure_name,
+    is_worker_name, is_zerg_hatch,
+};
 pub use parse::parse_replay;
 pub use types::{
     ChatEntry, EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,

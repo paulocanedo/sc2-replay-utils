@@ -96,8 +96,8 @@ pub struct AppState {
     pub timeline_playback_speed: u8,
     /// Opções do plot principal de army (métrica, grouping, checkboxes).
     pub charts_army_opts: tabs::charts::ArmyChartOptions,
-    /// Estado do gráfico de produção de worker (jogador selecionado).
-    pub charts_worker_prod_opts: tabs::charts::WorkerProductionOptions,
+    /// Estado do gráfico de produção (view atual + jogador + viewport).
+    pub charts_production_opts: tabs::charts::ProductionChartOptions,
     pub show_about: bool,
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
@@ -186,7 +186,7 @@ impl AppState {
             timeline_playing: false,
             timeline_playback_speed: 1,
             charts_army_opts: tabs::charts::ArmyChartOptions::default(),
-            charts_worker_prod_opts: tabs::charts::WorkerProductionOptions::default(),
+            charts_production_opts: tabs::charts::ProductionChartOptions::default(),
             show_about: false,
             timeline_show_heatmap: false,
             timeline_show_creep: true,
