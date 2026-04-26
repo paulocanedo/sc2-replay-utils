@@ -35,14 +35,13 @@ pub(super) mod unit_column;
 // (a aba Charts consome em `worker_production`).
 pub(crate) use unit_column::structure_icon;
 
-use egui::{Color32, RichText, TextStyle, Ui};
+use egui::{Color32, TextStyle, Ui};
 
-use crate::colors::player_slot_color_bright;
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::LoadedReplay;
 use crate::tokens::SPACE_XS;
-use crate::widgets::toggle_chip_bool;
+use crate::widgets::{player_pov_pill, toggle_chip_bool, PlayerPickerSize};
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
 /// Compartilhado entre `minimap` (camera rect) e `overlays` (heatmap
@@ -159,18 +158,29 @@ pub fn show(
                 toggle_chip_bool(ui, t("timeline.toggle.map", lang), show_map, None);
                 toggle_chip_bool(ui, t("timeline.toggle.fog", lang), show_fog, None);
                 if *show_fog {
-                    // Seletor de POV: um radio por jogador na cor do
-                    // slot. Clamp prévio garante que o índice
-                    // persistido entre replays não fique fora do range.
+                    // Seletor de POV inline com os toggles. Clamp
+                    // prévio garante que o índice persistido entre
+                    // replays não fique fora do range.
                     let n = loaded.timeline.players.len();
                     if n > 0 && *fog_player >= n {
                         *fog_player = 0;
                     }
                     for (i, p) in loaded.timeline.players.iter().enumerate() {
-                        let label = RichText::new(&p.name)
-                            .color(player_slot_color_bright(i))
-                            .strong();
-                        ui.radio_value(fog_player, i, label);
+                        if player_pov_pill(
+                            ui,
+                            &p.name,
+                            &p.race,
+                            i,
+                            config.is_user(&p.name),
+                            i == *fog_player,
+                            PlayerPickerSize::Small,
+                            config,
+                            lang,
+                        )
+                        .clicked()
+                        {
+                            *fog_player = i;
+                        }
                     }
                 }
             });

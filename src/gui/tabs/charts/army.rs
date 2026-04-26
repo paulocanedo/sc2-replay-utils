@@ -9,7 +9,7 @@ use crate::locale::{localize, t, tf, Language};
 use crate::replay::is_worker_name;
 use crate::replay_state::{loop_to_secs, LoadedReplay};
 use crate::tokens::SPACE_S;
-use crate::widgets::{chip, toggle_chip_bool};
+use crate::widgets::{chip, player_pov_pill, toggle_chip_bool, PlayerPickerSize};
 use crate::{army_value, balance_data};
 
 use super::classify::*;
@@ -89,19 +89,23 @@ pub(super) fn army_value_plot(
                 if opts.grouped_player >= player_count && player_count > 0 {
                     opts.grouped_player = 0;
                 }
-                let selected_name = loaded
-                    .timeline
-                    .players
-                    .get(opts.grouped_player)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_default();
-                egui::ComboBox::from_id_salt("charts_grouped_player")
-                    .selected_text(selected_name)
-                    .show_ui(ui, |ui| {
-                        for (idx, p) in loaded.timeline.players.iter().enumerate() {
-                            ui.selectable_value(&mut opts.grouped_player, idx, &p.name);
-                        }
-                    });
+                for (idx, p) in loaded.timeline.players.iter().enumerate() {
+                    if player_pov_pill(
+                        ui,
+                        &p.name,
+                        &p.race,
+                        idx,
+                        config.is_user(&p.name),
+                        idx == opts.grouped_player,
+                        PlayerPickerSize::Small,
+                        config,
+                        lang,
+                    )
+                    .clicked()
+                    {
+                        opts.grouped_player = idx;
+                    }
+                }
             } else {
                 // No modo agregado, os chips Army/Workers controlam o que
                 // entra na soma. Impede desmarcar ambos simultaneamente.
