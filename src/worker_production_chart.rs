@@ -68,6 +68,14 @@ pub struct PlayerWorkerLanes {
     pub lanes: Vec<StructureLane>,
 }
 
+/// Tolerância para considerar dois blocos contíguos. Produções de
+/// SCV/Probe encadeadas pelo replay chegam com gap = 0 ou 1 loop entre
+/// um Finished e o próximo Started, mas patches/replays exóticos podem
+/// introduzir alguns frames de folga. 5 loops ≈ 220ms em Faster — fica
+/// abaixo do tempo de reação humano, então qualquer pausa "de verdade"
+/// (player parou de filar) é maior que isso.
+const CONTINUITY_TOLERANCE_LOOPS: u32 = 5;
+
 /// Tipos de townhall que viram lane no gráfico.
 fn townhall_canonical(name: &str) -> Option<&'static str> {
     match name {
@@ -289,13 +297,51 @@ fn extract_player(player: &PlayerTimeline, base_build: u32) -> PlayerWorkerLanes
     let mut lanes: Vec<StructureLane> = lanes_by_tag.into_values().collect();
     lanes.sort_by_key(|l| (l.born_loop, l.tag));
 
-    // Garante ordenação interna dos blocos (Started fora de ordem em
-    // replays patológicos podem violar isso).
     for lane in &mut lanes {
         lane.blocks.sort_by_key(|b| b.start_loop);
+        lane.blocks = merge_continuous(std::mem::take(&mut lane.blocks));
     }
 
     PlayerWorkerLanes { lanes }
+}
+
+/// Mescla blocos consecutivos do mesmo `kind` quando o gap entre eles
+/// é ≤ `CONTINUITY_TOLERANCE_LOOPS` e **não há overlap**. O caso de
+/// overlap (Zerg produzindo múltiplos Drones em paralelo) é preservado:
+/// blocos sobrepostos representam trilhas paralelas e devem virar
+/// linhas finas separadas no render.
+///
+/// Espera input ordenado por `start_loop`.
+fn merge_continuous(blocks: Vec<ProductionBlock>) -> Vec<ProductionBlock> {
+    let mut out: Vec<ProductionBlock> = Vec::with_capacity(blocks.len());
+    for b in blocks {
+        // Tenta mesclar com algum bloco já emitido (não necessariamente
+        // o último — em Zerg, blocos paralelos podem ter sido empurrados
+        // entre dois encadeáveis na mesma trilha).
+        let mut merged = false;
+        for prev in out.iter_mut().rev() {
+            if prev.kind != b.kind {
+                continue;
+            }
+            // Overlap: trilhas paralelas, deixa separado.
+            if b.start_loop < prev.end_loop {
+                continue;
+            }
+            // Continuidade: gap ≤ tolerância.
+            if b.start_loop.saturating_sub(prev.end_loop) <= CONTINUITY_TOLERANCE_LOOPS {
+                prev.end_loop = prev.end_loop.max(b.end_loop);
+                merged = true;
+                break;
+            }
+            // prev terminou antes do gap aceitável; futuros candidatos
+            // anteriores só estão mais distantes, então paramos a busca.
+            break;
+        }
+        if !merged {
+            out.push(b);
+        }
+    }
+    out
 }
 
 /// Encontra a townhall que produziu este worker. Cascata:
@@ -632,6 +678,103 @@ mod tests {
             lane.blocks.is_empty(),
             "Hatch→Lair não deve emitir bloco Morphing"
         );
+    }
+
+    #[test]
+    fn consecutive_workers_merge_into_single_block() {
+        // 3 SCVs encadeados: 0→272, 272→544, 544→816. Devem virar
+        // um único bloco 0→816. (start = finish - 272.)
+        let cc = ev(
+            0,
+            0,
+            EntityEventKind::ProductionFinished,
+            "CommandCenter",
+            1,
+            None,
+        );
+        let mut events = vec![cc];
+        for (i, finish) in [272u32, 544, 816].iter().enumerate() {
+            events.push(ev(
+                *finish,
+                (i as u32) * 2 + 1,
+                EntityEventKind::ProductionStarted,
+                "SCV",
+                10 + i as i64,
+                Some(1),
+            ));
+            events.push(ev(
+                *finish,
+                (i as u32) * 2 + 2,
+                EntityEventKind::ProductionFinished,
+                "SCV",
+                10 + i as i64,
+                None,
+            ));
+        }
+        let p = player_with_events(events);
+        let out = extract_player(&p, 0);
+        let lane = &out.lanes[0];
+        assert_eq!(lane.blocks.len(), 1, "blocos consecutivos devem mesclar");
+        assert_eq!(lane.blocks[0].start_loop, 0);
+        assert_eq!(lane.blocks[0].end_loop, 816);
+    }
+
+    #[test]
+    fn parallel_drones_do_not_merge() {
+        // Dois drones nascendo em paralelo numa Hatch (jamelas que se
+        // sobrepõem) devem permanecer como blocos separados — não
+        // mesclar, porque o render depende disso para empilhar
+        // sub-trilhas.
+        let h = ev(
+            0,
+            0,
+            EntityEventKind::ProductionFinished,
+            "Hatchery",
+            1,
+            None,
+        );
+        let larva_a = vec![
+            ev(50, 1, EntityEventKind::ProductionStarted, "Larva", 5, Some(1)),
+            ev(50, 2, EntityEventKind::ProductionFinished, "Larva", 5, None),
+        ];
+        let larva_b = vec![
+            ev(60, 3, EntityEventKind::ProductionStarted, "Larva", 6, Some(1)),
+            ev(60, 4, EntityEventKind::ProductionFinished, "Larva", 6, None),
+        ];
+        let drone_a = vec![
+            ev(300, 5, EntityEventKind::Died, "Larva", 5, None),
+            ev(
+                300,
+                6,
+                EntityEventKind::ProductionStarted,
+                "Drone",
+                5,
+                Some(5),
+            ),
+            ev(300, 7, EntityEventKind::ProductionFinished, "Drone", 5, None),
+        ];
+        let drone_b = vec![
+            ev(320, 8, EntityEventKind::Died, "Larva", 6, None),
+            ev(
+                320,
+                9,
+                EntityEventKind::ProductionStarted,
+                "Drone",
+                6,
+                Some(6),
+            ),
+            ev(320, 10, EntityEventKind::ProductionFinished, "Drone", 6, None),
+        ];
+        let mut events = vec![h];
+        events.extend(larva_a);
+        events.extend(larva_b);
+        events.extend(drone_a);
+        events.extend(drone_b);
+        let p = player_with_events(events);
+        let out = extract_player(&p, 0);
+        let lane = &out.lanes[0];
+        // Drone A: 28→300, Drone B: 48→320 (overlap). Blocos separados.
+        assert_eq!(lane.blocks.len(), 2);
     }
 
     #[test]
