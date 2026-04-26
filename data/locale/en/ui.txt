@@ -326,6 +326,8 @@ charts.tooltip.supply_line = Supply: {used}/{made}
 charts.worker_production.title = Worker production by townhall
 charts.worker_production.player = Player:
 charts.worker_production.empty = No worker-producing structures found.
+charts.worker_production.reset_view = Reset view
+charts.worker_production.reset_view.hint = Reset zoom and pan. Tip: scroll to zoom, drag to pan, double-click to reset.
 
 # ── Timeline tab ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
