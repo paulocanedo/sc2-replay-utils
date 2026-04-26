@@ -9,7 +9,9 @@
 // com baseline fina + blocos de produção/morph/impeded.
 //
 // `Army` adiciona o bloco `Impeded` (Terran com addon em construção,
-// cor `ACCENT_IMPEDED`) e, no modo Protoss pós-WarpGateResearch, troca
+// renderizado em `ACCENT_WARNING` — mesma cor do morph CC→Orbital, já
+// que ambos indicam "estrutura ocupada/bloqueada") e, no modo Protoss
+// pós-WarpGateResearch, troca
 // o estilo de render por sub-trilhas thin estilo Hatchery — uma vez
 // que warpgates podem warpinar várias unidades em rajadas paralelas
 // entre estruturas distintas.
@@ -20,15 +22,14 @@
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::colors::{
-    player_slot_color_bright, ACCENT_IMPEDED, ACCENT_WARNING, BORDER, FOCUS_RING, LABEL_DIM,
-    SURFACE_RAISED,
+    player_slot_color_bright, ACCENT_WARNING, BORDER, FOCUS_RING, LABEL_DIM, SURFACE_RAISED,
 };
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::production_lanes::{extract, BlockKind, LaneMode, StructureLane};
 use crate::replay::is_zerg_hatch;
 use crate::replay_state::{fmt_time, LoadedReplay};
-use crate::tabs::timeline::{structure_icon, unit_icon};
+use crate::tabs::timeline::structure_icon;
 use crate::widgets::{chip, player_pov_pill, PlayerPickerSize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,10 +72,6 @@ const BLOCK_HEIGHT_WORKERS: f32 = 11.0;
 const BLOCK_HEIGHT_ARMY: f32 = 22.0;
 const RIGHT_PAD: f32 = 8.0;
 const LEFT_GUTTER: f32 = 8.0;
-const MIN_LABEL_WIDTH: f32 = 36.0;
-/// Largura mínima (px) para desenhar o ícone do produzido dentro do
-/// bloco — abaixo disso fica só o retângulo colorido.
-const ICON_INLINE_MIN_WIDTH: f32 = 22.0;
 const TIME_AXIS_HEIGHT: f32 = 18.0;
 const MIN_VIEW_LOOPS: u32 = 112;
 
@@ -112,8 +109,11 @@ pub fn show(
         opts.selected_player = 0;
     }
 
+    // Army temporariamente desativado — a implementação fica preservada
+    // (testes + extrator), mas o render fica como stub "em breve" até
+    // a feature ser revisada. Pesquisas/Upgrades também são stubs.
     match opts.view {
-        ProductionView::Research | ProductionView::Upgrades => {
+        ProductionView::Army | ProductionView::Research | ProductionView::Upgrades => {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(t("charts.production.coming_soon", lang)).italics(),
@@ -125,7 +125,6 @@ pub fn show(
 
     let mode = match opts.view {
         ProductionView::Workers => LaneMode::Workers,
-        ProductionView::Army => LaneMode::Army,
         _ => unreachable!(),
     };
 
@@ -251,11 +250,9 @@ pub fn show(
             view_start,
             view_end,
             game_end_loop,
-            lps,
             player_color,
             row_height,
             block_height,
-            mode,
         );
         row_top += row_height + ROW_GAP;
     }
@@ -414,11 +411,9 @@ fn draw_lane(
     view_start: u32,
     view_end: u32,
     end_loop: u32,
-    lps: f64,
     player_color: Color32,
     row_height: f32,
     block_height: f32,
-    mode: LaneMode,
 ) {
     // Ícone da estrutura à esquerda — fixo, não escala com zoom.
     let icon_top = row_rect.top() + (row_height - ICON_SIZE) * 0.5;
@@ -491,13 +486,20 @@ fn draw_lane(
         let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
         let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
 
+        let block_post_reactor = matches!(block.kind, BlockKind::Producing)
+            && lane
+                .reactor_since_loop
+                .map(|r| block.start_loop >= r)
+                .unwrap_or(false);
+
         let use_thin_track = match block.kind {
             BlockKind::Producing => {
-                lane_is_zerg_hatch
-                    || lane
-                        .warpgate_since_loop
-                        .map(|wg| block.start_loop >= wg)
-                        .unwrap_or(false)
+                !block_post_reactor
+                    && (lane_is_zerg_hatch
+                        || lane
+                            .warpgate_since_loop
+                            .map(|wg| block.start_loop >= wg)
+                            .unwrap_or(false))
             }
             // Morphing (CC→Orbital/PF) e Impeded (addon Terran) sempre
             // ocupam toda a faixa — semantica de "estrutura inteira
@@ -507,65 +509,36 @@ fn draw_lane(
 
         let color = match block.kind {
             BlockKind::Producing => player_color,
-            BlockKind::Morphing => ACCENT_WARNING,
-            BlockKind::Impeded => ACCENT_IMPEDED,
+            // Morph in-place (CC→Orbital/PF) e Impeded (addon Terran em
+            // construção) compartilham a mesma cor: ambos representam
+            // "estrutura existe mas está bloqueada para a função normal".
+            BlockKind::Morphing | BlockKind::Impeded => ACCENT_WARNING,
         };
 
-        if use_thin_track {
-            // Em sub-trilha, achatamos verticalmente para representar
-            // paralelismo. Sem assign_tracks aqui: como blocos vêm
-            // ordenados e a `merge_continuous` de modo paralelo já
-            // preservou overlaps, basta desenhar os blocos um sobre o
-            // outro num retângulo central thin.
+        if block_post_reactor {
+            // Lane Terran com reactor anexado: duas faixas top/bottom
+            // representando capacidade paralela 2x. O `sub_track` do
+            // bloco (0 ou 1) decide qual metade ocupar, com gap fino
+            // entre elas para distinguir visualmente.
+            let gap = 1.0;
+            let half_h = ((block_height - gap) * 0.5).max(3.0);
+            let (top, bot) = if block.sub_track == 0 {
+                (block_top, block_top + half_h)
+            } else {
+                (block_bot - half_h, block_bot)
+            };
+            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, bot));
+            painter.rect_filled(rect, 1.5, color);
+        } else if use_thin_track {
+            // Sub-trilha thin centralizada para Hatch Zerg / WarpGate
+            // pós-research — comunica paralelismo via empilhamento.
             let line_h = (block_height * 0.5).max(3.0);
             let top = block_top + (block_height - line_h) * 0.5;
             let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + line_h));
             painter.rect_filled(rect, 1.0, color);
-            // Ícone só faz sentido em sub-trilha quando block_height é
-            // suficiente — pulamos aqui (sub-track é fina por design).
         } else {
             let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
             painter.rect_filled(rect, 1.5, color);
-
-            // Decisão de mostrar ícone/texto usa uma largura derivada
-            // dos game loops do bloco, não de `rect.width()`. Como
-            // `loop_to_x` aplica `round()` independentemente em x0 e
-            // x1, a diferença pode oscilar ±1px entre frames quando os
-            // loops do bloco caem perto de meia-fração de pixel — isso
-            // causa flicker no threshold de ícone (22px). A largura
-            // derivada de loops é estável: depende só de `block_loops`,
-            // `view_loops` e `track_w` (todos snapped/inteiros).
-            let block_loops = block.end_loop.saturating_sub(block.start_loop) as f64;
-            let view_loops = view_end.saturating_sub(view_start).max(1) as f64;
-            let block_w_stable = (block_loops / view_loops * track_w as f64) as f32;
-
-            let mut drew_icon = false;
-
-            if mode == LaneMode::Army && block_w_stable >= ICON_INLINE_MIN_WIDTH {
-                if let Some(name) = block.produced_type {
-                    if let Some(src) = unit_icon(name) {
-                        let icon_h = (block_height - 2.0).min(20.0);
-                        let icon_size = Vec2::splat(icon_h);
-                        let icon_rect =
-                            Rect::from_center_size(rect.center(), icon_size);
-                        egui::Image::new(src)
-                            .fit_to_exact_size(icon_size)
-                            .paint_at(ui, icon_rect);
-                        drew_icon = true;
-                    }
-                }
-            }
-
-            if !drew_icon && block_w_stable >= MIN_LABEL_WIDTH {
-                let total_dur = block.end_loop.saturating_sub(block.start_loop);
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    fmt_time(total_dur, lps),
-                    FontId::proportional(10.0),
-                    contrast_text_color(color),
-                );
-            }
         }
     }
 }
@@ -582,14 +555,3 @@ fn loop_to_x(
     track_left + frac.clamp(0.0, 1.0) * track_w
 }
 
-fn contrast_text_color(bg: Color32) -> Color32 {
-    let r = bg.r() as f32;
-    let g = bg.g() as f32;
-    let b = bg.b() as f32;
-    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    if lum > 150.0 {
-        Color32::from_rgb(20, 20, 20)
-    } else {
-        Color32::from_rgb(240, 240, 240)
-    }
-}

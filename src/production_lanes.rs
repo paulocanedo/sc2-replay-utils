@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use crate::balance_data;
 use crate::replay::{
     is_army_producer, is_incapacitating_addon, is_larva_born_army, is_worker_name, is_zerg_hatch,
-    EntityEvent, EntityEventKind, PlayerTimeline, ReplayTimeline,
+    EntityEvent, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -58,6 +58,12 @@ pub struct ProductionBlock {
     /// blocos onde o tipo não é interessante (worker mode — o ícone à
     /// esquerda já comunica) ou desconhecido.
     pub produced_type: Option<&'static str>,
+    /// Trilha vertical dentro da lane. 0 = trilha única (full-height) ou
+    /// trilha superior. 1 = trilha inferior — usada apenas em lanes
+    /// Terran com Reactor anexado, para blocos `Producing` sobrepostos
+    /// pós-reactor. Hatch/WarpGate continuam 0 (renderização thin
+    /// centralizada permanece inalterada).
+    pub sub_track: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +81,12 @@ pub struct StructureLane {
     /// estilo "thin sub-tracks" (warp-in discreto). `None` para
     /// estruturas que nunca foram WarpGate.
     pub warpgate_since_loop: Option<u32>,
+    /// Para lanes Terran: loop em que um Reactor terminou de ser
+    /// construído nesta estrutura. Blocos `Producing` com
+    /// `start_loop >= reactor_since_loop` ganham `sub_track` 0 ou 1
+    /// (renderizados em duas faixas top/bottom representando a
+    /// capacidade paralela 2x). `None` se nunca teve reactor.
+    pub reactor_since_loop: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -83,6 +95,58 @@ pub struct PlayerProductionLanes {
 }
 
 const CONTINUITY_TOLERANCE_LOOPS: u32 = 5;
+
+/// Reactor (addon Terran que habilita produção paralela 2x). Subset de
+/// `is_incapacitating_addon` que exclui TechLabs — TechLab também bloqueia
+/// a estrutura durante a construção, mas não habilita paralelismo depois.
+fn is_reactor_addon(name: &str) -> bool {
+    matches!(name, "BarracksReactor" | "FactoryReactor" | "StarportReactor")
+}
+
+/// Tipo canônico da estrutura-mãe esperada para cada addon.
+fn addon_parent_canonical(addon: &str) -> Option<&'static str> {
+    match addon {
+        "BarracksReactor" | "BarracksTechLab" => Some("Barracks"),
+        "FactoryReactor" | "FactoryTechLab" => Some("Factory"),
+        "StarportReactor" | "StarportTechLab" => Some("Starport"),
+        _ => None,
+    }
+}
+
+/// Resolve o parent de um addon Terran por proximidade espacial. O
+/// `UnitInitEvent` do s2protocol não carrega `creator_unit_tag_index`,
+/// então `creator_tag` chega como `None` para Reactor/TechLab e
+/// precisamos achar a estrutura-mãe pelo posicionamento — addons são
+/// sempre colados na estrutura, então a Barracks/Factory/Starport mais
+/// próxima viva é virtualmente sempre a correta.
+fn resolve_addon_parent(
+    addon: &str,
+    addon_x: u8,
+    addon_y: u8,
+    at_loop: u32,
+    lanes: &HashMap<i64, StructureLane>,
+) -> Option<i64> {
+    let parent_type = addon_parent_canonical(addon)?;
+    let mut best: Option<(i64, i32)> = None;
+    for lane in lanes.values() {
+        if lane.canonical_type != parent_type {
+            continue;
+        }
+        if lane.born_loop > at_loop {
+            continue;
+        }
+        if lane.died_loop.map(|d| d <= at_loop).unwrap_or(false) {
+            continue;
+        }
+        let dx = lane.pos_x as i32 - addon_x as i32;
+        let dy = lane.pos_y as i32 - addon_y as i32;
+        let d2 = dx * dx + dy * dy;
+        if best.map(|(_, b)| d2 < b).unwrap_or(true) {
+            best = Some((lane.tag, d2));
+        }
+    }
+    best.map(|(tag, _)| tag)
+}
 
 /// Tipos de townhall (modo Workers).
 fn townhall_canonical(name: &str) -> Option<&'static str> {
@@ -135,8 +199,14 @@ fn is_target_unit(name: &str, mode: LaneMode, is_zerg: bool) -> bool {
             } else {
                 // Terran/Protoss: qualquer unidade não-worker, não-larva,
                 // não-estrutura é candidata. O resolver de producer
-                // descarta unidades que não tenham lane associada.
-                !is_zerg_hatch(name) && !is_army_producer(name) && name != "Larva"
+                // descarta unidades que não tenham lane associada. Addons
+                // Terran (Reactor/TechLab) não são unidades produzidas:
+                // a janela de construção é registrada como bloco
+                // `Impeded` no fluxo dedicado abaixo.
+                !is_zerg_hatch(name)
+                    && !is_army_producer(name)
+                    && !is_incapacitating_addon(name)
+                    && name != "Larva"
             }
         }
     }
@@ -282,6 +352,30 @@ fn extract_player(
 
     let is_zerg = matches!(player.race.as_str(), "Zerg");
 
+    // Cmd matching: índice cmds_by_producer (creator_tag → cmds). Mesma
+    // estratégia do `build_order::extract` para que o gráfico use o
+    // instante real em que o jogador clicou Train, não uma estimativa
+    // de balance_data subtraída do finish_loop. Mantém duas pipelines
+    // alinhadas no que mostram pra unidades produzidas.
+    let mut cmds_by_producer: HashMap<i64, Vec<usize>> = HashMap::new();
+    if mode == LaneMode::Army {
+        for (i, cmd) in player.production_cmds.iter().enumerate() {
+            if let Some(&p) = cmd.producer_tags.first() {
+                cmds_by_producer.entry(p).or_default().push(i);
+            }
+        }
+    }
+    let mut consumed = vec![false; player.production_cmds.len()];
+
+    // Slot scheduling: cada `creator_tag` (estrutura Terran ou larva
+    // Zerg) tem N slots de produção (1 por padrão; 2 quando um Reactor
+    // termina e expande a capacidade da Barracks/Factory/Starport).
+    // O slot guarda o `finish_loop` da última produção que ocupou — a
+    // próxima unidade pareada usa `start = max(cmd_loop, slot_finish)`,
+    // herdando a semântica de fila do `build_order` mas permitindo
+    // paralelismo via múltiplos slots.
+    let mut slots_by_creator: HashMap<i64, Vec<u32>> = HashMap::new();
+
     for i in 0..events.len() {
         let ev = &events[i];
         match ev.kind {
@@ -307,6 +401,7 @@ fn extract_player(
                                             end_loop: ev.game_loop,
                                             kind: BlockKind::Morphing,
                                             produced_type: None,
+                                            sub_track: 0,
                                         });
                                     }
                                 }
@@ -333,8 +428,22 @@ fn extract_player(
                 }
 
                 // Modo Army Terran: addon começou. Abre janela.
+                // O `UnitInitEvent` não carrega creator no protocolo —
+                // `ev.creator_tag` é sempre `None` para Reactor/TechLab.
+                // Caímos em proximidade espacial: addons ficam colados
+                // na estrutura-mãe, então a Barracks/Factory/Starport
+                // viva mais próxima é virtualmente sempre a certa.
                 if mode == LaneMode::Army && is_incapacitating_addon(new_type) {
-                    if let Some(parent) = ev.creator_tag {
+                    let parent = ev.creator_tag.or_else(|| {
+                        resolve_addon_parent(
+                            new_type,
+                            ev.pos_x,
+                            ev.pos_y,
+                            ev.game_loop,
+                            &lanes_by_tag,
+                        )
+                    });
+                    if let Some(parent) = parent {
                         if let Some(name) = intern_unit_name(new_type) {
                             pending_addon.insert(ev.tag, (parent, ev.game_loop, name));
                         }
@@ -358,6 +467,7 @@ fn extract_player(
                                 pos_y: ev.pos_y,
                                 blocks: Vec::new(),
                                 warpgate_since_loop: None,
+                                reactor_since_loop: None,
                             },
                         );
                     }
@@ -365,7 +475,22 @@ fn extract_player(
 
                 // Unidade-alvo concluída.
                 if is_target_unit(new_type, mode, is_zerg) {
-                    let producer_tag = resolve_producer(
+                    // creator_tag vem do `ProductionStarted` companheiro
+                    // (mesmo tag, mesmo game_loop). Para Terran é o tag
+                    // da estrutura produtora; para Zerg morphs é o tag
+                    // da larva. É o mesmo valor que o `producer_tag` em
+                    // `production_cmds`, então cmd matching usa esse.
+                    let creator_tag = events
+                        .get(i.wrapping_sub(1))
+                        .filter(|prev| {
+                            i > 0
+                                && matches!(prev.kind, EntityEventKind::ProductionStarted)
+                                && prev.tag == ev.tag
+                                && prev.game_loop == ev.game_loop
+                        })
+                        .and_then(|prev| prev.creator_tag);
+
+                    let lane_tag = resolve_producer(
                         events,
                         i,
                         new_type,
@@ -377,16 +502,50 @@ fn extract_player(
                         &larva_to_hatch,
                         mode,
                     );
-                    if let Some(producer) = producer_tag {
-                        let build_time = balance_data::build_time_loops(new_type, base_build);
-                        let build_time = if build_time > 0 { build_time } else { 272 };
-                        let start_loop = ev.game_loop.saturating_sub(build_time);
-                        if let Some(lane) = lanes_by_tag.get_mut(&producer) {
+
+                    if let Some(lane_tag) = lane_tag {
+                        let finish_loop = ev.game_loop;
+                        let expected_bt = balance_data::build_time_loops(new_type, base_build);
+                        let bt_fallback = if expected_bt > 0 { expected_bt } else { 272 };
+                        // Mesma constraint causal do build_order: o cmd
+                        // só é aceito se foi emitido cedo o suficiente
+                        // pra plausivelmente ter produzido essa unidade.
+                        // Filtra Born events de spawn inicial canibalizando
+                        // cmds reais.
+                        let max_cmd_loop = finish_loop.saturating_sub(bt_fallback / 2);
+
+                        let cmd_loop = creator_tag.and_then(|ct| {
+                            consume_producer_cmd(
+                                &cmds_by_producer,
+                                &mut consumed,
+                                &player.production_cmds,
+                                ct,
+                                new_type,
+                                max_cmd_loop,
+                            )
+                        });
+
+                        let (sub_track, start_loop) = if let Some(ct) = creator_tag {
+                            let slots = slots_by_creator.entry(ct).or_insert_with(|| vec![0]);
+                            let (slot_idx, slot_prev) =
+                                pick_slot(slots, cmd_loop.unwrap_or(0));
+                            let start = match cmd_loop {
+                                Some(c) => c.max(slot_prev),
+                                None => finish_loop.saturating_sub(bt_fallback),
+                            };
+                            slots[slot_idx] = finish_loop;
+                            (slot_idx as u8, start)
+                        } else {
+                            (0u8, finish_loop.saturating_sub(bt_fallback))
+                        };
+
+                        if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
                             lane.blocks.push(ProductionBlock {
                                 start_loop,
-                                end_loop: ev.game_loop,
+                                end_loop: finish_loop,
                                 kind: BlockKind::Producing,
                                 produced_type: intern_unit_name(new_type),
+                                sub_track,
                             });
                         }
                     }
@@ -401,7 +560,24 @@ fn extract_player(
                                 end_loop: ev.game_loop,
                                 kind: BlockKind::Impeded,
                                 produced_type: Some(name),
+                                sub_track: 0,
                             });
+                            // Reactor concluído habilita produção paralela
+                            // 2x na estrutura-mãe a partir deste loop. O
+                            // render usa esse marcador para alocar duas
+                            // sub-trilhas top/bottom; aqui também
+                            // expandimos a capacidade de slots da
+                            // estrutura para que o cmd matching aloque
+                            // os Marines paralelos em sub_track 0 e 1.
+                            if is_reactor_addon(new_type) {
+                                lane.reactor_since_loop = Some(ev.game_loop);
+                                let slots = slots_by_creator
+                                    .entry(parent)
+                                    .or_insert_with(|| vec![0]);
+                                if slots.len() < 2 {
+                                    slots.resize(2, 0);
+                                }
+                            }
                         }
                     }
                 }
@@ -415,6 +591,7 @@ fn extract_player(
                                 end_loop: ev.game_loop,
                                 kind: BlockKind::Impeded,
                                 produced_type: Some(name),
+                                sub_track: 0,
                             });
                         }
                     }
@@ -434,6 +611,7 @@ fn extract_player(
                                     end_loop: ev.game_loop,
                                     kind: BlockKind::Impeded,
                                     produced_type: Some(name),
+                                    sub_track: 0,
                                 });
                             }
                         }
@@ -447,18 +625,71 @@ fn extract_player(
     lanes.sort_by_key(|l| (l.born_loop, l.tag));
 
     for lane in &mut lanes {
-        lane.blocks.sort_by_key(|b| b.start_loop);
+        lane.blocks.sort_by_key(|b| (b.start_loop, b.sub_track));
         // Em estruturas com paralelismo real (Hatch/Lair/Hive em qualquer
-        // modo, ou WarpGate pós-research onde unidades chegam em rajada
-        // simultânea entre múltiplas warpgates), preservamos overlaps.
-        // Aqui, a lane é per-estrutura, então mesmo Hatch só tem
-        // paralelismo via larvas distintas — preservamos overlap só
-        // pra Zerg hatch.
+        // modo, ou WarpGate pós-research), preservamos overlaps. Aqui
+        // a lane é per-estrutura, então mesmo Hatch só tem paralelismo
+        // via larvas distintas (cada larva é um creator_tag separado).
         let parallel_lane = is_zerg_hatch(lane.canonical_type);
         lane.blocks = merge_continuous(std::mem::take(&mut lane.blocks), parallel_lane);
     }
 
     PlayerProductionLanes { lanes }
+}
+
+/// Escolhe o slot de produção em que a próxima unidade deve cair.
+/// Preferimos o menor índice já livre no `cmd_loop` (slot.finish ≤
+/// cmd_loop) — assim a sub_track de cada unidade fica estável ao longo
+/// do tempo. Se nenhum slot está livre, escolhe o que termina antes
+/// (vai bloquear menos). Retorna `(slot_idx, slot.finish)`.
+fn pick_slot(slots: &[u32], cmd_loop: u32) -> (usize, u32) {
+    debug_assert!(!slots.is_empty());
+    for (i, &f) in slots.iter().enumerate() {
+        if f <= cmd_loop {
+            return (i, f);
+        }
+    }
+    let mut best = 0usize;
+    let mut best_f = slots[0];
+    for (i, &f) in slots.iter().enumerate().skip(1) {
+        if f < best_f {
+            best_f = f;
+            best = i;
+        }
+    }
+    (best, best_f)
+}
+
+/// Procura o primeiro cmd não-consumido emitido pelo `producer_tag`
+/// cuja `ability` bate com `action` E cujo `game_loop` satisfaz a
+/// constraint de causalidade `cmd_loop <= max_cmd_loop`. Idêntico ao
+/// helper homônimo em `build_order::extract` — manter as duas
+/// pipelines com a mesma lógica de pareamento garante que o gráfico de
+/// produção e a aba de build order mostrem o mesmo conjunto de eventos
+/// pareados aos mesmos cmds.
+fn consume_producer_cmd(
+    by_producer: &HashMap<i64, Vec<usize>>,
+    consumed: &mut [bool],
+    cmds: &[ProductionCmd],
+    producer_tag: i64,
+    action: &str,
+    max_cmd_loop: u32,
+) -> Option<u32> {
+    let queue = by_producer.get(&producer_tag)?;
+    for &i in queue {
+        if consumed[i] {
+            continue;
+        }
+        if cmds[i].ability != action {
+            continue;
+        }
+        if cmds[i].game_loop > max_cmd_loop {
+            break;
+        }
+        consumed[i] = true;
+        return Some(cmds[i].game_loop);
+    }
+    None
 }
 
 fn merge_continuous(
@@ -469,6 +700,9 @@ fn merge_continuous(
     for b in blocks {
         let mut merged = false;
         for prev in out.iter_mut().rev() {
+            if prev.sub_track != b.sub_track {
+                continue;
+            }
             if prev.kind != b.kind {
                 continue;
             }
@@ -954,5 +1188,515 @@ mod tests {
             .collect();
         assert_eq!(imp.len(), 1);
         assert_eq!(imp[0].end_loop, 400);
+    }
+
+    fn ev_at(
+        gl: u32,
+        seq: u32,
+        kind: EntityEventKind,
+        ty: &str,
+        tag: i64,
+        creator: Option<i64>,
+        x: u8,
+        y: u8,
+    ) -> EntityEvent {
+        let mut e = ev(gl, seq, kind, ty, tag, creator);
+        e.pos_x = x;
+        e.pos_y = y;
+        e
+    }
+
+    #[test]
+    fn army_terran_addon_resolves_parent_via_proximity_when_creator_tag_missing() {
+        // O UnitInit do s2protocol não traz creator_tag para addons
+        // Terran. O parent precisa ser resolvido por proximidade
+        // espacial à Barracks/Factory/Starport mais próxima.
+        let events = vec![
+            // Duas Barracks: tag 1 perto (50, 50), tag 2 longe (200, 200).
+            ev_at(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+                50,
+                50,
+            ),
+            ev_at(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                2,
+                None,
+                200,
+                200,
+            ),
+            // Reactor inicia em (53, 50) — adjacente à Barracks 1.
+            // creator_tag = None (como vem do parser real).
+            ev_at(
+                200,
+                1,
+                EntityEventKind::ProductionStarted,
+                "BarracksReactor",
+                10,
+                None,
+                53,
+                50,
+            ),
+            ev_at(
+                600,
+                2,
+                EntityEventKind::ProductionFinished,
+                "BarracksReactor",
+                10,
+                None,
+                53,
+                50,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        // Lane 1 (próxima) recebeu o Impeded e o reactor_since_loop.
+        let lane1 = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+        let lane2 = out.lanes.iter().find(|l| l.tag == 2).unwrap();
+        assert_eq!(lane1.reactor_since_loop, Some(600));
+        assert_eq!(lane2.reactor_since_loop, None);
+        let imp1: Vec<_> = lane1
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Impeded)
+            .collect();
+        assert_eq!(imp1.len(), 1);
+        let imp2: Vec<_> = lane2
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Impeded)
+            .collect();
+        assert_eq!(imp2.len(), 0);
+    }
+
+    #[test]
+    fn army_terran_reactor_finished_sets_reactor_since_loop() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+            ),
+            ev(
+                200,
+                1,
+                EntityEventKind::ProductionStarted,
+                "BarracksReactor",
+                2,
+                Some(1),
+            ),
+            ev(
+                600,
+                2,
+                EntityEventKind::ProductionFinished,
+                "BarracksReactor",
+                2,
+                None,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        assert_eq!(out.lanes.len(), 1);
+        assert_eq!(out.lanes[0].reactor_since_loop, Some(600));
+    }
+
+    #[test]
+    fn army_terran_techlab_does_not_set_reactor_since_loop() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+            ),
+            ev(
+                200,
+                1,
+                EntityEventKind::ProductionStarted,
+                "BarracksTechLab",
+                2,
+                Some(1),
+            ),
+            ev(
+                600,
+                2,
+                EntityEventKind::ProductionFinished,
+                "BarracksTechLab",
+                2,
+                None,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        assert_eq!(out.lanes.len(), 1);
+        assert_eq!(out.lanes[0].reactor_since_loop, None);
+        // Impeded block do TechLab continua sendo emitido normalmente.
+        let imp: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Impeded)
+            .collect();
+        assert_eq!(imp.len(), 1);
+    }
+
+    #[test]
+    fn army_terran_reactor_cancelled_does_not_set_reactor_since_loop() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+            ),
+            ev(
+                200,
+                1,
+                EntityEventKind::ProductionStarted,
+                "BarracksReactor",
+                2,
+                Some(1),
+            ),
+            ev(
+                400,
+                2,
+                EntityEventKind::ProductionCancelled,
+                "BarracksReactor",
+                2,
+                None,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        assert_eq!(out.lanes[0].reactor_since_loop, None);
+    }
+
+    #[test]
+    fn army_terran_reactor_enables_parallel_blocks_with_subtracks() {
+        // Build time real do Marine no balance_data ~400 loops. Usamos
+        // tempos de finish bem acima do reactor (1500) para garantir
+        // que ambos os blocos `Producing` caiam pós-reactor, e tempos
+        // de finish próximos (delta=100) para forçar overlap das
+        // janelas de produção.
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+            ),
+            // Reactor: 200..1500
+            ev(
+                200,
+                1,
+                EntityEventKind::ProductionStarted,
+                "BarracksReactor",
+                2,
+                Some(1),
+            ),
+            ev(
+                1500,
+                2,
+                EntityEventKind::ProductionFinished,
+                "BarracksReactor",
+                2,
+                None,
+            ),
+            // Marine 1
+            ev(
+                2000,
+                3,
+                EntityEventKind::ProductionStarted,
+                "Marine",
+                10,
+                Some(1),
+            ),
+            ev(
+                2000,
+                3,
+                EntityEventKind::ProductionFinished,
+                "Marine",
+                10,
+                None,
+            ),
+            // Marine 2 — finish 100 loops depois força overlap.
+            ev(
+                2100,
+                4,
+                EntityEventKind::ProductionStarted,
+                "Marine",
+                11,
+                Some(1),
+            ),
+            ev(
+                2100,
+                4,
+                EntityEventKind::ProductionFinished,
+                "Marine",
+                11,
+                None,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        assert_eq!(out.lanes.len(), 1);
+        let lane = &out.lanes[0];
+        assert_eq!(lane.reactor_since_loop, Some(1500));
+        let prod: Vec<_> = lane
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        // Os dois Marines pós-reactor não devem mesclar.
+        assert_eq!(prod.len(), 2);
+        let mut tracks: Vec<u8> = prod.iter().map(|b| b.sub_track).collect();
+        tracks.sort();
+        assert_eq!(tracks, vec![0, 1]);
+    }
+
+    #[test]
+    fn army_terran_pre_and_post_reactor_marines_handled_separately() {
+        // Marine 1 finaliza bem antes do reactor (single-track).
+        // Marine 2 e 3 finalizam bem depois com overlap (top/bottom).
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Barracks",
+                1,
+                None,
+            ),
+            // Marine 1 pré-reactor — finish em 1000, bloco totalmente
+            // antes do reactor.
+            ev(
+                1000,
+                1,
+                EntityEventKind::ProductionStarted,
+                "Marine",
+                10,
+                Some(1),
+            ),
+            ev(
+                1000,
+                1,
+                EntityEventKind::ProductionFinished,
+                "Marine",
+                10,
+                None,
+            ),
+            // Reactor: 1100..2500 (concluído em 2500).
+            ev(
+                1100,
+                2,
+                EntityEventKind::ProductionStarted,
+                "BarracksReactor",
+                2,
+                Some(1),
+            ),
+            ev(
+                2500,
+                3,
+                EntityEventKind::ProductionFinished,
+                "BarracksReactor",
+                2,
+                None,
+            ),
+            // Marine 2 pós-reactor.
+            ev(
+                3000,
+                4,
+                EntityEventKind::ProductionStarted,
+                "Marine",
+                11,
+                Some(1),
+            ),
+            ev(
+                3000,
+                4,
+                EntityEventKind::ProductionFinished,
+                "Marine",
+                11,
+                None,
+            ),
+            // Marine 3 — finish 100 loops depois força overlap pós-reactor.
+            ev(
+                3100,
+                5,
+                EntityEventKind::ProductionStarted,
+                "Marine",
+                12,
+                Some(1),
+            ),
+            ev(
+                3100,
+                5,
+                EntityEventKind::ProductionFinished,
+                "Marine",
+                12,
+                None,
+            ),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let lane = &out.lanes[0];
+        assert_eq!(lane.reactor_since_loop, Some(2500));
+        let prod: Vec<_> = lane
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        // Pré-reactor: 1 bloco. Pós-reactor: 2 blocos não-mesclados.
+        assert_eq!(prod.len(), 3);
+
+        let pre: Vec<_> = prod.iter().filter(|b| b.start_loop < 2500).collect();
+        assert_eq!(pre.len(), 1);
+        assert_eq!(pre[0].sub_track, 0);
+
+        let post: Vec<_> = prod.iter().filter(|b| b.start_loop >= 2500).collect();
+        assert_eq!(post.len(), 2);
+        let mut tracks: Vec<u8> = post.iter().map(|b| b.sub_track).collect();
+        tracks.sort();
+        assert_eq!(tracks, vec![0, 1]);
+    }
+
+    /// Integration: a contagem de unidades de army por jogador no
+    /// gráfico tem que bater com o que o build_order extrai do mesmo
+    /// replay. As duas pipelines consomem os mesmos `production_cmds`
+    /// + `entity_events` e devem chegar nos mesmos eventos pareados.
+    #[test]
+    fn army_lanes_match_build_order_counts_on_real_terran_replay() {
+        use crate::build_order::extract_build_order;
+        use crate::replay::parse_replay;
+        use std::path::PathBuf;
+
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/replay1.SC2Replay");
+        let timeline = parse_replay(&path, 0).expect("parse replay");
+        let bo = extract_build_order(&timeline).expect("build_order");
+        let lanes_per_player = extract(&timeline, LaneMode::Army);
+
+        // Para cada jogador Terran, conta unidades de army produzidas
+        // (Marine/Marauder/etc.) em ambas as pipelines e compara.
+        let mut compared_any = false;
+        for (p_idx, player) in timeline.players.iter().enumerate() {
+            if player.race != "Terran" {
+                continue;
+            }
+            let bo_player = &bo.players[p_idx];
+            let lanes_player = &lanes_per_player[p_idx];
+
+            // Conta por tipo no build_order: entries de army (não
+            // estrutura, não upgrade, completed) com count agregado.
+            let mut bo_counts: HashMap<String, usize> = HashMap::new();
+            for entry in &bo_player.entries {
+                if entry.is_structure || entry.is_upgrade {
+                    continue;
+                }
+                if entry.outcome != crate::build_order::EntryOutcome::Completed {
+                    continue;
+                }
+                if is_worker_name(&entry.action) {
+                    continue;
+                }
+                if !matches!(
+                    entry.action.as_str(),
+                    "Marine"
+                        | "Marauder"
+                        | "Reaper"
+                        | "Ghost"
+                        | "Hellion"
+                        | "Hellbat"
+                        | "WidowMine"
+                        | "SiegeTank"
+                        | "Cyclone"
+                        | "Thor"
+                        | "VikingFighter"
+                        | "Medivac"
+                        | "Liberator"
+                        | "Banshee"
+                        | "Raven"
+                        | "Battlecruiser"
+                ) {
+                    continue;
+                }
+                *bo_counts.entry(entry.action.clone()).or_default() += entry.count as usize;
+            }
+
+            // Conta por tipo nas lanes: cada bloco Producing é uma
+            // unidade. Como `merge_continuous` mescla blocos contíguos
+            // do mesmo tipo na mesma sub_track, a contagem aqui pode
+            // ser ≤ build_order. Mas o conjunto de tipos produzidos
+            // tem que ser o mesmo, e a cardinalidade não pode ser zero
+            // quando build_order tem entradas.
+            let mut lanes_types: HashMap<&'static str, usize> = HashMap::new();
+            for lane in &lanes_player.lanes {
+                for block in &lane.blocks {
+                    if block.kind != BlockKind::Producing {
+                        continue;
+                    }
+                    if let Some(t) = block.produced_type {
+                        if matches!(
+                            t,
+                            "Marine"
+                                | "Marauder"
+                                | "Reaper"
+                                | "Ghost"
+                                | "Hellion"
+                                | "Hellbat"
+                                | "WidowMine"
+                                | "SiegeTank"
+                                | "Cyclone"
+                                | "Thor"
+                                | "VikingFighter"
+                                | "Medivac"
+                                | "Liberator"
+                                | "Banshee"
+                                | "Raven"
+                                | "Battlecruiser"
+                        ) {
+                            *lanes_types.entry(t).or_default() += 1;
+                        }
+                    }
+                }
+            }
+
+            // Validação: todo tipo presente no build_order tem que
+            // aparecer nas lanes, e vice-versa.
+            for (action, _) in &bo_counts {
+                assert!(
+                    lanes_types.contains_key(action.as_str()),
+                    "Player {}: build_order tem '{}' mas lanes não",
+                    player.name,
+                    action,
+                );
+            }
+            for action in lanes_types.keys() {
+                assert!(
+                    bo_counts.contains_key(*action),
+                    "Player {}: lanes tem '{}' mas build_order não",
+                    player.name,
+                    action,
+                );
+            }
+            compared_any = true;
+        }
+        assert!(compared_any, "replay1.SC2Replay não tem jogador Terran");
     }
 }

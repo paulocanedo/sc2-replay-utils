@@ -31,10 +31,9 @@ mod side_panel;
 mod transport;
 pub(super) mod unit_column;
 
-// Re-exporta os helpers de ícone para outras abas (a aba Charts consome
-// `structure_icon` para o ícone à esquerda da lane e `unit_icon` para o
-// ícone do produzido dentro do bloco em zoom alto).
-pub(crate) use unit_column::{structure_icon, unit_icon};
+// Re-exporta o helper de ícone de estrutura para a aba Charts (lane
+// header esquerdo).
+pub(crate) use unit_column::structure_icon;
 
 use egui::{Color32, TextStyle, Ui};
 
