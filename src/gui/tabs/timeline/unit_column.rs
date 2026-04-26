@@ -606,7 +606,7 @@ pub(super) fn unit_abbrev(entity_type: &str) -> String {
 /// `CommandCenter` pousado — mostrar os dois como chips separados só
 /// polui o painel durante transições de relocação. Retorna string vazia
 /// pra estruturas desconhecidas — caller deve filtrar.
-pub(super) fn structure_canonical(name: &str) -> &'static str {
+pub(crate) fn structure_canonical(name: &str) -> &'static str {
     match name {
         "CommandCenter" | "CommandCenterFlying" => "CommandCenter",
         "OrbitalCommand" | "OrbitalCommandFlying" => "OrbitalCommand",

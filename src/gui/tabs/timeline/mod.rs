@@ -31,6 +31,10 @@ mod side_panel;
 mod transport;
 pub(super) mod unit_column;
 
+// Re-exporta o helper de ícone de estrutura para outras abas
+// (a aba Charts consome em `worker_production`).
+pub(crate) use unit_column::structure_icon;
+
 use egui::{Color32, TextStyle, Ui};
 
 use crate::config::AppConfig;

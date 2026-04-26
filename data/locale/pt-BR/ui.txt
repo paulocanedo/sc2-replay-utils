@@ -306,6 +306,9 @@ charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
+charts.worker_production.title = Produção de workers por townhall
+charts.worker_production.player = Jogador:
+charts.worker_production.empty = Nenhuma estrutura produtora de worker encontrada.
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
