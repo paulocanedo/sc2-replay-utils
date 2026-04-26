@@ -64,9 +64,7 @@ impl AppState {
                         }
                         None => {
                             ui.label(
-                                RichText::new(t("app.status.no_replay", lang))
-                                    .italics()
-                                    .small(),
+                                RichText::new(t("app.status.no_replay", lang)).italics(),
                             );
                         }
                     },
@@ -93,10 +91,10 @@ impl AppState {
                                 &[("total", &library_total.to_string())],
                             )
                         };
-                        ui.small(RichText::new(msg).color(LABEL_DIM));
+                        ui.label(RichText::new(msg).color(LABEL_DIM));
                     }
                     Screen::Rename => {
-                        ui.small(
+                        ui.label(
                             RichText::new(t("rename_bar.title", lang))
                                 .italics()
                                 .color(LABEL_DIM),
@@ -117,7 +115,7 @@ impl AppState {
                             .stroke(egui::Stroke::new(1.0, Color32::LIGHT_GREEN))
                             .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_XS as i8))
                             .show(ui, |ui| {
-                                ui.label(RichText::new(msg).color(Color32::LIGHT_GREEN).small());
+                                ui.label(RichText::new(msg).color(Color32::LIGHT_GREEN));
                             });
                     }
                 });

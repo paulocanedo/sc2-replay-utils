@@ -102,7 +102,7 @@ pub const CHIP_INNER_MY: i8 = 3;
 // ── Top / status bar heights ─────────────────────────────────────────
 
 pub const TOPBAR_HEIGHT: f32 = 54.0;
-pub const STATUSBAR_HEIGHT: f32 = 22.0;
+pub const STATUSBAR_HEIGHT: f32 = 28.0;
 
 // ── Insights tab — responsive masonry grid ───────────────────────────
 
