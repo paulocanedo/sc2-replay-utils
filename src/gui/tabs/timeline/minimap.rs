@@ -15,7 +15,7 @@ use crate::replay::{EntityCategory, EntityEventKind, ResourceKind, ResourceNode}
 use crate::replay_state::{LoadedReplay, PlayableBounds};
 
 use super::entities::{alive_entities_at, LiveEntity};
-use super::overlays::{draw_creep, draw_heatmap};
+use super::overlays::{draw_creep, draw_fog, draw_heatmap};
 use super::unit_column::{structure_icon, unit_icon};
 use super::{CAMERA_HEIGHT_TILES, CAMERA_WIDTH_TILES};
 
@@ -47,6 +47,8 @@ pub(super) fn minimap_with_size(
     show_heatmap: bool,
     show_creep: bool,
     show_map: bool,
+    show_fog: bool,
+    fog_player: usize,
     hovered_entity: Option<&(usize, String)>,
     lang: Language,
 ) {
@@ -140,6 +142,18 @@ pub(super) fn minimap_with_size(
                     for e in entities.iter().filter(|e| &e.entity_type == hov_type) {
                         draw_highlight_halo(&painter, rect, e.x, e.y, bounds, e.side, color);
                     }
+                }
+            }
+
+            // Fog of War: escurece áreas fora do alcance de visão das
+            // entidades do `fog_player`. Roda depois das unidades pra
+            // esconder as inimigas em zonas sem visão; antes dos
+            // marcadores e da câmera pra que esses indicadores de
+            // análise continuem sempre visíveis.
+            if show_fog {
+                let slot = fog_player.min(loaded.timeline.players.len().saturating_sub(1));
+                if let Some(p) = loaded.timeline.players.get(slot) {
+                    draw_fog(&painter, rect, p, game_loop, bounds, loaded.timeline.base_build);
                 }
             }
 

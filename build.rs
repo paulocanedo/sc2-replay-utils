@@ -76,6 +76,10 @@ fn main() {
     // (versão, nome) → (minerals, vespene). Usado pelo gráfico de army value
     // agrupado por tipo para converter contagem de unidades em valor de recursos.
     let mut cost: BTreeMap<(u32, String), (u32, u32)> = BTreeMap::new();
+    // (versão, nome) → sightRadius × 100 (preserva precisão de 0.01 sem
+    // ter que serializar f32 no array gerado). Usado pelo overlay de FOG
+    // do tab Timeline para desenhar o círculo de visão por entidade.
+    let mut sight: BTreeMap<(u32, String), u32> = BTreeMap::new();
 
     for version_entry in fs::read_dir(&balance_dir).expect("read_dir BalanceData") {
         let version_entry = version_entry.expect("entry");
@@ -101,7 +105,7 @@ fn main() {
                 Ok(v) => v,
                 Err(e) => panic!("falha ao parsear {}: {e}", unit_path.display()),
             };
-            collect_unit(&json, version, &mut entries, &mut supply, &mut cost);
+            collect_unit(&json, version, &mut entries, &mut supply, &mut cost, &mut sight);
             collect_abilities(&json, version, &mut abilities);
         }
     }
@@ -115,7 +119,7 @@ fn main() {
         "nenhuma entrada de abilities extraída — algo está errado"
     );
 
-    write_generated(&entries, &abilities, &supply, &cost);
+    write_generated(&entries, &abilities, &supply, &cost, &sight);
 
     // Re-roda o build script se a árvore de balance data mudar (cargo
     // update do s2protocol troca o source dir, e o cargo já invalida
@@ -138,6 +142,7 @@ fn collect_unit(
     out: &mut BTreeMap<(u32, String), u32>,
     supply_out: &mut BTreeMap<(u32, String), u32>,
     cost_out: &mut BTreeMap<(u32, String), (u32, u32)>,
+    sight_out: &mut BTreeMap<(u32, String), u32>,
 ) {
     let Some(id) = json.get("@id").and_then(Value::as_str) else {
         return;
@@ -182,6 +187,22 @@ fn collect_unit(
         cost_out
             .entry((version, id.to_string()))
             .or_insert((minerals, vespene));
+    }
+
+    // Raio de visão (em tiles do jogo). Vive em `misc.@sightRadius`. Só
+    // grava entradas > 0 — unidades sem visão própria (ex.: alguns
+    // dummies/efeitos) não interessam ao overlay de FOG.
+    if let Some(sight_radius) = json
+        .get("misc")
+        .and_then(|m| m.get("@sightRadius"))
+        .and_then(Value::as_f64)
+    {
+        if sight_radius > 0.0 {
+            let sight_x100 = (sight_radius * 100.0).round() as u32;
+            sight_out
+                .entry((version, id.to_string()))
+                .or_insert(sight_x100);
+        }
     }
 
     if let Some(upgrades) = json
@@ -359,6 +380,7 @@ fn write_generated(
     abilities: &BTreeMap<AbilityKey, String>,
     supply: &BTreeMap<(u32, String), u32>,
     cost: &BTreeMap<(u32, String), (u32, u32)>,
+    sight: &BTreeMap<(u32, String), u32>,
 ) {
     let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR não definido");
     let out_path = Path::new(&out_dir).join("balance_data_generated.rs");
@@ -405,6 +427,15 @@ fn write_generated(
         s.push_str(&format!(
             "    ({version}, \"{escaped}\", {minerals}, {vespene}),\n",
         ));
+    }
+    s.push_str("];\n\n");
+
+    s.push_str("// Cada tupla é (protocol_version, unit_name, sight_radius_x100).\n");
+    s.push_str("// sight_radius_x100 = sightRadius (tiles) × 100 (ex.: Marine=900).\n");
+    s.push_str("pub static SIGHT_RADIUS_ENTRIES: &[(u32, &str, u32)] = &[\n");
+    for ((version, name), sight_x100) in sight {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        s.push_str(&format!("    ({version}, \"{escaped}\", {sight_x100}),\n"));
     }
     s.push_str("];\n");
 

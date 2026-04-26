@@ -102,6 +102,12 @@ pub struct AppState {
     pub timeline_show_heatmap: bool,
     pub timeline_show_creep: bool,
     pub timeline_show_map: bool,
+    /// Overlay de Fog of War no minimapa: quando ativo, escurece áreas
+    /// sem visão do `timeline_fog_player` no instante atual.
+    pub timeline_show_fog: bool,
+    /// Slot do jogador cujo ponto de vista é usado pelo overlay de FOG.
+    /// Clamp em `players.len() - 1` no consumer.
+    pub timeline_fog_player: usize,
     /// Quando o cursor está sobre um chip do `unit_column`, guarda
     /// `(slot_idx, canonical_type)` pra que o minimap desenhe um halo
     /// nas instâncias correspondentes. Resetado a `None` no começo de
@@ -179,6 +185,8 @@ impl AppState {
             timeline_show_heatmap: false,
             timeline_show_creep: true,
             timeline_show_map: true,
+            timeline_show_fog: false,
+            timeline_fog_player: 0,
             timeline_hovered_entity: None,
             rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
             rename_previews: Vec::new(),
@@ -301,6 +309,7 @@ impl AppState {
                 // transição com playback ligado do replay anterior.
                 self.timeline_playing = false;
                 self.timeline_playback_speed = 1;
+                self.timeline_fog_player = 0;
                 // Reset do POV da aba Insights: novo replay
                 // re-resolve o default via user_nicknames.
                 self.insights_pov = None;
