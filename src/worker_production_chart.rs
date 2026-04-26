@@ -171,21 +171,36 @@ fn extract_player(player: &PlayerTimeline, base_build: u32) -> PlayerWorkerLanes
             EntityEventKind::ProductionStarted => {
                 let new_type = ev.entity_type.as_str();
 
-                // Morph in-place de townhall: CC→Orbital/PF, Hatchery→Lair,
-                // Lair→Hive. Atualiza o tipo canônico da lane existente e
-                // emite o bloco Morphing retroativo (`finish - morph_time`).
+                // Morph in-place de townhall. Cobre dois casos
+                // semanticamente distintos:
+                //
+                // - **Terran** (CC→Orbital, CC→PF): a estrutura fica
+                //   ocupada pelo morph e não pode treinar SCV nesse
+                //   intervalo — emitimos um bloco `Morphing` para
+                //   destacar essa janela como impedimento.
+                //
+                // - **Zerg** (Hatchery→Lair, Lair→Hive): o morph **não
+                //   impede a produção de Drones**. A Hatch continua
+                //   gerando larvas e os drones podem nascer
+                //   normalmente — só o ícone muda. Não emitimos bloco.
                 if let Some(new_canonical) = townhall_canonical(new_type) {
                     if let Some(old_type) = morph_old_type(events, i) {
                         if townhall_canonical(old_type).is_some() {
                             if let Some(lane) = lanes_by_tag.get_mut(&ev.tag) {
-                                let mt = morph_build_loops(new_canonical, base_build);
-                                if mt > 0 {
-                                    let start = ev.game_loop.saturating_sub(mt);
-                                    lane.blocks.push(ProductionBlock {
-                                        start_loop: start,
-                                        end_loop: ev.game_loop,
-                                        kind: BlockKind::Morphing,
-                                    });
+                                let is_impeditive_morph = matches!(
+                                    new_canonical,
+                                    "OrbitalCommand" | "PlanetaryFortress"
+                                );
+                                if is_impeditive_morph {
+                                    let mt = morph_build_loops(new_canonical, base_build);
+                                    if mt > 0 {
+                                        let start = ev.game_loop.saturating_sub(mt);
+                                        lane.blocks.push(ProductionBlock {
+                                            start_loop: start,
+                                            end_loop: ev.game_loop,
+                                            kind: BlockKind::Morphing,
+                                        });
+                                    }
                                 }
                                 lane.canonical_type = new_canonical;
                             }
@@ -588,6 +603,35 @@ mod tests {
         let lane = &out.lanes[0];
         assert_eq!(lane.blocks.len(), 1);
         assert_eq!(lane.blocks[0].kind, BlockKind::Producing);
+    }
+
+    #[test]
+    fn zerg_hatch_to_lair_morph_does_not_emit_morphing_block() {
+        // Hatch nasce em loop=100. Em loop=1500 morpha pra Lair.
+        // Drones continuam podendo nascer durante o morph — não emitimos
+        // bloco Morphing, só atualizamos o canonical_type.
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Hatchery",
+                1,
+                None,
+            ),
+            ev(1500, 1, EntityEventKind::Died, "Hatchery", 1, None),
+            ev(1500, 2, EntityEventKind::ProductionStarted, "Lair", 1, None),
+            ev(1500, 3, EntityEventKind::ProductionFinished, "Lair", 1, None),
+        ];
+        let p = player_with_events(events);
+        let out = extract_player(&p, 0);
+        assert_eq!(out.lanes.len(), 1);
+        let lane = &out.lanes[0];
+        assert_eq!(lane.canonical_type, "Lair");
+        assert!(
+            lane.blocks.is_empty(),
+            "Hatch→Lair não deve emitir bloco Morphing"
+        );
     }
 
     #[test]
