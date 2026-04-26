@@ -30,6 +30,10 @@ pub(super) enum RowOutcome {
     None,
     Select,
     Load,
+    /// Checkbox da coluna de seleção foi clicado — alterna a marcação
+    /// para esta entrada. Independente de `Select`/`Load`, que vêm de
+    /// cliques no resto do row.
+    ToggleSelected,
     ApplyRelated(RelatedFilter),
 }
 
@@ -119,6 +123,10 @@ pub(super) fn row_height(ui: &Ui) -> f32 {
 
 const FRAME_CHROME_V: f32 = 14.0;
 
+/// Largura da coluna fixa do checkbox de seleção. Calibrada para caber
+/// o glifo do checkbox (~18px) com margem confortável.
+const CHECKBOX_COL_W: f32 = 22.0;
+
 /// Largura fixa da zona direita (matchup code + W/L). Garante que a
 /// coluna fique alinhada entre linhas, independentemente do comprimento
 /// dos nomes dos jogadores. Calibrada para caber "TvZ" + gap + "LOSS"
@@ -135,6 +143,7 @@ pub(super) fn entry_row(
     entry: &LibraryEntry,
     is_current: bool,
     is_selected: bool,
+    is_checked: bool,
     config: &AppConfig,
     row_h: f32,
 ) -> RowOutcome {
@@ -160,49 +169,79 @@ pub(super) fn entry_row(
 
     let content_h = (row_h - FRAME_CHROME_V).max(0.0);
 
-    let inner = egui::Frame::new()
-        .fill(fill)
-        .stroke(stroke)
-        .corner_radius(4.0)
-        .inner_margin(egui::Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_min_height(content_h);
+    // Layout: [ checkbox | frame com o conteúdo do row ]. O checkbox
+    // mora fora do frame interativo do row para que clicar nele NÃO
+    // dispare `Select`/`Load` (a área clicável do row é estritamente
+    // o rect do frame).
+    let mut toggle = false;
+    let inner = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_S;
+            // Coluna do checkbox — verticalmente centralizada na altura
+            // do row para alinhar com o conteúdo da direita.
+            ui.allocate_ui_with_layout(
+                egui::vec2(CHECKBOX_COL_W, row_h),
+                egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                |ui| {
+                    let mut local = is_checked;
+                    let resp = ui
+                        .add(egui::Checkbox::without_text(&mut local))
+                        .on_hover_text(t("library.selection.checkbox_tooltip", lang));
+                    if resp.changed() {
+                        toggle = true;
+                    }
+                },
+            );
 
-            match &entry.meta {
-                MetaState::Parsed(meta) => {
-                    render_parsed(ui, meta, config, content_h);
-                }
-                MetaState::Pending => {
-                    ui.label(RichText::new(&entry.filename).monospace());
-                    ui.small(RichText::new(t("library.entry.parsing", lang)).italics());
-                }
-                MetaState::Unsupported(reason) => {
-                    ui.label(
-                        RichText::new(&entry.filename)
-                            .monospace()
-                            .color(Color32::from_gray(140)),
-                    );
-                    ui.small(
-                        RichText::new(tf(
-                            "library.entry.unsupported",
-                            lang,
-                            &[("reason", reason)],
-                        ))
-                        .color(Color32::from_rgb(210, 170, 60))
-                        .italics(),
-                    );
-                }
-                MetaState::Failed(err) => {
-                    ui.label(RichText::new(&entry.filename).monospace());
-                    ui.small(
-                        RichText::new(tf("library.entry.failed", lang, &[("err", err)]))
-                            .color(Color32::LIGHT_RED)
-                            .italics(),
-                    );
-                }
-            }
-        });
+            egui::Frame::new()
+                .fill(fill)
+                .stroke(stroke)
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(10, 5))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.set_min_height(content_h);
+
+                    match &entry.meta {
+                        MetaState::Parsed(meta) => {
+                            render_parsed(ui, meta, config, content_h);
+                        }
+                        MetaState::Pending => {
+                            ui.label(RichText::new(&entry.filename).monospace());
+                            ui.small(RichText::new(t("library.entry.parsing", lang)).italics());
+                        }
+                        MetaState::Unsupported(reason) => {
+                            ui.label(
+                                RichText::new(&entry.filename)
+                                    .monospace()
+                                    .color(Color32::from_gray(140)),
+                            );
+                            ui.small(
+                                RichText::new(tf(
+                                    "library.entry.unsupported",
+                                    lang,
+                                    &[("reason", reason)],
+                                ))
+                                .color(Color32::from_rgb(210, 170, 60))
+                                .italics(),
+                            );
+                        }
+                        MetaState::Failed(err) => {
+                            ui.label(RichText::new(&entry.filename).monospace());
+                            ui.small(
+                                RichText::new(tf("library.entry.failed", lang, &[("err", err)]))
+                                    .color(Color32::LIGHT_RED)
+                                    .italics(),
+                            );
+                        }
+                    }
+                })
+        })
+        .inner;
+
+    if toggle {
+        return RowOutcome::ToggleSelected;
+    }
 
     let row_resp = inner.response.interact(Sense::click());
     let mut outcome = if loadable && row_resp.double_clicked() {

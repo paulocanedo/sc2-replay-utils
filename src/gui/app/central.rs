@@ -97,6 +97,8 @@ impl AppState {
                         &self.library,
                         current,
                         selected,
+                        &self.library_selected,
+                        &mut self.library_save_template,
                         &self.config,
                         &mut self.library_filter,
                     );
@@ -184,6 +186,16 @@ impl AppState {
                 self.rename_status = None;
                 self.screen = Screen::Rename;
             }
+            LibraryAction::ToggleSelected(p) => {
+                if !self.library_selected.remove(&p) {
+                    self.library_selected.insert(p);
+                }
+            }
+            LibraryAction::SetSelected(paths) => {
+                self.library_selected = paths.into_iter().collect();
+            }
+            LibraryAction::ClearSelected => self.library_selected.clear(),
+            LibraryAction::CopySelected => self.copy_selected_replays(),
         }
     }
 }

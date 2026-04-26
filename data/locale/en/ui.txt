@@ -66,6 +66,9 @@ toast.settings_saved = Settings saved.
 toast.save_error = Save error: {err}
 toast.save_config_error = Config save error: {err}
 toast.date_range_autodetect = Showing replays: {range}
+toast.copy_ok = Copied {count} replays to {dir}
+toast.copy_partial = Copied {ok} replays · {err_count} failed (see logs)
+toast.copy_mkdir_err = Could not create destination: {err}
 error.load_failed = Error loading {path}: {err}
 
 # ── Empty state ─────────────────────────────────────────────────────────────
@@ -175,6 +178,17 @@ library.entry.failed = failed: {err}
 library.entry.open = open
 library.outcome.win = WIN
 library.outcome.loss = LOSS
+# ── Multi-selection toolbar ──
+library.selection.toolbar = {count} selected
+library.selection.select_all_button = Select all
+library.selection.select_all_tooltip = Select all visible replays (Ctrl+A)
+library.selection.clear_button = Clear
+library.selection.clear_tooltip = Clear selection (Ctrl+Shift+A)
+library.selection.save_button = Save replay(s) as…
+library.selection.template_label = Name template:
+library.selection.help_tooltip = Show available template variables
+library.selection.help_fallback_note = Replays without parsed metadata fall back to their original filename.
+library.selection.checkbox_tooltip = Select replay (Ctrl+A: all · Ctrl+Shift+A: none)
 # ── Library detail card (right-side panel on single click) ──
 library.detail.close_tooltip = Close details
 library.detail.open_analysis = Open analysis
