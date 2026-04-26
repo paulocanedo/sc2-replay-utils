@@ -67,6 +67,9 @@ toast.settings_saved = Configurações salvas.
 toast.save_error = Erro ao salvar: {err}
 toast.save_config_error = Erro ao salvar config: {err}
 toast.date_range_autodetect = Mostrando replays: {range}
+toast.copy_ok = {count} replays copiados para {dir}
+toast.copy_partial = {ok} replays copiados · {err_count} falharam (veja o log)
+toast.copy_mkdir_err = Não foi possível criar o destino: {err}
 error.load_failed = Erro ao carregar {path}: {err}
 
 # ── Estado vazio ────────────────────────────────────────────────────────────
@@ -176,6 +179,17 @@ library.entry.failed = falha: {err}
 library.entry.open = abrir
 library.outcome.win = VIT
 library.outcome.loss = DER
+# ── Toolbar de seleção múltipla ──
+library.selection.toolbar = {count} selecionados
+library.selection.select_all_button = Selecionar todos
+library.selection.select_all_tooltip = Selecionar todos os replays visíveis (Ctrl+A)
+library.selection.clear_button = Limpar
+library.selection.clear_tooltip = Limpar seleção (Ctrl+Shift+A)
+library.selection.save_button = Salvar replay(s) como…
+library.selection.template_label = Modelo do nome:
+library.selection.help_tooltip = Mostrar variáveis disponíveis no modelo
+library.selection.help_fallback_note = Replays sem metadados parseados usam o nome de arquivo original.
+library.selection.checkbox_tooltip = Selecionar replay (Ctrl+A: tudo · Ctrl+Shift+A: nada)
 # ── Card lateral de detalhes (clique simples na entry) ──
 library.detail.close_tooltip = Fechar detalhes
 library.detail.open_analysis = Abrir análise

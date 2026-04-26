@@ -3,6 +3,7 @@
 // painéis em `menu_bar`, `topbar`, `status_bar`, `central` e `modals`
 // são `impl` separados sobre `AppState` espalhados pelos submódulos.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -62,6 +63,16 @@ pub struct AppState {
     /// análise") atualiza `loaded` e troca para a tela `Analysis`.
     /// `None` colapsa o card de detalhes e devolve a largura à lista.
     pub library_selection: Option<PathBuf>,
+    /// Marcação múltipla na biblioteca (checkbox por linha). Usada para
+    /// ações em lote como "salvar como…". É estado de UI puro, não
+    /// persistido no config — limpa em `refresh_library` (paths podem
+    /// desaparecer).
+    pub library_selected: HashSet<PathBuf>,
+    /// Template aplicado ao nome de destino quando o usuário salva
+    /// cópias dos replays marcados. Mesmas variáveis do template de
+    /// rename (`{datetime}`, `{map}`, `{p1}`, …). Quando um replay não
+    /// tem metadados parseáveis, cai no nome de arquivo original.
+    pub library_save_template: String,
     /// Minimapa carregado para `library_selection`. Cache simples: ao
     /// selecionar outra entrada, descarregamos o anterior e reabrimos o
     /// MPQ do novo. `None` significa "não tentado" ou "falhou" — o card
@@ -155,6 +166,8 @@ impl AppState {
             library_filter,
             library_sidebar_open: true,
             library_selection: None,
+            library_selected: HashSet::new(),
+            library_save_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
             library_selection_minimap: None,
             library_selection_minimap_path: None,
             timeline_tab_loop: 0,
@@ -190,6 +203,66 @@ impl AppState {
     pub(super) fn refresh_library(&mut self) {
         if let Some(dir) = self.config.effective_working_dir() {
             self.library.refresh(&dir);
+        }
+        // Paths podem ter sumido após o rescan — descarta a marcação.
+        self.library_selected.clear();
+    }
+
+    /// Copia os replays atualmente marcados na biblioteca (`library_selected`)
+    /// para uma pasta escolhida pelo usuário via diálogo nativo. Aplica o
+    /// `library_save_template` para gerar o nome de destino; quando o
+    /// replay não tem metadados parseáveis (Pending/Failed/Unsupported)
+    /// ou o template não pode ser expandido, cai no nome de arquivo
+    /// original. No-op se a marcação está vazia ou se o diálogo for
+    /// cancelado.
+    pub(super) fn copy_selected_replays(&mut self) {
+        let lang = self.config.language;
+        if self.library_selected.is_empty() {
+            return;
+        }
+        let Some(dest) = rfd::FileDialog::new().pick_folder() else {
+            return;
+        };
+        if !dest.exists() {
+            if let Err(e) = fs::create_dir_all(&dest) {
+                self.set_toast(tf(
+                    "toast.copy_mkdir_err",
+                    lang,
+                    &[("err", &e.to_string())],
+                ));
+                return;
+            }
+        }
+        let mut ok = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+        for src in &self.library_selected {
+            let target_name = expand_save_name(src, &self.library, &self.library_save_template);
+            let Some(target_name) = target_name else { continue };
+            let target = dest.join(&target_name);
+            match fs::copy(src, &target) {
+                Ok(_) => ok += 1,
+                Err(e) => errors.push(format!("{}: {e}", src.display())),
+            }
+        }
+        if errors.is_empty() {
+            self.set_toast(tf(
+                "toast.copy_ok",
+                lang,
+                &[
+                    ("count", &ok.to_string()),
+                    ("dir", &dest.display().to_string()),
+                ],
+            ));
+        } else {
+            self.set_toast(tf(
+                "toast.copy_partial",
+                lang,
+                &[
+                    ("ok", &ok.to_string()),
+                    ("err_count", &errors.len().to_string()),
+                ],
+            ));
+            eprintln!("library copy errors:\n{}", errors.join("\n"));
         }
     }
 
@@ -345,6 +418,23 @@ fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| p.display().to_string())
+}
+
+/// Resolve o nome de destino para um replay marcado: aplica o template
+/// quando o replay tem metadados parseáveis, caso contrário cai no nome
+/// de arquivo original. Devolve `None` apenas se o path não tiver
+/// componente final (nunca deveria acontecer pra paths vindos da
+/// biblioteca).
+fn expand_save_name(src: &Path, library: &ReplayLibrary, template: &str) -> Option<String> {
+    let entry = library.entries.iter().find(|e| e.path == src);
+    if let Some(entry) = entry {
+        if let crate::library::MetaState::Parsed(meta) = &entry.meta {
+            if let Some(name) = crate::rename::expand_template(template, meta) {
+                return Some(name);
+            }
+        }
+    }
+    src.file_name().map(|s| s.to_string_lossy().into_owned())
 }
 
 /// Deriva `ParsedMeta` de um `LoadedReplay` pronto. Preenche `opening`

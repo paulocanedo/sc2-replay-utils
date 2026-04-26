@@ -1,5 +1,6 @@
 //! Render egui da biblioteca + ação solicitada pelo usuário.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use egui::{Color32, Context, RichText, ScrollArea, Ui};
@@ -34,6 +35,18 @@ pub enum LibraryAction {
         date_range: DateRange,
         race: Option<char>,
     },
+    /// Alterna a marcação de uma entrada na seleção múltipla (checkbox
+    /// na coluna de seleção).
+    ToggleSelected(PathBuf),
+    /// Substitui a seleção múltipla pelos paths fornecidos (Ctrl+A
+    /// sobre as entradas atualmente visíveis).
+    SetSelected(Vec<PathBuf>),
+    /// Limpa a seleção múltipla (Ctrl+Shift+A ou botão "Clear").
+    ClearSelected,
+    /// Pede para copiar os replays atualmente marcados — o app abre o
+    /// diálogo de pasta e executa a cópia. Os paths vivem em
+    /// `AppState.library_selected`.
+    CopySelected,
 }
 
 /// Renderiza o hero (KPI strip clicável). Extraído da `show` principal
@@ -100,6 +113,8 @@ pub fn show(
     library: &ReplayLibrary,
     current_path: Option<&Path>,
     selected_path: Option<&Path>,
+    selected_set: &HashSet<PathBuf>,
+    save_template: &mut String,
     config: &AppConfig,
     filter: &mut LibraryFilter,
 ) -> LibraryAction {
@@ -265,6 +280,86 @@ pub fn show(
         );
     }
 
+    // ── Atalhos de teclado da seleção múltipla ───────────────────────
+    // Ctrl+A: marca tudo que está visível pelo filtro atual.
+    // Ctrl+Shift+A: limpa a seleção. Capturados aqui (e não em
+    // app/mod.rs) porque dependem do `visible` filtrado, que só existe
+    // dentro deste escopo.
+    if !visible.is_empty()
+        && ui.input(|i| {
+            i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::A)
+        })
+    {
+        let paths: Vec<PathBuf> = visible
+            .iter()
+            .map(|&i| library.entries[i].path.clone())
+            .collect();
+        action = LibraryAction::SetSelected(paths);
+    }
+    if !selected_set.is_empty()
+        && ui.input(|i| {
+            i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::A)
+        })
+    {
+        action = LibraryAction::ClearSelected;
+    }
+
+    // ── Toolbar de seleção ───────────────────────────────────────────
+    // Sempre que há entradas visíveis, mostra ao menos o botão "Select
+    // all" pra dar descoberta visual à feature (atalho Ctrl+A é
+    // espelhado no tooltip). Quando há alguma marcação, expande pra
+    // mostrar contagem, Clear, campo de template, ajuda e o botão
+    // "Salvar como…".
+    if !visible.is_empty() {
+        ui.add_space(SPACE_S);
+        ui.horizontal_wrapped(|ui| {
+            let select_all_resp = ui
+                .button(t("library.selection.select_all_button", lang))
+                .on_hover_text(t("library.selection.select_all_tooltip", lang));
+            if select_all_resp.clicked() {
+                let paths: Vec<PathBuf> = visible
+                    .iter()
+                    .map(|&i| library.entries[i].path.clone())
+                    .collect();
+                action = LibraryAction::SetSelected(paths);
+            }
+
+            if !selected_set.is_empty() {
+                ui.separator();
+                ui.label(
+                    RichText::new(tf(
+                        "library.selection.toolbar",
+                        lang,
+                        &[("count", &selected_set.len().to_string())],
+                    ))
+                    .strong(),
+                );
+                if ui
+                    .button(t("library.selection.clear_button", lang))
+                    .on_hover_text(t("library.selection.clear_tooltip", lang))
+                    .clicked()
+                {
+                    action = LibraryAction::ClearSelected;
+                }
+                ui.separator();
+                ui.label(t("library.selection.template_label", lang));
+                ui.add(
+                    egui::TextEdit::singleline(save_template)
+                        .desired_width(280.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+                template_help_popup(ui, lang);
+                if ui
+                    .button(RichText::new(t("library.selection.save_button", lang)).strong())
+                    .clicked()
+                {
+                    action = LibraryAction::CopySelected;
+                }
+            }
+        });
+        ui.add_space(SPACE_S);
+    }
+
     // ── Lista virtualizada ───────────────────────────────────────────
     // `max_height` is a belt-and-suspenders bound: with `auto_shrink=false`
     // the ScrollArea tries to fill all available space, and historically we
@@ -285,10 +380,14 @@ pub fn show(
                 let entry = &library.entries[idx];
                 let is_current = current_path.map_or(false, |cp| cp == entry.path);
                 let is_selected = selected_path.map_or(false, |sp| sp == entry.path);
-                match entry_row(ui, entry, is_current, is_selected, config, row_h) {
+                let is_checked = selected_set.contains(&entry.path);
+                match entry_row(ui, entry, is_current, is_selected, is_checked, config, row_h) {
                     RowOutcome::None => {}
                     RowOutcome::Select => action = LibraryAction::Select(entry.path.clone()),
                     RowOutcome::Load => action = LibraryAction::Load(entry.path.clone()),
+                    RowOutcome::ToggleSelected => {
+                        action = LibraryAction::ToggleSelected(entry.path.clone());
+                    }
                     RowOutcome::ApplyRelated(RelatedFilter::Opponent(n)) => {
                         filter.opponent_name = Some(n);
                     }
@@ -306,6 +405,51 @@ pub fn show(
         });
 
     action
+}
+
+/// Botão de ajuda com popup explicando as variáveis do template de
+/// "salvar como…". Reusa as strings `rename.var.*` da tela Rename para
+/// uma única fonte de verdade da documentação.
+fn template_help_popup(ui: &mut Ui, lang: crate::locale::Language) {
+    let resp = ui
+        .button("?")
+        .on_hover_text(t("library.selection.help_tooltip", lang));
+    egui::Popup::from_toggle_button_response(&resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_min_width(280.0);
+            ui.label(RichText::new(t("rename.vars_header", lang)).strong());
+            ui.add_space(SPACE_S);
+            egui::Grid::new("library_save_template_vars")
+                .num_columns(2)
+                .spacing([12.0, 2.0])
+                .show(ui, |ui| {
+                    let vars: [(&str, &str); 8] = [
+                        ("{datetime}", t("rename.var.datetime", lang)),
+                        ("{map}", t("rename.var.map", lang)),
+                        ("{p1}", t("rename.var.p1", lang)),
+                        ("{p2}", t("rename.var.p2", lang)),
+                        ("{r1}", t("rename.var.r1", lang)),
+                        ("{r2}", t("rename.var.r2", lang)),
+                        ("{loops}", t("rename.var.loops", lang)),
+                        ("{duration}", t("rename.var.duration", lang)),
+                    ];
+                    for (var, desc) in vars {
+                        ui.monospace(var);
+                        ui.label(desc);
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(SPACE_S);
+            ui.small(t("rename.note_special", lang));
+            ui.small(t("rename.note_ext", lang));
+            ui.add_space(SPACE_S);
+            ui.small(
+                RichText::new(t("library.selection.help_fallback_note", lang))
+                    .italics()
+                    .color(Color32::from_gray(160)),
+            );
+        });
 }
 
 /// Helper para a `app.rs` pedir repaint quando houver trabalho em andamento.

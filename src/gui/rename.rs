@@ -21,7 +21,7 @@ pub const DEFAULT_TEMPLATE: &str = "{datetime}_{map}-{p1}({r1})_vs_{p2}({r2})_{l
 
 /// Expande o template usando os metadados de um replay.
 /// Retorna `None` se o replay tiver menos de 2 jogadores.
-fn expand_template(template: &str, meta: &ParsedMeta) -> Option<String> {
+pub fn expand_template(template: &str, meta: &ParsedMeta) -> Option<String> {
     if meta.players.len() < 2 {
         return None;
     }
