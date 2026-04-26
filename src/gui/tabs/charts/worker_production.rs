@@ -9,9 +9,7 @@
 // e o overlay de duração nos blocos largos. O retângulo de captura
 // também é o que recebe scroll (zoom) e drag (pan).
 
-use egui::{
-    Align2, Color32, ComboBox, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2,
-};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::colors::{
     player_slot_color_bright, ACCENT_WARNING, BORDER, FOCUS_RING, LABEL_DIM, SURFACE_RAISED,
@@ -20,7 +18,7 @@ use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tabs::timeline::structure_icon;
-use crate::widgets::chip;
+use crate::widgets::{chip, player_pov_pill, PlayerPickerSize};
 use crate::worker_production_chart::{extract, BlockKind, ProductionBlock, StructureLane};
 
 /// Estado UI persistente da seção (não volta pro `AppConfig`).
@@ -76,14 +74,23 @@ pub fn show(
     // Cabeçalho: seletor + reset.
     ui.horizontal(|ui| {
         ui.label(t("charts.worker_production.player", lang));
-        let selected_name = players[opts.selected_player].name.clone();
-        ComboBox::from_id_salt("worker_production_player")
-            .selected_text(selected_name)
-            .show_ui(ui, |ui| {
-                for (idx, p) in players.iter().enumerate() {
-                    ui.selectable_value(&mut opts.selected_player, idx, &p.name);
-                }
-            });
+        for (idx, p) in players.iter().enumerate() {
+            if player_pov_pill(
+                ui,
+                &p.name,
+                &p.race,
+                idx,
+                config.is_user(&p.name),
+                idx == opts.selected_player,
+                PlayerPickerSize::Small,
+                config,
+                lang,
+            )
+            .clicked()
+            {
+                opts.selected_player = idx;
+            }
+        }
         ui.separator();
         if chip(
             ui,
