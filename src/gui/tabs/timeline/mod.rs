@@ -31,13 +31,17 @@ mod side_panel;
 mod transport;
 pub(super) mod unit_column;
 
+// Re-exporta o helper de ícone de estrutura para a aba Charts (lane
+// header esquerdo).
+pub(crate) use unit_column::structure_icon;
+
 use egui::{Color32, TextStyle, Ui};
 
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::LoadedReplay;
 use crate::tokens::SPACE_XS;
-use crate::widgets::toggle_chip_bool;
+use crate::widgets::{player_pov_pill, toggle_chip_bool, PlayerPickerSize};
 
 /// Tamanho do viewport da câmera do SC2 em tiles (zoom padrão).
 /// Compartilhado entre `minimap` (camera rect) e `overlays` (heatmap
@@ -105,6 +109,8 @@ pub fn show(
     show_heatmap: &mut bool,
     show_creep: &mut bool,
     show_map: &mut bool,
+    show_fog: &mut bool,
+    fog_player: &mut usize,
     hovered_entity: &mut Option<(usize, String)>,
 ) {
     // Hover dos chips do `unit_column` é cross-frame com lag de 1 frame:
@@ -150,6 +156,33 @@ pub fn show(
                 toggle_chip_bool(ui, t("timeline.toggle.heatmap", lang), show_heatmap, None);
                 toggle_chip_bool(ui, t("timeline.toggle.creep", lang), show_creep, None);
                 toggle_chip_bool(ui, t("timeline.toggle.map", lang), show_map, None);
+                toggle_chip_bool(ui, t("timeline.toggle.fog", lang), show_fog, None);
+                if *show_fog {
+                    // Seletor de POV inline com os toggles. Clamp
+                    // prévio garante que o índice persistido entre
+                    // replays não fique fora do range.
+                    let n = loaded.timeline.players.len();
+                    if n > 0 && *fog_player >= n {
+                        *fog_player = 0;
+                    }
+                    for (i, p) in loaded.timeline.players.iter().enumerate() {
+                        if player_pov_pill(
+                            ui,
+                            &p.name,
+                            &p.race,
+                            i,
+                            config.is_user(&p.name),
+                            i == *fog_player,
+                            PlayerPickerSize::Small,
+                            config,
+                            lang,
+                        )
+                        .clicked()
+                        {
+                            *fog_player = i;
+                        }
+                    }
+                }
             });
             ui.add_space(SPACE_XS);
         });
@@ -230,6 +263,8 @@ pub fn show(
                         *show_heatmap,
                         *show_creep,
                         *show_map,
+                        *show_fog,
+                        *fog_player,
                         prev_hover.as_ref(),
                         lang,
                     );

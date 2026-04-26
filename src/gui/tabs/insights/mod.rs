@@ -26,8 +26,8 @@ use egui::{ScrollArea, Ui};
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::replay_state::LoadedReplay;
-use crate::tokens::{SPACE_M, SPACE_S};
-use crate::widgets::player_pov_pill;
+use crate::tokens::SPACE_M;
+use crate::widgets::{player_pov_selector, PlayerPickerSize};
 
 /// Retorna `Some(target_loop)` quando algum card pediu seek pra aba
 /// Timeline (hoje, apenas o card Turning Point). Caller (central.rs)
@@ -56,30 +56,19 @@ pub fn show(
             *pov = Some(0);
         }
     }
-    let selected = pov.unwrap_or(0);
+    let mut selected = pov.unwrap_or(0);
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = SPACE_S;
-        ui.label(t("insights.pov_label", lang));
-        for (idx, p) in loaded.timeline.players.iter().enumerate() {
-            let is_user = config.is_user(&p.name);
-            let is_selected = idx == selected;
-            if player_pov_pill(
-                ui,
-                &p.name,
-                &p.race,
-                idx,
-                is_user,
-                is_selected,
-                config,
-                lang,
-            )
-            .clicked()
-            {
-                *pov = Some(idx);
-            }
-        }
-    });
+    if player_pov_selector(
+        ui,
+        &loaded.timeline.players,
+        &mut selected,
+        PlayerPickerSize::Small,
+        config,
+        lang,
+        Some(&t("insights.pov_label", lang)),
+    ) {
+        *pov = Some(selected);
+    }
     ui.add_space(SPACE_M);
 
     let mut seek_request: Option<u32> = None;

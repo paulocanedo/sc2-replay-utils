@@ -58,6 +58,16 @@ disclaimer.repo_link = Acessar o projeto no GitHub
 disclaimer.dont_show_again = Não exibir este aviso nas próximas execuções
 disclaimer.acknowledge = Entendi — continuar
 
+# ── Avisos experimentais por aba ────────────────────────────────────────────
+experimental.timeline.title = Experimental: Timeline
+experimental.timeline.intro = Algumas funcionalidades da Timeline ainda estão em desenvolvimento. Tenha isto em mente ao interpretar a visualização:
+experimental.timeline.bullet_movement = As posições das unidades no minimapa são interpoladas, não são dados exatos do replay — os caminhos reais podem diferir do que é exibido.
+experimental.timeline.bullet_fog = O overlay de Fog of War está incompleto: ainda não considera terreno elevado ou outros obstáculos de visão. Trate-o como uma aproximação.
+experimental.timeline.acknowledge = Entendi — continuar
+experimental.insights.title = Experimental: Insights
+experimental.insights.message = Os cálculos de Insights ainda estão sendo aperfeiçoados e podem apresentar valores incorretos. Considere os números aqui como aproximados enquanto a metodologia se estabiliza.
+experimental.insights.acknowledge = Entendi — continuar
+
 # ── Toasts / erros ──────────────────────────────────────────────────────────
 toast.no_working_dir = Diretório de trabalho não definido (veja Configurações).
 toast.no_replays_found = Nenhum replay encontrado em {dir}
@@ -67,6 +77,9 @@ toast.settings_saved = Configurações salvas.
 toast.save_error = Erro ao salvar: {err}
 toast.save_config_error = Erro ao salvar config: {err}
 toast.date_range_autodetect = Mostrando replays: {range}
+toast.copy_ok = {count} replays copiados para {dir}
+toast.copy_partial = {ok} replays copiados · {err_count} falharam (veja o log)
+toast.copy_mkdir_err = Não foi possível criar o destino: {err}
 error.load_failed = Erro ao carregar {path}: {err}
 
 # ── Estado vazio ────────────────────────────────────────────────────────────
@@ -176,6 +189,17 @@ library.entry.failed = falha: {err}
 library.entry.open = abrir
 library.outcome.win = VIT
 library.outcome.loss = DER
+# ── Toolbar de seleção múltipla ──
+library.selection.toolbar = {count} selecionados
+library.selection.select_all_button = Selecionar todos
+library.selection.select_all_tooltip = Selecionar todos os replays visíveis (Ctrl+A)
+library.selection.clear_button = Limpar
+library.selection.clear_tooltip = Limpar seleção (Ctrl+Shift+A)
+library.selection.save_button = Salvar replay(s) como…
+library.selection.template_label = Modelo do nome:
+library.selection.help_tooltip = Mostrar variáveis disponíveis no modelo
+library.selection.help_fallback_note = Replays sem metadados parseados usam o nome de arquivo original.
+library.selection.checkbox_tooltip = Selecionar replay (Ctrl+A: tudo · Ctrl+Shift+A: nada)
 # ── Card lateral de detalhes (clique simples na entry) ──
 library.detail.close_tooltip = Fechar detalhes
 library.detail.open_analysis = Abrir análise
@@ -306,11 +330,23 @@ charts.tooltip.army_anon = Tempo: {mm}:{ss}\nArmy Value: {value}
 charts.tooltip.count_named = {name}\nTempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.count_anon = Tempo: {mm}:{ss}\nQuantidade: {value}
 charts.tooltip.supply_line = Supply: {used}/{made}
+charts.production.title = Produção
+charts.production.view.workers = Workers
+charts.production.view.army = Army
+charts.production.view.research = Pesquisas
+charts.production.view.upgrades = Upgrades
+charts.production.coming_soon = Em breve.
+charts.production.player = Jogador:
+charts.production.empty.workers = Nenhuma estrutura produtora de worker encontrada.
+charts.production.empty.army = Nenhuma estrutura produtora de army encontrada.
+charts.production.reset_view = Redefinir
+charts.production.reset_view.hint = Redefinir zoom e pan. Dica: scroll para zoom, arraste para pan, duplo-clique para redefinir.
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
 timeline.toggle.creep = Creep
 timeline.toggle.map = Map
+timeline.toggle.fog = Névoa
 timeline.stats.bldg_focus_none = — foco prédios
 timeline.stats.bldg_focus = {pct}% foco prédios
 timeline.stats.idle_worker = ⏱ {secs}s workers ociosos

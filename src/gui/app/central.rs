@@ -97,6 +97,8 @@ impl AppState {
                         &self.library,
                         current,
                         selected,
+                        &self.library_selected,
+                        &mut self.library_save_template,
                         &self.config,
                         &mut self.library_filter,
                     );
@@ -117,6 +119,8 @@ impl AppState {
                             &mut self.timeline_show_heatmap,
                             &mut self.timeline_show_creep,
                             &mut self.timeline_show_map,
+                            &mut self.timeline_show_fog,
+                            &mut self.timeline_fog_player,
                             &mut self.timeline_hovered_entity,
                         ),
                         Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
@@ -125,6 +129,7 @@ impl AppState {
                             loaded,
                             &self.config,
                             &mut self.charts_army_opts,
+                            &mut self.charts_production_opts,
                         ),
                         Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
                         Tab::Insights => {
@@ -183,6 +188,16 @@ impl AppState {
                 self.rename_status = None;
                 self.screen = Screen::Rename;
             }
+            LibraryAction::ToggleSelected(p) => {
+                if !self.library_selected.remove(&p) {
+                    self.library_selected.insert(p);
+                }
+            }
+            LibraryAction::SetSelected(paths) => {
+                self.library_selected = paths.into_iter().collect();
+            }
+            LibraryAction::ClearSelected => self.library_selected.clear(),
+            LibraryAction::CopySelected => self.copy_selected_replays(),
         }
     }
 }

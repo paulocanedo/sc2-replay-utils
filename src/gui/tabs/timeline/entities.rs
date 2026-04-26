@@ -105,15 +105,11 @@ pub(super) fn alive_entities_at(
         }
         match ev.kind {
             EntityEventKind::ProductionFinished => {
-                // Tumors são desenhadas implicitamente pela camada de
-                // creep — pular aqui evita o quadrado de 9px de
-                // estrutura por cima da própria mancha. Beacons são
-                // pings de minimapa do próprio jogador (BeaconAttack,
-                // BeaconRally, etc.), não unidades — mesmo filtro
-                // aplicado por `collect_alive_units` no `unit_column`.
-                if ev.entity_type.starts_with("CreepTumor")
-                    || ev.entity_type.starts_with("Beacon")
-                {
+                // Beacons são pings de minimapa do próprio jogador
+                // (BeaconAttack, BeaconRally, etc.), não unidades —
+                // mesmo filtro aplicado por `collect_alive_units` no
+                // `unit_column`.
+                if ev.entity_type.starts_with("Beacon") {
                     continue;
                 }
                 let is_base = is_base_type(&ev.entity_type);

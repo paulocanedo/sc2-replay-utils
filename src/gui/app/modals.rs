@@ -188,3 +188,102 @@ fn disclaimer_bullets(ui: &mut egui::Ui, lang: Language) {
         ui.label(format!("•  {}", t(key, lang)));
     }
 }
+
+/// Bullet keys shown by [`timeline_experimental_prompt`].
+const TIMELINE_EXPERIMENTAL_BULLET_KEYS: &[&str] = &[
+    "experimental.timeline.bullet_movement",
+    "experimental.timeline.bullet_fog",
+];
+
+/// Tab-scoped warning shown the first time the user opens the Timeline
+/// tab in a session. Lists known limitations of the visualization
+/// (interpolated unit movement, incomplete Fog of War). Dismissal lives
+/// only in `dismissed_session` — flag is reset on each launch by design.
+pub(super) fn timeline_experimental_prompt(
+    ctx: &Context,
+    lang: Language,
+    dismissed_session: &mut bool,
+) {
+    egui::Window::new(t("experimental.timeline.title", lang))
+        .collapsible(false)
+        .resizable(false)
+        .default_width(560.0)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_max_width(560.0);
+            ui.add_space(4.0);
+            ui.heading(t("experimental.timeline.title", lang));
+            ui.add_space(6.0);
+            ui.label(t("experimental.timeline.intro", lang));
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            for (i, key) in TIMELINE_EXPERIMENTAL_BULLET_KEYS.iter().enumerate() {
+                if i > 0 {
+                    ui.add_space(6.0);
+                }
+                ui.label(format!("•  {}", t(key, lang)));
+            }
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            ui.vertical_centered(|ui| {
+                if ui
+                    .add_sized(
+                        [220.0, 32.0],
+                        egui::Button::new(
+                            RichText::new(t("experimental.timeline.acknowledge", lang)).strong(),
+                        ),
+                    )
+                    .clicked()
+                {
+                    *dismissed_session = true;
+                }
+                ui.add_space(4.0);
+            });
+        });
+}
+
+/// Tab-scoped warning shown the first time the user opens the Insights
+/// tab in a session. Calculations there are still being refined and may
+/// report inaccurate values. Dismissal lives only in
+/// `dismissed_session`.
+pub(super) fn insights_experimental_prompt(
+    ctx: &Context,
+    lang: Language,
+    dismissed_session: &mut bool,
+) {
+    egui::Window::new(t("experimental.insights.title", lang))
+        .collapsible(false)
+        .resizable(false)
+        .default_width(520.0)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.set_max_width(520.0);
+            ui.add_space(4.0);
+            ui.heading(t("experimental.insights.title", lang));
+            ui.add_space(6.0);
+            ui.label(t("experimental.insights.message", lang));
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            ui.vertical_centered(|ui| {
+                if ui
+                    .add_sized(
+                        [220.0, 32.0],
+                        egui::Button::new(
+                            RichText::new(t("experimental.insights.acknowledge", lang)).strong(),
+                        ),
+                    )
+                    .clicked()
+                {
+                    *dismissed_session = true;
+                }
+                ui.add_space(4.0);
+            });
+        });
+}

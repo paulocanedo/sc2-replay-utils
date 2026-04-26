@@ -26,7 +26,9 @@ use crate::loss_analysis::{cluster_engagements, player_kills, player_losses};
 use crate::production_efficiency::{
     is_warp_gate_unit, ARMY_SUPPLY_MAXED_THRESHOLD, WARP_GATE_CYCLE_LOOPS, WARP_GATE_RESEARCH,
 };
-use crate::replay::{EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline};
+use crate::replay::{
+    is_incapacitating_addon, EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline,
+};
 
 /// Gap (em segundos) que separa engajamentos. Mesmo threshold usado em
 /// `insights/army_trades.rs` — mantém a noção de "grande luta"
@@ -39,22 +41,6 @@ const MIN_TOTAL_VALUE: u32 = 300;
 
 /// Número máximo de marcos (e portanto de segmentos) reportados.
 pub const MAX_SEGMENTS: usize = 3;
-
-/// Addons cuja construção deixa o produtor-mãe incapacitado enquanto
-/// estão em andamento. A estrutura volta a contar como capacidade
-/// quando o addon termina (ou é cancelado/morto).
-const INCAPACITATING_ADDONS: &[&str] = &[
-    "BarracksReactor",
-    "BarracksTechLab",
-    "FactoryReactor",
-    "FactoryTechLab",
-    "StarportReactor",
-    "StarportTechLab",
-];
-
-fn is_incapacitating_addon(name: &str) -> bool {
-    INCAPACITATING_ADDONS.iter().any(|a| *a == name)
-}
 
 #[derive(Clone, Debug)]
 pub struct BattleSegmentEfficiency {

@@ -55,6 +55,9 @@ type SupplyTable = HashMap<&'static str, u32>;
 /// Tabela `nome_unidade → (minerals, vespene)` para uma única versão.
 type CostTable = HashMap<&'static str, (u32, u32)>;
 
+/// Tabela `nome_unidade → sight_radius × 100` para uma única versão.
+type SightTable = HashMap<&'static str, u32>;
+
 struct Balance {
     /// `BTreeMap` para permitir busca pelo maior `version ≤ alvo` em
     /// O(log n).
@@ -62,6 +65,7 @@ struct Balance {
     abilities: BTreeMap<u32, AbilityTable>,
     supply: BTreeMap<u32, SupplyTable>,
     cost: BTreeMap<u32, CostTable>,
+    sight: BTreeMap<u32, SightTable>,
 }
 
 static GLOBAL: OnceLock<Balance> = OnceLock::new();
@@ -91,11 +95,16 @@ fn load() -> &'static Balance {
                 .or_default()
                 .insert(name, (minerals, vespene));
         }
+        let mut sight: BTreeMap<u32, SightTable> = BTreeMap::new();
+        for &(version, name, sight_x100) in SIGHT_RADIUS_ENTRIES {
+            sight.entry(version).or_default().insert(name, sight_x100);
+        }
         Balance {
             versions,
             abilities,
             supply,
             cost,
+            sight,
         }
     })
 }
@@ -136,6 +145,14 @@ fn pick_cost_table(b: &Balance, base_build: u32) -> Option<&CostTable> {
         .map(|(_, t)| t)
 }
 
+fn pick_sight_table(b: &Balance, base_build: u32) -> Option<&SightTable> {
+    b.sight
+        .range(..=base_build)
+        .next_back()
+        .or_else(|| b.sight.iter().next())
+        .map(|(_, t)| t)
+}
+
 /// Custo de supply de `name` em décimos (ex.: Marine = 10, Zergling = 5).
 /// Retorna `0` quando desconhecido.
 pub fn supply_cost_x10(name: &str, base_build: u32) -> u32 {
@@ -151,6 +168,15 @@ pub fn resource_cost(name: &str, base_build: u32) -> (u32, u32) {
     let b = load();
     let Some(table) = pick_cost_table(b, base_build) else { return (0, 0) };
     table.get(name).copied().unwrap_or((0, 0))
+}
+
+/// Raio de visão (sight radius) de `name` em tiles do jogo. Retorna
+/// `None` quando o nome não está presente na balance data — o consumer
+/// (overlay de FOG no Timeline) decide o fallback.
+pub fn sight_radius(name: &str, base_build: u32) -> Option<f32> {
+    let b = load();
+    let table = pick_sight_table(b, base_build)?;
+    table.get(name).copied().map(|x100| x100 as f32 / 100.0)
 }
 
 /// Tempo de build/research/upgrade para `name` em **game loops**,
@@ -220,5 +246,25 @@ mod tests {
     fn future_base_build_falls_back_to_highest() {
         let scv = build_time_loops("SCV", u32::MAX);
         assert!(scv > 0, "SCV deveria resolver mesmo em base_build futurista");
+    }
+
+    /// Sanity check: sightRadius do Marine deve estar em torno de 9 tiles
+    /// e do Probe em torno de 8 tiles. Se a extração do build.rs quebrar,
+    /// esse teste alerta antes do overlay de FOG silenciosamente cair no
+    /// fallback de 8.0 para tudo.
+    #[test]
+    fn known_sight_radii_are_present() {
+        let b = load();
+        let max_build = *b.sight.keys().next_back().expect("at least one sight version");
+        let marine = sight_radius("Marine", max_build).expect("Marine sight");
+        assert!(
+            (8.0..=10.0).contains(&marine),
+            "Marine sight radius esperado ~9, obtido {marine}",
+        );
+        let probe = sight_radius("Probe", max_build).expect("Probe sight");
+        assert!(
+            (7.0..=9.0).contains(&probe),
+            "Probe sight radius esperado ~8, obtido {probe}",
+        );
     }
 }
