@@ -57,6 +57,16 @@ disclaimer.repo_link = View the project on GitHub
 disclaimer.dont_show_again = Do not show this notice on future launches
 disclaimer.acknowledge = I understand — continue
 
+# ── Tab-scoped experimental warnings ────────────────────────────────────────
+experimental.timeline.title = Experimental: Timeline
+experimental.timeline.intro = Some Timeline features are still under development. Please keep this in mind when interpreting the visualization:
+experimental.timeline.bullet_movement = Unit positions on the minimap are interpolated, not exact replay data — actual paths may differ from what is displayed.
+experimental.timeline.bullet_fog = The Fog of War overlay is incomplete: it does not yet account for high ground or other vision-affecting terrain. Treat it as a rough approximation.
+experimental.timeline.acknowledge = Got it — continue
+experimental.insights.title = Experimental: Insights
+experimental.insights.message = Insights calculations are still being refined and may report inaccurate values. Treat the figures here as approximate while the methodology stabilizes.
+experimental.insights.acknowledge = Got it — continue
+
 # ── Toasts / errors ─────────────────────────────────────────────────────────
 toast.no_working_dir = Working directory not set (see Settings).
 toast.no_replays_found = No replay found in {dir}

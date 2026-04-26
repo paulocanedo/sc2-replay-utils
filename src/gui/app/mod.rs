@@ -270,6 +270,34 @@ impl eframe::App for AppState {
             modals::about_window(&ctx, lang, &mut self.show_about);
         }
 
+        // -------- Tab-scoped experimental warnings --------
+        // Session-only: ack lasts until app exit. Painted after central
+        // so the user sees the underlying tab; egui::Window floats on
+        // top.
+        if self.screen == Screen::Analysis {
+            match self.active_tab {
+                crate::tabs::Tab::Timeline
+                    if !self.timeline_experimental_dismissed_session =>
+                {
+                    modals::timeline_experimental_prompt(
+                        &ctx,
+                        lang,
+                        &mut self.timeline_experimental_dismissed_session,
+                    );
+                }
+                crate::tabs::Tab::Insights
+                    if !self.insights_experimental_dismissed_session =>
+                {
+                    modals::insights_experimental_prompt(
+                        &ctx,
+                        lang,
+                        &mut self.insights_experimental_dismissed_session,
+                    );
+                }
+                _ => {}
+            }
+        }
+
         // Mantém o ciclo de polling do watcher vivo mesmo sem input.
         if self.watcher.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));

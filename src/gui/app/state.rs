@@ -142,6 +142,12 @@ pub struct AppState {
     /// they didn't tick "don't show again" (in which case it will
     /// re-appear on the next launch).
     pub disclaimer_dismissed_session: bool,
+    /// Session-only flag: suppresses the Timeline experimental warning
+    /// modal once dismissed. Not persisted — resets on every launch.
+    pub timeline_experimental_dismissed_session: bool,
+    /// Session-only flag: suppresses the Insights experimental warning
+    /// modal once dismissed. Not persisted — resets on every launch.
+    pub insights_experimental_dismissed_session: bool,
     /// Índice do jogador de referência na aba Insights. `None` até
     /// o primeiro render pós-load, que resolve pelo nickname do usuário
     /// (cai em 0 se não houver match). Resetado a cada novo replay.
@@ -196,6 +202,8 @@ impl AppState {
             language_draft,
             disclaimer_dont_show_again: false,
             disclaimer_dismissed_session: false,
+            timeline_experimental_dismissed_session: false,
+            insights_experimental_dismissed_session: false,
             insights_pov: None,
         };
         me.restart_watcher();
