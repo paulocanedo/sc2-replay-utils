@@ -26,7 +26,7 @@ use crate::colors::{
 };
 use crate::config::AppConfig;
 use crate::locale::t;
-use crate::production_lanes::{extract, BlockKind, LaneMode, StructureLane};
+use crate::production_lanes::{extract, BlockKind, LaneMode, ProductionBlock, StructureLane};
 use crate::replay::is_zerg_hatch;
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tabs::timeline::structure_icon;
@@ -472,12 +472,54 @@ fn draw_lane(
 
     let lane_is_zerg_hatch = is_zerg_hatch(lane.canonical_type);
 
-    // Decide o estilo do bloco. Em modo Workers, Hatch/Lair/Hive usa
-    // sub-trilhas para Producing (drones paralelos via larvas). Em modo
-    // Army, é igual; e em Protoss pós-WarpGate, cada bloco produzido
-    // *após* o morph para WarpGate também usa sub-trilhas — isso dá o
-    // visual "estilo Zerg" para warp-ins em rajada.
-    for block in &lane.blocks {
+    // Identifica quais blocos vão para sub-trilhas paralelas e atribui
+    // a cada um um índice vertical (0..n) via interval scheduling, pra
+    // que produções simultâneas (ex.: drones nascendo em larvas
+    // distintas da mesma Hatch) apareçam empilhadas em vez de
+    // sobrepostas na mesma faixa thin centralizada.
+    //
+    // Aplica para: lanes Zerg Hatch/Lair/Hive (modo Workers e Army), e
+    // blocos Producing pós-WarpGateResearch em lanes Protoss.
+    let thin_indices: Vec<usize> = (0..lane.blocks.len())
+        .filter(|&i| {
+            let b = &lane.blocks[i];
+            if !matches!(b.kind, BlockKind::Producing) {
+                return false;
+            }
+            let post_reactor = lane
+                .reactor_since_loop
+                .map(|r| b.start_loop >= r)
+                .unwrap_or(false);
+            if post_reactor {
+                return false;
+            }
+            lane_is_zerg_hatch
+                || lane
+                    .warpgate_since_loop
+                    .map(|wg| b.start_loop >= wg)
+                    .unwrap_or(false)
+        })
+        .collect();
+    let thin_tracks: Vec<usize> = if thin_indices.is_empty() {
+        Vec::new()
+    } else {
+        let refs: Vec<&ProductionBlock> = thin_indices.iter().map(|&i| &lane.blocks[i]).collect();
+        assign_parallel_tracks(&refs)
+    };
+    let mut thin_track_by_block: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(thin_indices.len());
+    for (k, &i) in thin_indices.iter().enumerate() {
+        thin_track_by_block.insert(i, thin_tracks[k]);
+    }
+    let n_thin_tracks = thin_tracks.iter().copied().max().map(|m| m + 1).unwrap_or(1);
+    // Distribui as N trilhas dentro de block_height com 1px de gap entre
+    // elas. Saturamos altura mínima em 2px pra paralelismos altos
+    // permanecerem visíveis.
+    let thin_line_h = ((block_height - n_thin_tracks.saturating_sub(1) as f32)
+        / n_thin_tracks.max(1) as f32)
+        .max(2.0);
+
+    for (i, block) in lane.blocks.iter().enumerate() {
         let s = block.start_loop.max(view_start).min(view_end);
         let e = block.end_loop.max(view_start).min(view_end);
         if e <= s {
@@ -491,21 +533,6 @@ fn draw_lane(
                 .reactor_since_loop
                 .map(|r| block.start_loop >= r)
                 .unwrap_or(false);
-
-        let use_thin_track = match block.kind {
-            BlockKind::Producing => {
-                !block_post_reactor
-                    && (lane_is_zerg_hatch
-                        || lane
-                            .warpgate_since_loop
-                            .map(|wg| block.start_loop >= wg)
-                            .unwrap_or(false))
-            }
-            // Morphing (CC→Orbital/PF) e Impeded (addon Terran) sempre
-            // ocupam toda a faixa — semantica de "estrutura inteira
-            // bloqueada", merece destaque visual cheio.
-            _ => false,
-        };
 
         let color = match block.kind {
             BlockKind::Producing => player_color,
@@ -529,18 +556,43 @@ fn draw_lane(
             };
             let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, bot));
             painter.rect_filled(rect, 1.5, color);
-        } else if use_thin_track {
-            // Sub-trilha thin centralizada para Hatch Zerg / WarpGate
-            // pós-research — comunica paralelismo via empilhamento.
-            let line_h = (block_height * 0.5).max(3.0);
-            let top = block_top + (block_height - line_h) * 0.5;
-            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + line_h));
+        } else if let Some(&track_idx) = thin_track_by_block.get(&i) {
+            // Sub-trilha thin para Hatch Zerg / WarpGate pós-research:
+            // cada produção paralela ganha sua própria linha vertical
+            // (interval scheduling). Sem isso, drones nascendo
+            // simultaneamente de larvas distintas se sobrepõem na
+            // mesma posição central e somem visualmente.
+            let top = block_top + track_idx as f32 * (thin_line_h + 1.0);
+            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + thin_line_h));
             painter.rect_filled(rect, 1.0, color);
         } else {
             let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
             painter.rect_filled(rect, 1.5, color);
         }
     }
+}
+
+/// Atribui a cada bloco uma sub-trilha paralela usando interval
+/// scheduling clássico: percorre os blocos por `start_loop` e coloca
+/// em qualquer trilha cujo último intervalo já terminou; cria uma
+/// trilha nova se nenhuma estiver livre. Output paralelo a `blocks`
+/// (mesmo length, mesmo índice).
+fn assign_parallel_tracks(blocks: &[&ProductionBlock]) -> Vec<usize> {
+    let mut tracks_end: Vec<u32> = Vec::new();
+    let mut assigned = vec![0usize; blocks.len()];
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by_key(|&i| blocks[i].start_loop);
+    for &i in &order {
+        let b = blocks[i];
+        if let Some(idx) = tracks_end.iter().position(|&e| e <= b.start_loop) {
+            tracks_end[idx] = b.end_loop;
+            assigned[i] = idx;
+        } else {
+            assigned[i] = tracks_end.len();
+            tracks_end.push(b.end_loop);
+        }
+    }
+    assigned
 }
 
 fn loop_to_x(
