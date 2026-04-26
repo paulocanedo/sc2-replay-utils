@@ -3,10 +3,12 @@
 
 use egui::{pos2, vec2, Color32, Rect};
 
+use crate::balance_data;
 use crate::replay::CreepEntry;
 use crate::replay::PlayerTimeline;
 use crate::replay_state::PlayableBounds;
 
+use super::entities::alive_entities_at;
 use super::minimap::to_screen;
 use super::{CAMERA_HEIGHT_TILES, CAMERA_WIDTH_TILES};
 
@@ -27,6 +29,24 @@ const CREEP_ALPHA: u8 = 55;
 /// Resolução do grid de heatmap (células por eixo). Valores maiores
 /// dão mais detalhe mas custam mais memória e iteração na renderização.
 const HEATMAP_GRID: usize = 64;
+
+/// Resolução do grid do overlay de FOG (células por eixo). Mais alto
+/// que o heatmap porque a borda da visão (interface entre visível e
+/// nevoento) é o elemento visual dominante e granularidade baixa fica
+/// "blocada" demais. 96 = ~9k células — barato dado o early-exit por
+/// bounding box de cada entidade.
+const FOG_GRID: usize = 96;
+
+/// Alpha (0–255) do overlay escuro nas áreas sem visão. ~140 deixa o
+/// mapa base e creep sob a névoa visíveis o bastante pra comparação,
+/// mas escuro o suficiente pra leitura imediata "isso aqui está fora
+/// da visão".
+const FOG_ALPHA: u8 = 140;
+
+/// Sight radius (em tiles) usado quando a balance data não tem entrada
+/// para uma entidade — ex.: cooperativo, campanha, replays muito
+/// antigos. Valor conservador típico de unidade ground.
+const FOG_DEFAULT_SIGHT: f32 = 8.0;
 
 /// Desenha a camada de creep do jogador como círculos translúcidos
 /// centrados em cada fonte (hatchery/lair/hive/tumor) viva no instante
@@ -147,6 +167,100 @@ pub(super) fn draw_heatmap(
             let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
             // Y invertido: gy=0 é min_y do jogo (base do mapa) → base da tela.
             let screen_gy = HEATMAP_GRID - 1 - gy;
+            let cell_rect = Rect::from_min_size(
+                pos2(
+                    rect.left() + gx as f32 * cell_w,
+                    rect.top() + screen_gy as f32 * cell_h,
+                ),
+                vec2(cell_w, cell_h),
+            );
+            painter.rect_filled(cell_rect, 0.0, fill);
+        }
+    }
+}
+
+/// Overlay de Fog of War da perspectiva de `player`: escurece as células
+/// do grid que não estão dentro do `sight_radius` de nenhuma entidade
+/// viva do jogador no instante `until_loop`.
+///
+/// Modelo simplificado — sem high-ground vision, sem detector/cloak.
+/// Cada entidade contribui um disco de raio `sight_radius` (tiles do
+/// jogo). Células marcam-se "visíveis" se o seu centro cai dentro de
+/// pelo menos um disco; o resto recebe um retângulo translúcido escuro.
+///
+/// Custo: O(N · cells_per_entity), onde `cells_per_entity` é limitada
+/// ao bounding box do disco no grid (não ao grid inteiro). Para um
+/// late-game com ~150 unidades cada uma cobrindo ~5×5 cells, são ~4k
+/// updates — barato comparado ao heatmap (~9k cells × N samples).
+pub(super) fn draw_fog(
+    painter: &egui::Painter,
+    rect: Rect,
+    player: &PlayerTimeline,
+    until_loop: u32,
+    bounds: PlayableBounds,
+    base_build: u32,
+) {
+    let entities = alive_entities_at(player, until_loop, base_build);
+    if entities.is_empty() {
+        // Sem entidades vivas (pré-spawn ou jogador eliminado): tudo é
+        // névoa. Pinta um único retângulo cobrindo o minimap inteiro —
+        // mais barato que rasterizar o grid.
+        painter.rect_filled(rect, 0.0, Color32::from_black_alpha(FOG_ALPHA));
+        return;
+    }
+
+    let span_x = (bounds.max_x - bounds.min_x).max(1) as f32;
+    let span_y = (bounds.max_y - bounds.min_y).max(1) as f32;
+
+    let mut visible = vec![false; FOG_GRID * FOG_GRID];
+
+    for e in &entities {
+        let radius = balance_data::sight_radius(&e.entity_type, base_build)
+            .unwrap_or(FOG_DEFAULT_SIGHT);
+        if radius <= 0.0 {
+            continue;
+        }
+        // Conversão tiles → unidades de grid em cada eixo. Mantemos os
+        // dois ratios separados pra que mapas com aspect não-quadrado
+        // continuem dando círculos bem cobertos no espaço de mundo.
+        let r_gx = radius * (FOG_GRID as f32) / span_x;
+        let r_gy = radius * (FOG_GRID as f32) / span_y;
+        let center_gx = ((e.x - bounds.min_x as f32) / span_x) * FOG_GRID as f32;
+        let center_gy = ((e.y - bounds.min_y as f32) / span_y) * FOG_GRID as f32;
+
+        let gx_min = (center_gx - r_gx).floor().max(0.0) as usize;
+        let gx_max = ((center_gx + r_gx).ceil() as i32)
+            .clamp(0, FOG_GRID as i32 - 1) as usize;
+        let gy_min = (center_gy - r_gy).floor().max(0.0) as usize;
+        let gy_max = ((center_gy + r_gy).ceil() as i32)
+            .clamp(0, FOG_GRID as i32 - 1) as usize;
+
+        // Test em espaço normalizado de grid: divide o delta pelos
+        // raios de cada eixo e usa unit-circle. Equivalente ao teste
+        // em coords de mundo, sem precisar reconverter cell→tile.
+        for gy in gy_min..=gy_max {
+            for gx in gx_min..=gx_max {
+                let dx = (gx as f32 + 0.5 - center_gx) / r_gx;
+                let dy = (gy as f32 + 0.5 - center_gy) / r_gy;
+                if dx * dx + dy * dy <= 1.0 {
+                    visible[gy * FOG_GRID + gx] = true;
+                }
+            }
+        }
+    }
+
+    let cell_w = rect.width() / FOG_GRID as f32;
+    let cell_h = rect.height() / FOG_GRID as f32;
+    let fill = Color32::from_black_alpha(FOG_ALPHA);
+
+    for gy in 0..FOG_GRID {
+        for gx in 0..FOG_GRID {
+            if visible[gy * FOG_GRID + gx] {
+                continue;
+            }
+            // Inverte Y igual ao heatmap: gy=0 = min_y do mundo (base) →
+            // base da tela.
+            let screen_gy = FOG_GRID - 1 - gy;
             let cell_rect = Rect::from_min_size(
                 pos2(
                     rect.left() + gx as f32 * cell_w,
