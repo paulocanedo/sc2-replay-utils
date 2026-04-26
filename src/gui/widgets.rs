@@ -20,7 +20,8 @@ use crate::config::AppConfig;
 use crate::locale::{t, Language};
 use crate::tokens::{
     size_body, size_caption, size_subtitle, size_title, CARD_INNER_MX, CARD_INNER_MY,
-    CHIP_MIN_HEIGHT, RADIUS_CARD, RADIUS_CHIP, SHADOW_CARD, SPACE_S, SPACE_XS, STROKE_HAIRLINE,
+    CHIP_MIN_HEIGHT, RADIUS_CARD, RADIUS_CHIP, SHADOW_CARD, SPACE_L, SPACE_M, SPACE_S, SPACE_XL,
+    SPACE_XS, STROKE_HAIRLINE,
 };
 
 // ── Chip ─────────────────────────────────────────────────────────────
@@ -245,8 +246,14 @@ impl NameDensity {
 /// as the glyphs next to it. Caller places it inline inside an
 /// `ui.horizontal`.
 pub fn race_badge(ui: &mut Ui, race: &str, density: NameDensity, cfg: &AppConfig) -> Response {
+    race_badge_sized(ui, race, density.icon_size(cfg), cfg)
+}
+
+/// Same as `race_badge` but takes an explicit side length in points.
+/// Used by widgets that derive icon size from a scale other than
+/// `NameDensity` (e.g., `player_pov_pill` with `PlayerPickerSize`).
+fn race_badge_sized(ui: &mut Ui, race: &str, side: f32, cfg: &AppConfig) -> Response {
     let letter = crate::utils::race_letter(race);
-    let side = density.icon_size(cfg);
     let icon_size = egui::vec2(side, side);
     match letter {
         'T' => ui.add(
@@ -319,10 +326,38 @@ pub fn player_identity(
     cfg: &AppConfig,
     lang: Language,
 ) {
-    race_badge(ui, race, density, cfg);
+    player_identity_sized(
+        ui,
+        name,
+        race,
+        player_idx,
+        is_user,
+        density.name_size(cfg),
+        density.icon_size(cfg),
+        cfg,
+        lang,
+    );
+}
+
+/// Same as `player_identity` but takes explicit name/icon sizes.
+/// Lets size-driven callers (e.g., `player_pov_pill`) reuse the
+/// canonical race+name+YOU composition without going through
+/// `NameDensity`.
+fn player_identity_sized(
+    ui: &mut Ui,
+    name: &str,
+    race: &str,
+    player_idx: usize,
+    is_user: bool,
+    name_size: f32,
+    icon_size: f32,
+    cfg: &AppConfig,
+    lang: Language,
+) {
+    race_badge_sized(ui, race, icon_size, cfg);
     ui.label(
         RichText::new(name)
-            .size(density.name_size(cfg))
+            .size(name_size)
             .strong()
             .color(player_slot_color_bright(player_idx)),
     );
@@ -331,15 +366,74 @@ pub fn player_identity(
     }
 }
 
-// ── Player POV pill ──────────────────────────────────────────────────
+// ── Player POV picker ────────────────────────────────────────────────
 //
-// Clickable pill wrapping a `player_identity(Compact)`. Used by the
-// Insights tab to pick a point-of-view — replaces a plain ComboBox so
-// both players are visible at a glance and the selection surfaces in
-// the shared visual language (race badge + bright slot colour).
+// Clickable pill (`player_pov_pill`) and the row-of-pills selector
+// (`player_pov_selector`) used to pick which player a tab is "looking
+// from". Replaces ad-hoc ComboBoxes so both players are visible at a
+// glance and the selection surfaces in the shared visual language
+// (race badge + bright slot colour).
 //
 // Selected: filled with a subtle tint of the slot colour + slot stroke.
 // Unselected: neutral grey fill + hairline border.
+//
+// Sizing is driven by `PlayerPickerSize`. Every dimension is derived
+// from `cfg.font_size` via the typography tokens, so the widget scales
+// with the user's font slider and with `pixels_per_point` on HiDPI
+// displays — no raw pixel literals.
+
+/// Four-step size scale for the POV picker.
+///
+/// `Small` matches the historical Insights look (caption-sized name,
+/// body-sized race icon). `Medium`/`Large`/`ExtraLarge` step up one
+/// typographic tier each, keeping the icon one tier above the name for
+/// the same optical weight `NameDensity` enforces.
+#[derive(Clone, Copy, Debug)]
+pub enum PlayerPickerSize {
+    Small,
+    Medium,
+    Large,
+    ExtraLarge,
+}
+
+impl PlayerPickerSize {
+    fn name_size(self, cfg: &AppConfig) -> f32 {
+        match self {
+            Self::Small => size_caption(cfg),
+            Self::Medium => size_body(cfg),
+            Self::Large => size_subtitle(cfg),
+            Self::ExtraLarge => size_title(cfg),
+        }
+    }
+
+    fn icon_size(self, cfg: &AppConfig) -> f32 {
+        match self {
+            Self::Small => size_body(cfg),
+            Self::Medium => size_subtitle(cfg),
+            Self::Large => size_title(cfg),
+            // Title is the top of the typography scale; bump 1.25× to
+            // keep the one-tier optical gap above the name.
+            Self::ExtraLarge => size_title(cfg) * 1.25,
+        }
+    }
+
+    fn margin(self) -> Margin {
+        let (mx, my) = match self {
+            Self::Small => (SPACE_M as i8, SPACE_XS as i8),
+            Self::Medium => (SPACE_M as i8, SPACE_S as i8),
+            Self::Large => (SPACE_L as i8, SPACE_S as i8),
+            Self::ExtraLarge => (SPACE_XL as i8, SPACE_M as i8),
+        };
+        Margin::symmetric(mx, my)
+    }
+
+    fn item_spacing(self) -> f32 {
+        match self {
+            Self::Small | Self::Medium => SPACE_S,
+            Self::Large | Self::ExtraLarge => SPACE_M,
+        }
+    }
+}
 
 pub fn player_pov_pill(
     ui: &mut Ui,
@@ -348,6 +442,7 @@ pub fn player_pov_pill(
     player_idx: usize,
     is_user: bool,
     selected: bool,
+    size: PlayerPickerSize,
     cfg: &AppConfig,
     lang: Language,
 ) -> Response {
@@ -363,21 +458,25 @@ pub fn player_pov_pill(
         (Color32::from_gray(36), Stroke::new(STROKE_HAIRLINE, BORDER))
     };
 
+    let name_size = size.name_size(cfg);
+    let icon_size = size.icon_size(cfg);
+
     let inner = egui::Frame::new()
         .fill(fill)
         .stroke(stroke)
         .corner_radius(RADIUS_CHIP)
-        .inner_margin(Margin::symmetric(crate::tokens::SPACE_M as i8, SPACE_XS as i8))
+        .inner_margin(size.margin())
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = SPACE_S;
-                player_identity(
+                player_identity_sized(
                     ui,
                     name,
                     race,
                     player_idx,
                     is_user,
-                    NameDensity::Compact,
+                    name_size,
+                    icon_size,
                     cfg,
                     lang,
                 );
@@ -386,6 +485,56 @@ pub fn player_pov_pill(
 
     ui.interact(inner.response.rect, inner.response.id, Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Horizontal row of clickable POV pills, one per player. Mutates
+/// `*selected` when a pill is clicked and returns `true` if the
+/// selection changed this frame.
+///
+/// `label` is rendered to the left of the row when `Some` — pass the
+/// localised "Point of view:" string from the calling tab so wording
+/// can vary per surface while the visual treatment stays uniform.
+///
+/// The caller owns `selected`, including any defensive bounds checks
+/// (the renderer assumes `*selected < players.len()` is *eventually*
+/// true; out-of-range values just mean no pill renders highlighted).
+pub fn player_pov_selector(
+    ui: &mut Ui,
+    players: &[crate::replay::PlayerTimeline],
+    selected: &mut usize,
+    size: PlayerPickerSize,
+    cfg: &AppConfig,
+    lang: Language,
+    label: Option<&str>,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = size.item_spacing();
+        if let Some(text) = label {
+            ui.label(text);
+        }
+        for (idx, p) in players.iter().enumerate() {
+            let is_user = cfg.is_user(&p.name);
+            let is_selected = idx == *selected;
+            if player_pov_pill(
+                ui,
+                &p.name,
+                &p.race,
+                idx,
+                is_user,
+                is_selected,
+                size,
+                cfg,
+                lang,
+            )
+            .clicked()
+            {
+                *selected = idx;
+                changed = true;
+            }
+        }
+    });
+    changed
 }
 
 // ── Labeled value ────────────────────────────────────────────────────
