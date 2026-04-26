@@ -21,7 +21,7 @@ use crate::locale::t;
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tabs::timeline::structure_icon;
 use crate::widgets::chip;
-use crate::worker_production_chart::{extract, BlockKind, StructureLane};
+use crate::worker_production_chart::{extract, BlockKind, ProductionBlock, StructureLane};
 
 /// Estado UI persistente da seção (não volta pro `AppConfig`).
 pub struct WorkerProductionOptions {
@@ -404,8 +404,71 @@ fn draw_lane(
         }
     }
 
-    // Blocos.
     let font = FontId::proportional(10.0);
+    let center_y = row_rect.center().y;
+    let is_zerg = matches!(lane.canonical_type, "Hatchery" | "Lair" | "Hive");
+
+    // Para Zerg, desenhamos cada produção de Drone como uma linha fina
+    // numa sub-trilha paralela (até 3+ Drones podem nascer
+    // simultaneamente de uma Hatchery via larva + inject). Para
+    // Terran/Protoss, CC/Nexus produzem 1 worker por vez — bloco cheio
+    // ocupando toda a altura da faixa funciona bem.
+    if is_zerg {
+        let producing: Vec<&ProductionBlock> = lane
+            .blocks
+            .iter()
+            .filter(|b| matches!(b.kind, BlockKind::Producing))
+            .collect();
+        let track_assignments = assign_tracks(&producing);
+        let n_tracks = track_assignments.iter().copied().max().map(|m| m + 1).unwrap_or(1);
+        // Distribui as N trilhas dentro de BLOCK_HEIGHT com 1px entre
+        // linhas. Cada linha tem altura = (BLOCK_HEIGHT - (N-1)) / N
+        // saturada em mínimo 2px.
+        let line_h =
+            ((BLOCK_HEIGHT - (n_tracks.saturating_sub(1)) as f32) / n_tracks.max(1) as f32)
+                .max(2.0);
+        for (block, track_idx) in producing.iter().zip(track_assignments.iter()) {
+            let s = block.start_loop.max(view_start).min(view_end);
+            let e = block.end_loop.max(view_start).min(view_end);
+            if e <= s {
+                continue;
+            }
+            let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
+            let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
+            let top = block_top + *track_idx as f32 * (line_h + 1.0);
+            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, top + line_h));
+            painter.rect_filled(rect, 1.0, player_color);
+        }
+
+        // Morphs (Hatch→Lair, Lair→Hive) continuam como blocos cheios:
+        // a estrutura inteira está ocupada e nenhuma larva pode treinar
+        // worker — semantica de "impedimento total" que merece destaque.
+        for block in lane.blocks.iter().filter(|b| matches!(b.kind, BlockKind::Morphing)) {
+            let s = block.start_loop.max(view_start).min(view_end);
+            let e = block.end_loop.max(view_start).min(view_end);
+            if e <= s {
+                continue;
+            }
+            let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
+            let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
+            let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
+            painter.rect_filled(rect, 1.5, ACCENT_WARNING);
+            if rect.width() >= MIN_LABEL_WIDTH {
+                let total_dur = block.end_loop.saturating_sub(block.start_loop);
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    fmt_time(total_dur, lps),
+                    font.clone(),
+                    contrast_text_color(ACCENT_WARNING),
+                );
+            }
+        }
+        let _ = center_y;
+        return;
+    }
+
+    // Terran/Protoss: bloco cheio.
     for block in &lane.blocks {
         let s = block.start_loop.max(view_start).min(view_end);
         let e = block.end_loop.max(view_start).min(view_end);
@@ -421,8 +484,6 @@ fn draw_lane(
         };
         painter.rect_filled(rect, 1.5, color);
 
-        // Label de duração: usa a duração total do bloco (não a recortada),
-        // exibida apenas se o segmento visível tiver largura mínima.
         if rect.width() >= MIN_LABEL_WIDTH {
             let total_dur = block.end_loop.saturating_sub(block.start_loop);
             let label = fmt_time(total_dur, lps);
@@ -435,6 +496,30 @@ fn draw_lane(
             );
         }
     }
+}
+
+/// Atribui cada bloco a uma sub-trilha (track) paralela usando o
+/// algoritmo clássico de interval scheduling: percorre os blocos por
+/// `start_loop` e coloca em qualquer trilha cujo último intervalo já
+/// terminou; cria nova trilha se nenhuma estiver livre. Os blocos já
+/// vêm ordenados em `extract.rs`, mas refazemos a ordem aqui para
+/// resiliência. Output paralelo a `blocks` (mesmo length).
+fn assign_tracks(blocks: &[&ProductionBlock]) -> Vec<usize> {
+    let mut tracks_end: Vec<u32> = Vec::new();
+    let mut assigned = vec![0usize; blocks.len()];
+    let mut order: Vec<usize> = (0..blocks.len()).collect();
+    order.sort_by_key(|&i| blocks[i].start_loop);
+    for &i in &order {
+        let b = blocks[i];
+        if let Some(idx) = tracks_end.iter().position(|&e| e <= b.start_loop) {
+            tracks_end[idx] = b.end_loop;
+            assigned[i] = idx;
+        } else {
+            assigned[i] = tracks_end.len();
+            tracks_end.push(b.end_loop);
+        }
+    }
+    assigned
 }
 
 fn loop_to_x(game_loop: u32, view_start: u32, view_end: u32, track_left: f32, track_w: f32) -> f32 {
