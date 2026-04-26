@@ -323,6 +323,8 @@ charts.tooltip.supply_line = Supply: {used}/{made}
 charts.worker_production.title = Produção de workers por townhall
 charts.worker_production.player = Jogador:
 charts.worker_production.empty = Nenhuma estrutura produtora de worker encontrada.
+charts.worker_production.reset_view = Redefinir
+charts.worker_production.reset_view.hint = Redefinir zoom e pan. Dica: scroll para zoom, arraste para pan, duplo-clique para redefinir.
 
 # ── Aba Timeline ────────────────────────────────────────────────────────────
 timeline.toggle.heatmap = Heatmap
