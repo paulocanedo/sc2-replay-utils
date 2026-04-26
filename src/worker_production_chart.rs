@@ -299,42 +299,63 @@ fn extract_player(player: &PlayerTimeline, base_build: u32) -> PlayerWorkerLanes
 
     for lane in &mut lanes {
         lane.blocks.sort_by_key(|b| b.start_loop);
-        lane.blocks = merge_continuous(std::mem::take(&mut lane.blocks));
+        // Em estruturas Terran/Protoss só há uma produção por vez —
+        // qualquer overlap aparente é artefato da estimativa
+        // `start = finish - build_time` (chrono boost, build_time
+        // levemente diferente do real). Mesclamos overlap também.
+        // Em Hatch/Lair/Hive overlap é paralelismo real (drones
+        // simultâneos em várias larvas) e precisa ser preservado.
+        let parallel_lane = matches!(lane.canonical_type, "Hatchery" | "Lair" | "Hive");
+        lane.blocks = merge_continuous(std::mem::take(&mut lane.blocks), parallel_lane);
     }
 
     PlayerWorkerLanes { lanes }
 }
 
-/// Mescla blocos consecutivos do mesmo `kind` quando o gap entre eles
-/// é ≤ `CONTINUITY_TOLERANCE_LOOPS` e **não há overlap**. O caso de
-/// overlap (Zerg produzindo múltiplos Drones em paralelo) é preservado:
-/// blocos sobrepostos representam trilhas paralelas e devem virar
-/// linhas finas separadas no render.
+/// Mescla blocos consecutivos do mesmo `kind` quando estão dentro da
+/// tolerância de continuidade.
+///
+/// - `parallel_lane = false` (Terran/Protoss): qualquer overlap entre
+///   blocos é tratado como artefato de estimativa e mesclado. Lacunas
+///   ≤ `CONTINUITY_TOLERANCE_LOOPS` também mesclam.
+/// - `parallel_lane = true` (Zerg): overlap é paralelismo real (drones
+///   nascendo de larvas distintas em paralelo) e fica preservado. Só
+///   mescla quando `next.start ≥ prev.end` E `gap ≤ tolerância`.
 ///
 /// Espera input ordenado por `start_loop`.
-fn merge_continuous(blocks: Vec<ProductionBlock>) -> Vec<ProductionBlock> {
+fn merge_continuous(
+    blocks: Vec<ProductionBlock>,
+    parallel_lane: bool,
+) -> Vec<ProductionBlock> {
     let mut out: Vec<ProductionBlock> = Vec::with_capacity(blocks.len());
     for b in blocks {
-        // Tenta mesclar com algum bloco já emitido (não necessariamente
-        // o último — em Zerg, blocos paralelos podem ter sido empurrados
-        // entre dois encadeáveis na mesma trilha).
+        // Tenta mesclar com algum bloco já emitido (não só o último —
+        // em Zerg, blocos paralelos podem ter sido inseridos entre dois
+        // encadeáveis numa "trilha" implícita).
         let mut merged = false;
         for prev in out.iter_mut().rev() {
             if prev.kind != b.kind {
                 continue;
             }
-            // Overlap: trilhas paralelas, deixa separado.
-            if b.start_loop < prev.end_loop {
-                continue;
+            let overlap = b.start_loop < prev.end_loop;
+            if overlap {
+                if parallel_lane {
+                    // Drone paralelo: pula esse prev, tenta anteriores.
+                    continue;
+                }
+                // Single-track: mescla mesmo com overlap.
+                prev.end_loop = prev.end_loop.max(b.end_loop);
+                merged = true;
+                break;
             }
-            // Continuidade: gap ≤ tolerância.
+            // Sem overlap: mescla se gap pequeno.
             if b.start_loop.saturating_sub(prev.end_loop) <= CONTINUITY_TOLERANCE_LOOPS {
                 prev.end_loop = prev.end_loop.max(b.end_loop);
                 merged = true;
                 break;
             }
-            // prev terminou antes do gap aceitável; futuros candidatos
-            // anteriores só estão mais distantes, então paramos a busca.
+            // Sem overlap e gap > tolerância: prev é o último candidato
+            // possível (anteriores estão ainda mais longe). Encerra.
             break;
         }
         if !merged {
@@ -717,6 +738,52 @@ mod tests {
         assert_eq!(lane.blocks.len(), 1, "blocos consecutivos devem mesclar");
         assert_eq!(lane.blocks[0].start_loop, 0);
         assert_eq!(lane.blocks[0].end_loop, 816);
+    }
+
+    #[test]
+    fn terran_overlap_artifact_still_merges() {
+        // Caso real: build_time estimado = 272 mas as finishes do Nexus
+        // estão a 268 loops de distância (chrono parcial / arredondamento
+        // do balance data). Isso gera overlap aparente entre blocos
+        // sucessivos. Como Nexus produz 1 worker por vez, devemos mesclar.
+        // Probe1: end=268, start=saturating_sub(272)=0 → [0, 268]
+        // Probe2: end=536, start=536-272=264 → [264, 536]  (overlap com Probe1)
+        let nexus = ev(
+            0,
+            0,
+            EntityEventKind::ProductionFinished,
+            "Nexus",
+            1,
+            None,
+        );
+        let mut events = vec![nexus];
+        for (i, finish) in [268u32, 536].iter().enumerate() {
+            events.push(ev(
+                *finish,
+                (i as u32) * 2 + 1,
+                EntityEventKind::ProductionStarted,
+                "Probe",
+                10 + i as i64,
+                Some(1),
+            ));
+            events.push(ev(
+                *finish,
+                (i as u32) * 2 + 2,
+                EntityEventKind::ProductionFinished,
+                "Probe",
+                10 + i as i64,
+                None,
+            ));
+        }
+        let p = player_with_events(events);
+        let out = extract_player(&p, 0);
+        let lane = &out.lanes[0];
+        assert_eq!(
+            lane.blocks.len(),
+            1,
+            "Probes em CC com overlap aparente devem mesclar (single-track)"
+        );
+        assert_eq!(lane.blocks[0].end_loop, 536);
     }
 
     #[test]
