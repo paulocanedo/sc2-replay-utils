@@ -58,6 +58,16 @@ disclaimer.repo_link = Acessar o projeto no GitHub
 disclaimer.dont_show_again = Não exibir este aviso nas próximas execuções
 disclaimer.acknowledge = Entendi — continuar
 
+# ── Avisos experimentais por aba ────────────────────────────────────────────
+experimental.timeline.title = Experimental: Timeline
+experimental.timeline.intro = Algumas funcionalidades da Timeline ainda estão em desenvolvimento. Tenha isto em mente ao interpretar a visualização:
+experimental.timeline.bullet_movement = As posições das unidades no minimapa são interpoladas, não são dados exatos do replay — os caminhos reais podem diferir do que é exibido.
+experimental.timeline.bullet_fog = O overlay de Fog of War está incompleto: ainda não considera terreno elevado ou outros obstáculos de visão. Trate-o como uma aproximação.
+experimental.timeline.acknowledge = Entendi — continuar
+experimental.insights.title = Experimental: Insights
+experimental.insights.message = Os cálculos de Insights ainda estão sendo aperfeiçoados e podem apresentar valores incorretos. Considere os números aqui como aproximados enquanto a metodologia se estabiliza.
+experimental.insights.acknowledge = Entendi — continuar
+
 # ── Toasts / erros ──────────────────────────────────────────────────────────
 toast.no_working_dir = Diretório de trabalho não definido (veja Configurações).
 toast.no_replays_found = Nenhum replay encontrado em {dir}
