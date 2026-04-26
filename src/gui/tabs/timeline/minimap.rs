@@ -15,7 +15,7 @@ use crate::replay::{EntityCategory, EntityEventKind, ResourceKind, ResourceNode}
 use crate::replay_state::{LoadedReplay, PlayableBounds};
 
 use super::entities::{alive_entities_at, LiveEntity};
-use super::overlays::{draw_creep, draw_fog, draw_heatmap};
+use super::overlays::{draw_fog, draw_heatmap};
 use super::unit_column::{structure_icon, unit_icon};
 use super::{CAMERA_HEIGHT_TILES, CAMERA_WIDTH_TILES};
 
@@ -100,19 +100,10 @@ pub(super) fn minimap_with_size(
                 draw_heatmap(&painter, rect, p, game_loop, bounds, color);
             }
         } else {
-            // Modo normal: creep → recursos → unidades → câmera. Creep
-            // entra na base da pilha (logo acima do minimap) porque
-            // representa terreno: minerais, estruturas e unidades
-            // continuam visíveis por cima da mancha. Apenas Zerg tem
-            // creep_index populado — chamadas para outras raças saem
-            // imediatamente via short-circuit em `draw_creep`.
-            if show_creep {
-                for (i, p) in loaded.timeline.players.iter().enumerate() {
-                    let color = player_slot_color_bright(i);
-                    draw_creep(&painter, rect, p, game_loop, bounds, color);
-                }
-            }
-
+            // Modo normal: recursos → unidades → estruturas → câmera.
+            // CreepTumors entram no pass de estruturas; `show_creep`
+            // toggle apenas os ícones de tumor — late-game Zerg pode
+            // acumular dezenas, então mantemos a opção de esconder.
             for r in &loaded.timeline.resources {
                 draw_resource(&painter, rect, *r, bounds);
             }
@@ -127,7 +118,10 @@ pub(super) fn minimap_with_size(
                 // borda branca para destacar. Bases (townhalls) usam
                 // `TOWNHALL_BASE_SIZE` (2× uma estrutura normal) —
                 // âncora visual das bases dos jogadores no minimapa.
-                for e in entities.iter().filter(|e| e.category == EntityCategory::Structure) {
+                for e in entities.iter().filter(|e| {
+                    e.category == EntityCategory::Structure
+                        && (show_creep || e.entity_type != "CreepTumor")
+                }) {
                     let icon = structure_icon(&e.entity_type);
                     draw_unit(ui, &painter, rect, e.x, e.y, bounds, e.side, color, true, icon);
                 }
@@ -171,9 +165,8 @@ pub(super) fn minimap_with_size(
                         continue;
                     }
                     // Tumors morrem o tempo todo (são plantadas em
-                    // série e morrem ao plantar a filha) — mostrar um
-                    // X pra cada morte poluiria o minimapa. A camada
-                    // de creep já refleteo desaparecimento.
+                    // série e morrem ao plantar a filha) — um X pra
+                    // cada morte poluiria o minimapa.
                     if ev.entity_type.starts_with("CreepTumor") {
                         continue;
                     }
@@ -224,7 +217,10 @@ pub(super) fn minimap_with_size(
                 } else {
                     0.0
                 };
-                let entries = nearby_grouped(&entities_per_player, cx, cy, tol_tiles);
+                let mut entries = nearby_grouped(&entities_per_player, cx, cy, tol_tiles);
+                if !show_creep {
+                    entries.retain(|(_, ty, _)| ty != "CreepTumor");
+                }
                 if !entries.is_empty() {
                     resp.on_hover_ui_at_pointer(|ui| {
                         render_nearby_tooltip(ui, &entries, loaded, lang);

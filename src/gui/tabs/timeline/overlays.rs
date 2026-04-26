@@ -1,30 +1,14 @@
-//! Overlays toggleáveis do minimapa: creep (camada de terreno) e
-//! heatmap de câmera (tempo gasto olhando cada região).
+//! Overlays toggleáveis do minimapa: heatmap de câmera (tempo gasto
+//! olhando cada região) e fog of war.
 
 use egui::{pos2, vec2, Color32, Rect};
 
 use crate::balance_data;
-use crate::replay::CreepEntry;
 use crate::replay::PlayerTimeline;
 use crate::replay_state::PlayableBounds;
 
 use super::entities::alive_entities_at;
-use super::minimap::to_screen;
 use super::{CAMERA_HEIGHT_TILES, CAMERA_WIDTH_TILES};
-
-/// Raio aproximado (em tiles do mapa) da cobertura de creep gerada por
-/// uma fonte (hatchery/lair/hive ou tumor) quando atingiu o tamanho
-/// pleno. O valor real in-game varia (~10 para hatchery, ~10 para
-/// tumor adulto) e o spread é progressivo, mas para o MVP usamos um
-/// raio fixo — visualmente próximo o suficiente da cobertura real e
-/// barato de renderizar com `circle_filled`.
-const CREEP_RADIUS_TILES: f32 = 10.0;
-
-/// Alpha (0–255) do círculo de creep. Translúcido o bastante para
-/// múltiplas fontes próximas se sobreporem em mancha mais densa sem
-/// saturar a cor do jogador, e transparente o suficiente para deixar
-/// minerais/geysers visíveis abaixo.
-const CREEP_ALPHA: u8 = 55;
 
 /// Resolução do grid de heatmap (células por eixo). Valores maiores
 /// dão mais detalhe mas custam mais memória e iteração na renderização.
@@ -47,40 +31,6 @@ const FOG_ALPHA: u8 = 140;
 /// para uma entidade — ex.: cooperativo, campanha, replays muito
 /// antigos. Valor conservador típico de unidade ground.
 const FOG_DEFAULT_SIGHT: f32 = 8.0;
-
-/// Desenha a camada de creep do jogador como círculos translúcidos
-/// centrados em cada fonte (hatchery/lair/hive/tumor) viva no instante
-/// `until_loop`. Usa o índice `creep_index` (pré-computado em
-/// `finalize.rs`) e binary-search para parar cedo no range de "já
-/// nasceu", cabendo no orçamento por-frame mesmo em late-game.
-pub(super) fn draw_creep(
-    painter: &egui::Painter,
-    rect: Rect,
-    player: &PlayerTimeline,
-    until_loop: u32,
-    bounds: PlayableBounds,
-    color: Color32,
-) {
-    if player.creep_index.is_empty() {
-        return;
-    }
-    let span_x = (bounds.max_x - bounds.min_x).max(1) as f32;
-    let radius_px = CREEP_RADIUS_TILES * (rect.width() / span_x);
-    let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), CREEP_ALPHA);
-
-    // O(log n) para achar o fim do range "já nasceu". O loop linear
-    // dentro filtra `died_loop`, que é u32::MAX para fontes ainda vivas.
-    let end = player
-        .creep_index
-        .partition_point(|c: &CreepEntry| c.born_loop <= until_loop);
-    for src in &player.creep_index[..end] {
-        if src.died_loop <= until_loop {
-            continue;
-        }
-        let center = to_screen(rect, src.x as f32, src.y as f32, bounds);
-        painter.circle_filled(center, radius_px, fill);
-    }
-}
 
 /// Renderiza um heatmap de tempo de câmera do jogador sobre o minimapa.
 ///

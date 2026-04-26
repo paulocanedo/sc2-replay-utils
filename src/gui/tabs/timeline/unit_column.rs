@@ -647,6 +647,9 @@ pub(crate) fn structure_canonical(name: &str) -> &'static str {
         "LurkerDen" => "LurkerDen",
         "SpineCrawler" => "SpineCrawler",
         "SporeCrawler" => "SporeCrawler",
+        "CreepTumor" | "CreepTumorBurrowed" | "CreepTumorQueen" | "CreepTumorMissile" => {
+            "CreepTumor"
+        }
         "Nexus" => "Nexus",
         "Pylon" => "Pylon",
         "Assimilator" => "Assimilator",
@@ -797,6 +800,7 @@ pub(crate) fn structure_icon(canonical: &str) -> Option<egui::ImageSource<'stati
         "SporeCrawler" => {
             include_image!("../../../../assets/buildings/zerg/SporeCrawler.png")
         }
+        "CreepTumor" => include_image!("../../../../assets/units/zerg/CreepTumor.png"),
         _ => return None,
     };
     Some(src)
