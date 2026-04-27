@@ -30,8 +30,8 @@ use std::collections::HashMap;
 
 use crate::balance_data;
 use crate::replay::{
-    is_army_producer, is_incapacitating_addon, is_larva_born_army, is_worker_name, is_zerg_hatch,
-    EntityEvent, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
+    is_incapacitating_addon, is_larva_born_army, is_worker_name, is_zerg_hatch, EntityEvent,
+    EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -197,16 +197,24 @@ fn is_target_unit(name: &str, mode: LaneMode, is_zerg: bool) -> bool {
             if is_zerg {
                 is_larva_born_army(name)
             } else {
-                // Terran/Protoss: qualquer unidade não-worker, não-larva,
-                // não-estrutura é candidata. O resolver de producer
-                // descarta unidades que não tenham lane associada. Addons
-                // Terran (Reactor/TechLab) não são unidades produzidas:
-                // a janela de construção é registrada como bloco
-                // `Impeded` no fluxo dedicado abaixo.
-                !is_zerg_hatch(name)
-                    && !is_army_producer(name)
-                    && !is_incapacitating_addon(name)
-                    && name != "Larva"
+                // Terran/Protoss: whitelist via `intern_unit_name`.
+                // Filtra estruturas (SupplyDepot, Refinery,
+                // EngineeringBay, GhostAcademy, CommandCenter, Bunker,
+                // …), summons que vêm com `creator_unit_tag` apontando
+                // pra unidade-mãe e não pra um produtor-estrutura
+                // (KD8Charge granada de Reaper, AutoTurret de Raven,
+                // Broodling, Locust, Changeling, Interceptor) e
+                // qualquer tipo desconhecido. Sem essa whitelist o
+                // bloco resultante caía no fallback de proximidade do
+                // `resolve_producer` e era atribuído à
+                // Barracks/Factory/Starport mais próxima — gerando
+                // blocos `Producing` fantasmas com `produced_type=None`.
+                //
+                // Addons (Reactor/TechLab) tecnicamente estão em
+                // `intern_unit_name` mas vão pelo fluxo dedicado de
+                // `pending_addon` (bloco `Impeded`), então excluímos
+                // explicitamente aqui.
+                intern_unit_name(name).is_some() && !is_incapacitating_addon(name)
             }
         }
     }
@@ -267,6 +275,35 @@ fn is_morph_died(events: &[EntityEvent], i: usize) -> bool {
     matches!(next.kind, EntityEventKind::ProductionStarted)
         && next.tag == cur.tag
         && next.game_loop == cur.game_loop
+}
+
+/// Tipos "consumíveis" cujo `Died` representa uma produção real em
+/// progresso (não um simples toggle/transform). Larva é a fonte óbvia
+/// (Drone/Zergling/Overlord/etc.); cocoons e eggs cobrem morphs Zerg de
+/// segundo nível (Baneling vem de BanelingCocoon, Lurker de
+/// LurkerMPEgg, Ravager de RavagerCocoon, BroodLord de
+/// BroodLordCocoon, Overlord de OverlordCocoon).
+///
+/// Tudo fora dessa lista que dispara o pattern Died→Started→Finished no
+/// mesmo tag/loop é um morph mecânico (siege mode, hellbat transform,
+/// viking assault, widowmine burrow, liberator AG) — a unidade original
+/// já foi contada quando nasceu, então o transform não vira bloco novo.
+fn is_consumable_progenitor(name: &str) -> bool {
+    name == "Larva" || name.ends_with("Cocoon") || name.ends_with("Egg")
+}
+
+/// `is_morph_finish` mas restrito a transforms PUROS (não-larva,
+/// não-cocoon, não-egg). Usado para descartar `ProductionFinished` de
+/// toggles Terran (Hellion↔Hellbat, SiegeTank siege mode, etc.) que de
+/// outro modo gerariam blocos `Producing` fantasmas atribuídos por
+/// proximidade. Mirror semântico do filtro `creator_ability` em
+/// `build_order/extract.rs:79-97`, sem depender das strings cruas do
+/// SC2 (que variam por base_build).
+fn is_pure_morph_finish(events: &[EntityEvent], i: usize) -> bool {
+    if !is_morph_finish(events, i) {
+        return false;
+    }
+    !is_consumable_progenitor(events[i - 2].entity_type.as_str())
 }
 
 /// Captura o nome estaticamente embutido pra unidades-alvo. Como
@@ -451,6 +488,19 @@ fn extract_player(
                 }
             }
             EntityEventKind::ProductionFinished => {
+                // Transforms mecânicos Terran (Hellion↔Hellbat, SiegeTank
+                // siege mode, Viking assault, WidowMine burrow, Liberator
+                // AG) emitem Died(old)→Started(new)→Finished(new) no mesmo
+                // tag/loop via apply_type_change com creator_ability=None.
+                // A unidade original já foi contada quando nasceu — sem
+                // este skip, cada toggle viraria um bloco fantasma
+                // atribuído por proximidade à Factory/Barracks/Starport
+                // mais próxima. Larva-borns e cocoons Zerg passam (são
+                // produções reais consumindo o progenitor).
+                if is_pure_morph_finish(events, i) {
+                    continue;
+                }
+
                 let new_type = ev.entity_type.as_str();
 
                 // Born real de uma estrutura-lane: cria a lane.
@@ -1695,8 +1745,235 @@ mod tests {
                     action,
                 );
             }
+
+            // Sem blocos `Producing` com `produced_type=None`: como
+            // `is_target_unit` agora gateia em `intern_unit_name.is_some()`,
+            // todo bloco aceito tem nome canônico. Se este invariante
+            // quebra, é sinal de que `is_target_unit` está deixando algo
+            // passar (ou `intern_unit_name` divergiu).
+            for lane in &lanes_player.lanes {
+                for block in &lane.blocks {
+                    if block.kind == BlockKind::Producing {
+                        assert!(
+                            block.produced_type.is_some(),
+                            "Player {}: bloco Producing em lane '{}' com produced_type=None — divergência entre is_target_unit e intern_unit_name",
+                            player.name,
+                            lane.canonical_type,
+                        );
+                    }
+                }
+            }
             compared_any = true;
         }
         assert!(compared_any, "replay1.SC2Replay não tem jogador Terran");
+    }
+
+    /// Terran transform: Hellion ↔ Hellbat. Sem o filtro
+    /// `is_pure_morph_finish`, o `Finished(Hellbat)` viraria um bloco
+    /// fantasma — a Hellion já foi contada quando nasceu da Factory.
+    #[test]
+    fn army_terran_hellion_hellbat_morph_does_not_create_phantom_block() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Factory",
+                1,
+                None,
+            ),
+            // Hellion produzido na Factory (UnitBorn fresh tag).
+            ev(500, 1, EntityEventKind::ProductionStarted, "Hellion", 10, Some(1)),
+            ev(500, 1, EntityEventKind::ProductionFinished, "Hellion", 10, None),
+            // Morph Hellion → Hellbat via UnitTypeChange (apply_type_change
+            // emite Died+Started+Finished com creator_ability=None).
+            ev(2000, 2, EntityEventKind::Died, "Hellion", 10, None),
+            ev(2000, 3, EntityEventKind::ProductionStarted, "Hellbat", 10, Some(10)),
+            ev(2000, 3, EntityEventKind::ProductionFinished, "Hellbat", 10, None),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let prod: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        assert_eq!(prod.len(), 1, "esperava 1 bloco (Hellion), Hellbat morph não conta");
+        assert_eq!(prod[0].produced_type, Some("Hellion"));
+    }
+
+    /// Terran toggle: SiegeTank ↔ SiegeTankSieged. Em uma partida típica
+    /// o jogador siege/unsiege dezenas de vezes. Cada toggle emite
+    /// Died→Started→Finished e geraria 2 blocos fantasmas por ciclo
+    /// sem o fix.
+    #[test]
+    fn army_terran_siegetank_siege_cycle_zero_extra_blocks() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Factory",
+                1,
+                None,
+            ),
+            ev(800, 1, EntityEventKind::ProductionStarted, "SiegeTank", 20, Some(1)),
+            ev(800, 1, EntityEventKind::ProductionFinished, "SiegeTank", 20, None),
+            // Siege.
+            ev(2000, 2, EntityEventKind::Died, "SiegeTank", 20, None),
+            ev(2000, 3, EntityEventKind::ProductionStarted, "SiegeTankSieged", 20, Some(20)),
+            ev(2000, 3, EntityEventKind::ProductionFinished, "SiegeTankSieged", 20, None),
+            // Unsiege.
+            ev(3000, 4, EntityEventKind::Died, "SiegeTankSieged", 20, None),
+            ev(3000, 5, EntityEventKind::ProductionStarted, "SiegeTank", 20, Some(20)),
+            ev(3000, 5, EntityEventKind::ProductionFinished, "SiegeTank", 20, None),
+            // Re-siege.
+            ev(4000, 6, EntityEventKind::Died, "SiegeTank", 20, None),
+            ev(4000, 7, EntityEventKind::ProductionStarted, "SiegeTankSieged", 20, Some(20)),
+            ev(4000, 7, EntityEventKind::ProductionFinished, "SiegeTankSieged", 20, None),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let prod: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        assert_eq!(prod.len(), 1, "esperava 1 bloco (Tank), 3 toggles não contam");
+        assert_eq!(prod[0].produced_type, Some("SiegeTank"));
+    }
+
+    /// Terran toggle: VikingFighter ↔ VikingAssault.
+    #[test]
+    fn army_terran_viking_transform_zero_extra_blocks() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Starport",
+                1,
+                None,
+            ),
+            ev(800, 1, EntityEventKind::ProductionStarted, "VikingFighter", 30, Some(1)),
+            ev(800, 1, EntityEventKind::ProductionFinished, "VikingFighter", 30, None),
+            // Transform para assault mode.
+            ev(2000, 2, EntityEventKind::Died, "VikingFighter", 30, None),
+            ev(2000, 3, EntityEventKind::ProductionStarted, "VikingAssault", 30, Some(30)),
+            ev(2000, 3, EntityEventKind::ProductionFinished, "VikingAssault", 30, None),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let prod: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        assert_eq!(prod.len(), 1);
+        assert_eq!(prod[0].produced_type, Some("VikingFighter"));
+    }
+
+    /// Terran toggle: WidowMine ↔ WidowMineBurrowed.
+    #[test]
+    fn army_terran_widowmine_burrow_zero_extra_blocks() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Factory",
+                1,
+                None,
+            ),
+            ev(800, 1, EntityEventKind::ProductionStarted, "WidowMine", 40, Some(1)),
+            ev(800, 1, EntityEventKind::ProductionFinished, "WidowMine", 40, None),
+            // Burrow.
+            ev(1500, 2, EntityEventKind::Died, "WidowMine", 40, None),
+            ev(1500, 3, EntityEventKind::ProductionStarted, "WidowMineBurrowed", 40, Some(40)),
+            ev(1500, 3, EntityEventKind::ProductionFinished, "WidowMineBurrowed", 40, None),
+            // Unburrow.
+            ev(2500, 4, EntityEventKind::Died, "WidowMineBurrowed", 40, None),
+            ev(2500, 5, EntityEventKind::ProductionStarted, "WidowMine", 40, Some(40)),
+            ev(2500, 5, EntityEventKind::ProductionFinished, "WidowMine", 40, None),
+        ];
+        let p = player_with_events(events, "Terran");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let prod: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        assert_eq!(prod.len(), 1);
+        assert_eq!(prod[0].produced_type, Some("WidowMine"));
+    }
+
+    /// Helper logic test: `is_consumable_progenitor` deve aceitar Larva,
+    /// cocoons (BanelingCocoon, RavagerCocoon, BroodLordCocoon,
+    /// OverlordCocoon) e eggs (LurkerMPEgg) — confirmados em
+    /// `s2protocol-3.5.2/assets/BalanceData/`. E rejeitar tudo o mais.
+    #[test]
+    fn is_consumable_progenitor_accepts_larva_cocoons_and_eggs() {
+        // Aceitar.
+        assert!(is_consumable_progenitor("Larva"));
+        assert!(is_consumable_progenitor("BanelingCocoon"));
+        assert!(is_consumable_progenitor("BroodLordCocoon"));
+        assert!(is_consumable_progenitor("OverlordCocoon"));
+        assert!(is_consumable_progenitor("RavagerCocoon"));
+        assert!(is_consumable_progenitor("LurkerMPEgg"));
+        // Rejeitar transforms Terran.
+        assert!(!is_consumable_progenitor("Hellion"));
+        assert!(!is_consumable_progenitor("Hellbat"));
+        assert!(!is_consumable_progenitor("SiegeTank"));
+        assert!(!is_consumable_progenitor("SiegeTankSieged"));
+        assert!(!is_consumable_progenitor("VikingFighter"));
+        assert!(!is_consumable_progenitor("VikingAssault"));
+        assert!(!is_consumable_progenitor("WidowMine"));
+        assert!(!is_consumable_progenitor("WidowMineBurrowed"));
+        assert!(!is_consumable_progenitor("Liberator"));
+        assert!(!is_consumable_progenitor("LiberatorAG"));
+        // Rejeitar unidades Zerg base (não progenitoras).
+        assert!(!is_consumable_progenitor("Zergling"));
+        assert!(!is_consumable_progenitor("Roach"));
+        assert!(!is_consumable_progenitor("Overlord"));
+    }
+
+    /// Zerg via Cocoon: Larva → OverlordCocoon → Overlord. Quando o
+    /// tracker emite a transição final (Cocoon → Overlord), o
+    /// `is_consumable_progenitor("OverlordCocoon")` é `true` e o
+    /// `Finished(Overlord)` continua gerando bloco. Confirma que o fix
+    /// não regrediu Zerg que passa por intermediário cocoon.
+    #[test]
+    fn army_zerg_overlord_via_cocoon_creates_block() {
+        let events = vec![
+            ev(
+                100,
+                0,
+                EntityEventKind::ProductionFinished,
+                "Hatchery",
+                1,
+                None,
+            ),
+            ev(150, 1, EntityEventKind::ProductionStarted, "Larva", 5, Some(1)),
+            ev(150, 1, EntityEventKind::ProductionFinished, "Larva", 5, None),
+            // Larva → OverlordCocoon (intermediário, descartado por
+            // is_target_unit pra Zerg porque OverlordCocoon não está em
+            // is_larva_born_army).
+            ev(472, 2, EntityEventKind::Died, "Larva", 5, None),
+            ev(472, 3, EntityEventKind::ProductionStarted, "OverlordCocoon", 5, Some(5)),
+            ev(472, 3, EntityEventKind::ProductionFinished, "OverlordCocoon", 5, None),
+            // OverlordCocoon → Overlord (final morph, IS em is_larva_born_army).
+            ev(900, 4, EntityEventKind::Died, "OverlordCocoon", 5, None),
+            ev(900, 5, EntityEventKind::ProductionStarted, "Overlord", 5, Some(5)),
+            ev(900, 5, EntityEventKind::ProductionFinished, "Overlord", 5, None),
+        ];
+        let p = player_with_events(events, "Zerg");
+        let out = extract_player(&p, 0, LaneMode::Army);
+        let prod: Vec<_> = out.lanes[0]
+            .blocks
+            .iter()
+            .filter(|b| b.kind == BlockKind::Producing)
+            .collect();
+        assert_eq!(prod.len(), 1, "Overlord via cocoon deve gerar 1 bloco");
+        assert_eq!(prod[0].produced_type, Some("Overlord"));
     }
 }
