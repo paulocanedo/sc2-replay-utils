@@ -437,7 +437,10 @@ fn extract_player(
                                             start_loop: start,
                                             end_loop: ev.game_loop,
                                             kind: BlockKind::Morphing,
-                                            produced_type: None,
+                                            // Tipo destino do morph (Orbital/PF) — o
+                                            // render desenha o ícone dentro da faixa
+                                            // pra mostrar o motivo do impedimento.
+                                            produced_type: Some(new_canonical),
                                             sub_track: 0,
                                         });
                                     }
@@ -984,6 +987,9 @@ mod tests {
         assert_eq!(out.lanes[0].canonical_type, "OrbitalCommand");
         assert_eq!(out.lanes[0].blocks.len(), 1);
         assert_eq!(out.lanes[0].blocks[0].kind, BlockKind::Morphing);
+        // O ícone do destino do morph é desenhado dentro da faixa,
+        // então `produced_type` precisa carregar o tipo destino.
+        assert_eq!(out.lanes[0].blocks[0].produced_type, Some("OrbitalCommand"));
     }
 
     #[test]
