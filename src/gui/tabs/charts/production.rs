@@ -109,11 +109,11 @@ pub fn show(
         opts.selected_player = 0;
     }
 
-    // Army temporariamente desativado — a implementação fica preservada
-    // (testes + extrator), mas o render fica como stub "em breve" até
-    // a feature ser revisada. Pesquisas/Upgrades também são stubs.
+    // Pesquisas/Upgrades continuam como stubs até serem implementados.
+    // Workers e Army usam o mesmo pipeline (`production_lanes`), variando
+    // apenas o `LaneMode` consumido.
     match opts.view {
-        ProductionView::Army | ProductionView::Research | ProductionView::Upgrades => {
+        ProductionView::Research | ProductionView::Upgrades => {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new(t("charts.production.coming_soon", lang)).italics(),
@@ -125,6 +125,7 @@ pub fn show(
 
     let mode = match opts.view {
         ProductionView::Workers => LaneMode::Workers,
+        ProductionView::Army => LaneMode::Army,
         _ => unreachable!(),
     };
 
