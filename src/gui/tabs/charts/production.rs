@@ -65,10 +65,17 @@ impl Default for ProductionChartOptions {
 }
 
 const ICON_SIZE: f32 = 28.0;
-const ROW_HEIGHT_WORKERS: f32 = 32.0;
+// Workers e Army compartilham as mesmas dimensões. Antes Workers tinha
+// row=32/block=11 — a faixa ocupava só 34% da altura da linha contra
+// os 28px do ícone à esquerda, deixando um espaço vertical morto
+// considerável e tornando ícones de impedimento (CC→Orbital) e
+// sub-trilhas thin de drones Zerg quase ilegíveis. Usar 36/22 em ambos
+// os modos casa com a altura do ícone e dá espaço pros 3 slots de
+// larva renderizarem com folga.
+const ROW_HEIGHT_WORKERS: f32 = 36.0;
 const ROW_HEIGHT_ARMY: f32 = 36.0;
 const ROW_GAP: f32 = 4.0;
-const BLOCK_HEIGHT_WORKERS: f32 = 11.0;
+const BLOCK_HEIGHT_WORKERS: f32 = 22.0;
 const BLOCK_HEIGHT_ARMY: f32 = 22.0;
 const RIGHT_PAD: f32 = 8.0;
 const LEFT_GUTTER: f32 = 8.0;
