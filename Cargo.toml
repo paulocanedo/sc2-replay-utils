@@ -4,21 +4,40 @@ version = "0.8.1"
 edition = "2024"
 
 [dependencies]
-s2protocol = "3.5"
-serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0"
-dirs = "6"
-eframe    = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
-egui      = "0.34"
+# s2protocol's default features (`dep_arrow`, `syntax`) pull in arrow/syntect
+# transitively, which we don't use. `syntect` in particular brings `onig_sys`
+# (Oniguruma C lib) that breaks wasm builds without clang.
+s2protocol  = { version = "3.5", default-features = false }
+serde       = { version = "1", features = ["derive"] }
+serde_yml   = "0.0"
+eframe      = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+egui        = "0.34"
 egui_extras = { version = "0.34", default-features = false, features = ["svg", "image"] }
-egui_plot = "0.35"
-rfd       = "0.17"
-notify    = "8"
-bitcode   = { version = "0.6", features = ["serde"] }
+egui_plot   = "0.35"
+rfd         = "0.17"
+bitcode     = { version = "0.6", features = ["serde"] }
 
-[[bin]]
-name = "sc2-replay-utils"
-path = "src/bin/gui.rs"
+# Native-only deps. `dirs` resolves OS config/data directories; `notify`
+# watches replay folder for new SC2Replay files. Neither has a meaningful
+# wasm32 implementation.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs   = "6"
+notify = "8"
+
+# Linux native uses Wayland/X11 backends. Cargo merges feature lists from
+# both this section and `[dependencies]` for the same crate, so the Linux
+# build ends up with `default_fonts + glow + persistence + wayland + x11`.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.34", default-features = false, features = ["wayland", "x11"] }
+
+# Wasm-only deps. `wasm-bindgen-futures` bridges Rust async to JS event
+# loop; `web-sys` exposes browser APIs (canvas, window); panic hook routes
+# Rust panics to the JS console.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures     = "0.4"
+web-sys                  = { version = "0.3", features = ["HtmlCanvasElement", "Window", "Document"] }
+console_error_panic_hook = "0.1"
+log                      = "0.4"
 
 # build.rs gera `balance_data_generated.rs` (tabela
 # `nome → loops` por versão de protocolo) lendo as JSONs de

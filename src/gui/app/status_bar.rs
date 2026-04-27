@@ -20,14 +20,18 @@ impl AppState {
         // Snapshot dos campos antes do closure para evitar conflitos de
         // borrow (toast_visible empresta self inteiro).
         let loaded_file = self.loaded.as_ref().map(|l| l.file_name());
+        #[cfg(not(target_arch = "wasm32"))]
         let watcher_dir = self
             .watcher
             .as_ref()
             .map(|w| w.watched_dir().to_path_buf());
         let toast_msg = self.toast_visible().map(|s| s.to_string());
         let screen = self.screen;
+        #[cfg(not(target_arch = "wasm32"))]
         let library_total = self.library.entries.len();
+        #[cfg(not(target_arch = "wasm32"))]
         let library_pending = self.library.pending_count();
+        #[cfg(not(target_arch = "wasm32"))]
         let library_scanning = self.library.scanning;
 
         // `exact_size` pins the reserved height so that `Panel::bottom` always
@@ -68,6 +72,7 @@ impl AppState {
                             );
                         }
                     },
+                    #[cfg(not(target_arch = "wasm32"))]
                     Screen::Library => {
                         let msg = if library_scanning {
                             tf(
@@ -93,6 +98,7 @@ impl AppState {
                         };
                         ui.label(RichText::new(msg).color(LABEL_DIM));
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
                     Screen::Rename => {
                         ui.label(
                             RichText::new(t("rename_bar.title", lang))
@@ -102,6 +108,7 @@ impl AppState {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
                     if let Some(dir) = &watcher_dir {
                         ui.label("👁").on_hover_text(tf(
                             "app.status.watching",

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sc2-replay-utils</title>
+
+  <link data-trunk rel="rust" data-wasm-opt="2" />
+  <link data-trunk rel="copy-file" href="assets/fonts/Inter-Regular.ttf" />
+  <link data-trunk rel="copy-file" href="assets/fonts/JetBrainsMono-Regular.ttf" />
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #1a1a1a;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #888;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Carregando…</div>
+  <canvas id="the_canvas_id"></canvas>
+  <script>
+    // Hide the loading indicator once the canvas paints something.
+    const canvas = document.getElementById('the_canvas_id');
+    const loading = document.getElementById('loading');
+    const obs = new MutationObserver(() => {
+      if (canvas.width > 0) {
+        loading.style.display = 'none';
+        obs.disconnect();
+      }
+    });
+    obs.observe(canvas, { attributes: true });
+    setTimeout(() => { loading.style.display = 'none'; }, 5000);
+  </script>
+</body>
+</html>
