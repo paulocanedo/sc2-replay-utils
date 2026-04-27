@@ -22,6 +22,7 @@ use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label, Nam
 use super::state::{AppState, Screen};
 
 impl AppState {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
@@ -96,6 +97,7 @@ impl AppState {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn show_rename_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         Panel::top("rename_bar")
@@ -145,7 +147,17 @@ impl AppState {
                 });
         }
         if back_clicked {
-            self.screen = Screen::Library;
+            // Native: voltar para a tela de biblioteca.
+            // Web: descarrega o replay atual para mostrar o prompt de
+            // upload novamente.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.screen = Screen::Library;
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.loaded = None;
+            }
         }
 
         Panel::top("tabs").show(ctx, |ui| {

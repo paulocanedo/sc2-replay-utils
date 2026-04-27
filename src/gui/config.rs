@@ -6,6 +6,7 @@
 // #[serde(default)] no struct garante que adicionar novos campos no futuro
 // não quebra arquivos de config antigos — os campos ausentes usam Default.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::PathBuf;
 
@@ -102,11 +103,15 @@ impl Default for AppConfig {
 impl AppConfig {
     /// Caminho do arquivo de configuração. Retorna None se `dirs::config_dir()`
     /// não conseguir resolver (muito raro).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("sc2-replay-utils").join("config.yaml"))
     }
 
     /// Carrega do disco. Falhas silenciosas viram Default + log em stderr.
+    /// Wasm: sempre `Default::default()` — não temos disco; settings ficam
+    /// efêmeros por sessão (TODO: pode evoluir pra `eframe::Storage`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load() -> Self {
         let Some(path) = Self::config_path() else {
             return Self::default();
@@ -129,7 +134,20 @@ impl AppConfig {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn load() -> Self {
+        let mut cfg = Self::default();
+        // Em web não temos modal de language picker (UI nativa) nem flow de
+        // first-run, então marcamos as flags como confirmadas pra cair direto
+        // no Analysis screen.
+        cfg.language_selected = true;
+        cfg.disclaimer_acknowledged = true;
+        cfg.settings_confirmed = true;
+        cfg
+    }
+
     /// Grava em disco, criando diretórios intermediários se necessário.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path().ok_or_else(|| "config_dir indisponível".to_string())?;
         if let Some(parent) = path.parent() {
@@ -140,13 +158,26 @@ impl AppConfig {
         Ok(())
     }
 
+    /// Wasm: no-op, mudanças ficam só na sessão.
+    #[cfg(target_arch = "wasm32")]
+    pub fn save(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     /// Retorna o diretório de trabalho efetivo: o valor persistido no config,
     /// ou — se vazio — o diretório padrão do SC2 detectado automaticamente.
     /// Esse é o único path que a UI usa para listar/observar replays.
     pub fn effective_working_dir(&self) -> Option<PathBuf> {
-        self.working_dir
-            .clone()
-            .or_else(crate::utils::sc2_default_dir)
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.working_dir
+                .clone()
+                .or_else(crate::utils::sc2_default_dir)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.working_dir.clone()
+        }
     }
 
     /// `true` se `name` (case-insensitive) bate com algum nickname cadastrado.

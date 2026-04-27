@@ -5,12 +5,16 @@
 // sobre o `ReplayTimeline` resultante. Os resultados ficam em cache
 // no struct e as abas leem sem recomputar.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 
 use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
-use crate::map_image::{self, MapImage};
+use crate::map_image::MapImage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::map_image;
 use crate::production_gap::{self, ProductionGapResult};
 use crate::replay::{self, EntityEventKind, ReplayTimeline};
 use crate::supply_block::{self, SupplyBlockEntry};
@@ -52,8 +56,36 @@ pub struct LoadedReplay {
 }
 
 impl LoadedReplay {
+    /// Native-only path-based loader. Reads bytes from disk, delegates the
+    /// parsing/extraction work to `from_bytes`, then attempts the minimap
+    /// lookup (which requires the local Battle.net Cache and is therefore
+    /// native-only).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path, max_time: u32) -> Result<Self, String> {
-        let timeline = replay::parse_replay(path, max_time)?;
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut me = Self::from_bytes(file_name, &bytes, max_time)?;
+        me.path = path.to_path_buf();
+        me.map_image = match map_image::load_for_replay(&me.timeline.map, &me.timeline.cache_handles)
+        {
+            Ok(img) => Some(img),
+            Err(e) => {
+                eprintln!("map_image: {e}");
+                None
+            }
+        };
+        Ok(me)
+    }
+
+    /// Bytes-in-memory loader. Used by the web build (FileReader upload)
+    /// and shared as the implementation core of `load`. Does NOT attempt
+    /// to resolve the minimap — that requires the local Battle.net Cache
+    /// and is the caller's responsibility on native.
+    pub fn from_bytes(file_name: String, bytes: &[u8], max_time: u32) -> Result<Self, String> {
+        let timeline = replay::parse_replay_from_bytes(&file_name, bytes, max_time)?;
 
         // O app só suporta 1v1. Rejeitamos aqui também (além do filtro
         // da biblioteca) para cobrir carregamentos diretos via diálogo
@@ -99,26 +131,17 @@ impl LoadedReplay {
             .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops, timeline.base_build))
             .collect();
 
-        let map_image = match map_image::load_for_replay(&timeline.map, &timeline.cache_handles)
-        {
-            Ok(img) => Some(img),
-            Err(e) => {
-                eprintln!("map_image: {e}");
-                None
-            }
-        };
-
         let playable_bounds = compute_playable_bounds(&timeline);
 
         Ok(Self {
-            path: path.to_path_buf(),
+            path: PathBuf::from(&file_name),
             timeline,
             build_order,
             chat,
             army,
             production,
             supply_blocks_per_player,
-            map_image,
+            map_image: None,
             playable_bounds,
         })
     }

@@ -10,14 +10,21 @@
 
 use egui::{Color32, RichText};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::library::{self, LibraryAction};
-use crate::locale::{t, tf, Language};
+use crate::locale::{t, Language};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::locale::tf;
 use crate::tabs::{self, Tab};
 use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
 
 use super::state::{AppState, Screen};
 
 impl AppState {
+    /// Native: routes through Library / Analysis / Rename screens, returns
+    /// the `LibraryAction` produced by the library UI for the caller to
+    /// dispatch. Web: only the Analysis screen exists; returns `()`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn show_central(&mut self, ctx: &egui::Context) -> LibraryAction {
         let lang = self.config.language;
         let mut library_action = LibraryAction::None;
@@ -160,6 +167,7 @@ impl AppState {
         library_action
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn handle_library_action(&mut self, action: LibraryAction) {
         let lang = self.config.language;
         match action {
@@ -210,5 +218,114 @@ fn empty_state(ui: &mut egui::Ui, lang: Language) {
         ui.label(RichText::new(t("empty.heading", lang)).heading());
         ui.add_space(SPACE_S);
         ui.label(RichText::new(t("empty.hint", lang)).italics());
+    });
+}
+
+/// Web central: renders the analysis tabs when a replay is loaded, or an
+/// upload prompt otherwise. The library / rename screens don't exist on
+/// web, so there's no `LibraryAction` to return.
+#[cfg(target_arch = "wasm32")]
+impl AppState {
+    pub(super) fn show_central(&mut self, ctx: &egui::Context) {
+        let lang = self.config.language;
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(err) = self.load_error.clone() {
+                egui::Frame::new()
+                    .fill(Color32::from_rgb(60, 20, 20))
+                    .stroke(egui::Stroke::new(1.0, Color32::LIGHT_RED))
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(err).color(Color32::LIGHT_RED));
+                            if ui.small_button("×").clicked() {
+                                self.load_error = None;
+                            }
+                        });
+                    });
+                ui.add_space(8.0);
+            }
+
+            match self.loaded.as_ref() {
+                None => {
+                    web_upload_prompt(ui, ctx, &self.pending_upload, lang);
+                }
+                Some(loaded) => match self.active_tab {
+                    Tab::Timeline => tabs::timeline::show(
+                        ui,
+                        loaded,
+                        &self.config,
+                        &mut self.timeline_tab_loop,
+                        &mut self.timeline_playing,
+                        &mut self.timeline_playback_speed,
+                        &mut self.timeline_show_heatmap,
+                        &mut self.timeline_show_creep,
+                        &mut self.timeline_show_map,
+                        &mut self.timeline_show_fog,
+                        &mut self.timeline_fog_player,
+                        &mut self.timeline_hovered_entity,
+                    ),
+                    Tab::BuildOrder => tabs::build_order::show(ui, loaded, &self.config),
+                    Tab::Charts => tabs::charts::show(
+                        ui,
+                        loaded,
+                        &self.config,
+                        &mut self.charts_army_opts,
+                        &mut self.charts_production_opts,
+                    ),
+                    Tab::Chat => tabs::chat::show(ui, loaded, &self.config),
+                    Tab::Insights => {
+                        if let Some(target) = tabs::insights::show(
+                            ui,
+                            loaded,
+                            &self.config,
+                            &mut self.insights_pov,
+                        ) {
+                            self.timeline_tab_loop = target;
+                            self.active_tab = Tab::Timeline;
+                        }
+                    }
+                },
+            }
+        });
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn web_upload_prompt(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    pending: &std::sync::Arc<std::sync::Mutex<Option<(String, Vec<u8>)>>>,
+    lang: Language,
+) {
+    ui.add_space(SPACE_XXL * 2.0);
+    ui.vertical_centered(|ui| {
+        ui.label(RichText::new("📂").size(56.0));
+        ui.add_space(SPACE_M);
+        ui.label(RichText::new(t("empty.heading", lang)).heading());
+        ui.add_space(SPACE_S);
+        ui.label(RichText::new(t("empty.hint", lang)).italics());
+        ui.add_space(SPACE_M);
+        if ui
+            .add(egui::Button::new(
+                RichText::new("📂  Carregar replay").size(15.0),
+            ))
+            .clicked()
+        {
+            let pending = pending.clone();
+            let ctx = ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let dialog = rfd::AsyncFileDialog::new()
+                    .add_filter("SC2Replay", &["SC2Replay"]);
+                let Some(handle) = dialog.pick_file().await else {
+                    return;
+                };
+                let file_name = handle.file_name();
+                let bytes = handle.read().await;
+                if let Ok(mut g) = pending.lock() {
+                    *g = Some((file_name, bytes));
+                }
+                ctx.request_repaint();
+            });
+        }
     });
 }

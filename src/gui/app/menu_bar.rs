@@ -18,23 +18,31 @@ impl AppState {
                 ui.menu_button(t("menu.file", lang), |ui| {
                     if ui.button(t("menu.file.open", lang)).clicked() {
                         ui.close();
+                        #[cfg(not(target_arch = "wasm32"))]
                         if let Some(p) = rfd::FileDialog::new()
                             .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
                             .pick_file()
                         {
                             self.load_path(p);
                         }
+                        #[cfg(target_arch = "wasm32")]
+                        self.spawn_file_pick(ctx);
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
                     if ui.button(t("menu.file.load_latest", lang)).clicked() {
                         ui.close();
                         self.try_load_latest();
                     }
-                    ui.separator();
-                    if ui.button(t("menu.file.quit", lang)).clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        ui.separator();
+                        if ui.button(t("menu.file.quit", lang)).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
                     }
                 });
                 ui.menu_button(t("menu.view", lang), |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
                     if ui.button(t("menu.view.library", lang)).clicked() {
                         self.screen = Screen::Library;
                         ui.close();
@@ -49,6 +57,7 @@ impl AppState {
                         self.screen = Screen::Analysis;
                         ui.close();
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
                     if ui.button(t("menu.view.rename", lang)).clicked() {
                         self.rename_previews = crate::rename::generate_previews(
                             &self.library,
@@ -57,10 +66,13 @@ impl AppState {
                         self.screen = Screen::Rename;
                         ui.close();
                     }
-                    ui.separator();
-                    if ui.button(t("menu.view.refresh", lang)).clicked() {
-                        self.refresh_library();
-                        ui.close();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        ui.separator();
+                        if ui.button(t("menu.view.refresh", lang)).clicked() {
+                            self.refresh_library();
+                            ui.close();
+                        }
                     }
                     ui.separator();
                     if ui.button(t("menu.view.settings", lang)).clicked() {
