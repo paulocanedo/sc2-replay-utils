@@ -98,14 +98,6 @@ impl AppState {
                         };
                         ui.label(RichText::new(msg).color(LABEL_DIM));
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    Screen::Rename => {
-                        ui.label(
-                            RichText::new(t("rename_bar.title", lang))
-                                .italics()
-                                .color(LABEL_DIM),
-                        );
-                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     #[cfg(not(target_arch = "wasm32"))]

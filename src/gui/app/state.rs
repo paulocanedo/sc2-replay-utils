@@ -43,17 +43,15 @@ pub(super) const TOAST_TTL: Duration = Duration::from_secs(4);
 /// não pelo estado de `loaded` — ao voltar para `Library`, o replay
 /// carregado permanece na memória e o usuário pode reentrar na análise.
 ///
-/// On wasm32, only `Analysis` exists — the Library and Rename screens
-/// depend on filesystem-resident replay collections that the web build
-/// can't realistically scan. Variants are gated to keep match
-/// exhaustiveness honest in both targets.
+/// On wasm32, only `Analysis` exists — the Library screen depends on a
+/// filesystem-resident replay collection that the web build can't
+/// realistically scan. Variants are gated to keep match exhaustiveness
+/// honest in both targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     #[cfg(not(target_arch = "wasm32"))]
     Library,
     Analysis,
-    #[cfg(not(target_arch = "wasm32"))]
-    Rename,
 }
 
 pub struct AppState {
@@ -90,8 +88,9 @@ pub struct AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub library_selected: HashSet<PathBuf>,
     /// Template aplicado ao nome de destino quando o usuário salva
-    /// cópias dos replays marcados. Mesmas variáveis do template de
-    /// rename (`{datetime}`, `{map}`, `{p1}`, …). Quando um replay não
+    /// cópias dos replays marcados. Suporta variáveis como
+    /// `{datetime}`, `{map}`, `{p1}`, `{r1}`, `{loops}` etc. — definição
+    /// canônica em `crate::library::save_template`. Quando um replay não
     /// tem metadados parseáveis, cai no nome de arquivo original.
     #[cfg(not(target_arch = "wasm32"))]
     pub library_save_template: String,
@@ -139,15 +138,6 @@ pub struct AppState {
     /// nas instâncias correspondentes. Resetado a `None` no começo de
     /// cada frame da Timeline — vida do hover ligada ao frame ativo.
     pub timeline_hovered_entity: Option<(usize, String)>,
-    /// Template de renomeação em lote.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub rename_template: String,
-    /// Previews gerados a partir do template + biblioteca.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub rename_previews: Vec<(PathBuf, String)>,
-    /// Status da última operação de rename.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub rename_status: Option<String>,
     /// Carregamento do replay mais recente adiado até o scanner terminar.
     pub pending_load_latest: bool,
     /// Auto-detect pendente do `DateRange` inicial da biblioteca: quando
@@ -220,7 +210,7 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             library_selected: HashSet::new(),
             #[cfg(not(target_arch = "wasm32"))]
-            library_save_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
+            library_save_template: crate::library::save_template::DEFAULT_TEMPLATE.to_string(),
             library_selection_minimap: None,
             library_selection_minimap_path: None,
             #[cfg(target_arch = "wasm32")]
@@ -237,12 +227,6 @@ impl AppState {
             timeline_show_fog: false,
             timeline_fog_player: 0,
             timeline_hovered_entity: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
-            #[cfg(not(target_arch = "wasm32"))]
-            rename_previews: Vec::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            rename_status: None,
             pending_load_latest: false,
             pending_date_range_autodetect,
             language_draft,
@@ -544,7 +528,7 @@ fn expand_save_name(src: &Path, library: &ReplayLibrary, template: &str) -> Opti
     let entry = library.entries.iter().find(|e| e.path == src);
     if let Some(entry) = entry {
         if let crate::library::MetaState::Parsed(meta) = &entry.meta {
-            if let Some(name) = crate::rename::expand_template(template, meta) {
+            if let Some(name) = crate::library::save_template::expand_template(template, meta) {
                 return Some(name);
             }
         }

@@ -3,8 +3,8 @@
 //!
 //! `AppState` is shared between targets. Modules whose backing infra
 //! (filesystem, threads, OS dialogs, Battle.net Cache lookups) doesn't
-//! exist on the web — `library`, `watcher`, `cache`, `rename`, and the
-//! real `map_image` implementation — are gated out for wasm32. Consumers
+//! exist on the web — `library`, `watcher`, `cache`, and the real
+//! `map_image` implementation — are gated out for wasm32. Consumers
 //! in `app/state.rs` and the surrounding GUI use
 //! `#[cfg(not(target_arch = "wasm32"))]` on the specific fields, methods,
 //! and match arms that touch them.
@@ -73,10 +73,6 @@ mod library {
         ThisMonth,
     }
 }
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "gui/rename.rs"]
-mod rename;
-
 // ── Shared GUI tree (compiles for both targets) ──
 #[path = "gui/colors.rs"]
 mod colors;

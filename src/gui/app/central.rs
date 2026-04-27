@@ -1,6 +1,6 @@
-// Roteamento do painel central: biblioteca, aba de análise (Timeline /
-// BuildOrder / Charts / Chat) ou tela de rename. Também consume a
-// `LibraryAction` devolvida pela biblioteca após o render.
+// Roteamento do painel central: biblioteca ou aba de análise (Timeline
+// / BuildOrder / Charts / Chat). Também consume a `LibraryAction`
+// devolvida pela biblioteca após o render.
 
 // See `app/mod.rs` for why we use deprecated `CentralPanel::show(ctx, ...)`.
 // Note: only the outer `CentralPanel::show(ctx, ...)` is deprecated;
@@ -21,8 +21,8 @@ use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
 use super::state::{AppState, Screen};
 
 impl AppState {
-    /// Native: routes through Library / Analysis / Rename screens, returns
-    /// the `LibraryAction` produced by the library UI for the caller to
+    /// Native: routes through Library / Analysis screens, returns the
+    /// `LibraryAction` produced by the library UI for the caller to
     /// dispatch. Web: only the Analysis screen exists; returns `()`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn show_central(&mut self, ctx: &egui::Context) -> LibraryAction {
@@ -152,16 +152,6 @@ impl AppState {
                         }
                     },
                 },
-                Screen::Rename => {
-                    crate::rename::show(
-                        ui,
-                        &self.library,
-                        &self.config,
-                        &mut self.rename_template,
-                        &mut self.rename_previews,
-                        &mut self.rename_status,
-                    );
-                }
             }
         });
         library_action
@@ -190,12 +180,6 @@ impl AppState {
                     self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
                 }
             }
-            LibraryAction::OpenRename => {
-                self.rename_previews =
-                    crate::rename::generate_previews(&self.library, &self.rename_template);
-                self.rename_status = None;
-                self.screen = Screen::Rename;
-            }
             LibraryAction::ToggleSelected(p) => {
                 if !self.library_selected.remove(&p) {
                     self.library_selected.insert(p);
@@ -222,8 +206,8 @@ fn empty_state(ui: &mut egui::Ui, lang: Language) {
 }
 
 /// Web central: renders the analysis tabs when a replay is loaded, or an
-/// upload prompt otherwise. The library / rename screens don't exist on
-/// web, so there's no `LibraryAction` to return.
+/// upload prompt otherwise. The library screen doesn't exist on web,
+/// so there's no `LibraryAction` to return.
 #[cfg(target_arch = "wasm32")]
 impl AppState {
     pub(super) fn show_central(&mut self, ctx: &egui::Context) {

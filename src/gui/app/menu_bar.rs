@@ -58,15 +58,6 @@ impl AppState {
                         ui.close();
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    if ui.button(t("menu.view.rename", lang)).clicked() {
-                        self.rename_previews = crate::rename::generate_previews(
-                            &self.library,
-                            &self.rename_template,
-                        );
-                        self.screen = Screen::Rename;
-                        ui.close();
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
                     {
                         ui.separator();
                         if ui.button(t("menu.view.refresh", lang)).clicked() {

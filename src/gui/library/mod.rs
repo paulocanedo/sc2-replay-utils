@@ -18,6 +18,7 @@ pub mod date;
 mod entry_row;
 pub mod filter;
 mod hero;
+pub mod save_template;
 pub mod scanner;
 mod sidebar;
 pub mod stats;

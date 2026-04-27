@@ -18,7 +18,6 @@ menu.file.quit = Quit
 menu.view = View
 menu.view.library = Library
 menu.view.analysis = Analysis
-menu.view.rename = Rename
 menu.view.refresh = Refresh library
 menu.view.settings = Settings…
 menu.help = Help
@@ -26,9 +25,6 @@ menu.help.about = About
 
 # ── File dialogs ────────────────────────────────────────────────────────────
 dialog.filter.sc2_replay = SC2 Replay
-
-# ── Rename bar ──────────────────────────────────────────────────────────────
-rename_bar.title = Batch Rename Replays
 
 # ── About dialog ────────────────────────────────────────────────────────────
 about.title = About
@@ -375,28 +371,18 @@ timeline.tt.blocks = Supply-blocked periods up to current time — total count a
 timeline.tt.unit_chip = {name} × {count}
 timeline.tt.research_chip = {name} · finished at {mm}:{ss}
 
-# ── Rename screen ───────────────────────────────────────────────────────────
-rename.heading = Batch Rename Replays
-rename.template_label = Name template:
-rename.vars_header = Available variables
-rename.var.datetime = Compact date/time (YYYYMMDDHHMM)
-rename.var.map = Map name (sanitized)
-rename.var.p1 = Player 1 name (sanitized)
-rename.var.p2 = Player 2 name (sanitized)
-rename.var.r1 = Player 1 race (T, P, Z or R)
-rename.var.r2 = Player 2 race (T, P, Z or R)
-rename.var.loops = Total game loops
-rename.var.duration = Match duration (MMmSSs)
-rename.note_special = Special characters in player/map names are replaced with '_'.
-rename.note_ext = The .SC2Replay extension is added automatically.
-rename.total = {count} replays will be renamed
-rename.skipped = ({count} skipped — pending or non-1v1)
-rename.execute = Rename All…
-rename.execute_tooltip = Choose the destination folder to copy the renamed replays
-rename.status.ok = {count} replays copied to {dir}
-rename.status.mkdir_err = Error creating directory: {err}
-rename.status.partial = {ok} copied, {errors} errors:
-rename.status.error_marker = errors
+# ── Library "Save as…" template (help popup) ────────────────────────────────
+library.template.vars_header = Available variables
+library.template.var.datetime = Compact date/time (YYYYMMDDHHMM)
+library.template.var.map = Map name (sanitized)
+library.template.var.p1 = Player 1 name (sanitized)
+library.template.var.p2 = Player 2 name (sanitized)
+library.template.var.r1 = Player 1 race (T, P, Z or R)
+library.template.var.r2 = Player 2 race (T, P, Z or R)
+library.template.var.loops = Total game loops
+library.template.var.duration = Match duration (MMmSSs)
+library.template.note_special = Special characters in player/map names are replaced with '_'.
+library.template.note_ext = The .SC2Replay extension is added automatically.
 
 # ── Insights tab ────────────────────────────────────────────────────────────
 insights.pov_label = Point of view

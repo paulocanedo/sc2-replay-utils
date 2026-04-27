@@ -16,11 +16,10 @@
 // `#[allow(deprecated)]`; the path is still fully supported by egui
 // (deprecation is advisory, not removal).
 //
-// A UI alterna entre três telas mutuamente exclusivas:
+// A UI alterna entre duas telas mutuamente exclusivas:
 // - `Screen::Library`: a biblioteca de replays ocupa toda a janela.
 // - `Screen::Analysis`: replay bar + tab bar + central panel + painel
 //   direito de jogadores ocupam toda a janela.
-// - `Screen::Rename`: barra de rename + central panel de preview.
 //
 // Em todas as telas há uma status bar inferior persistente exibindo o
 // replay atualmente carregado, o estado do watcher e os toasts.
@@ -33,7 +32,7 @@
 // Organização dos submódulos:
 //   - `state`      — `Screen`, `AppState`, métodos de ownership.
 //   - `menu_bar`   — barra de menu superior.
-//   - `topbar`     — topbars de Library, Rename e Analysis (+ tab bar).
+//   - `topbar`     — topbars de Library e Analysis (+ tab bar).
 //   - `status_bar` — status bar inferior persistente.
 //   - `central`    — roteamento do painel central + `LibraryAction`.
 //   - `modals`     — janelas modais (language prompt, about).
@@ -214,7 +213,7 @@ impl eframe::App for AppState {
             }
 
             // F5 atalha o "Refresh library" do menu View. Só dispara na
-            // tela de biblioteca para não surpreender em Analysis/Rename.
+            // tela de biblioteca para não surpreender em Analysis.
             if self.screen == Screen::Library
                 && ctx.input(|i| i.key_pressed(egui::Key::F5))
             {
@@ -235,8 +234,6 @@ impl eframe::App for AppState {
         match self.screen {
             #[cfg(not(target_arch = "wasm32"))]
             Screen::Library => self.show_library_topbar(&ctx),
-            #[cfg(not(target_arch = "wasm32"))]
-            Screen::Rename => self.show_rename_topbar(&ctx),
             Screen::Analysis => self.show_analysis_topbar(&ctx),
         }
 

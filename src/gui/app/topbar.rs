@@ -1,6 +1,6 @@
-// Topbars de cada tela — Library, Rename e Analysis. O topbar de análise
-// é o mais rico: back + mapa + matchup + popover de detalhes + chips de
-// jogadores + atalhos (abrir/rename) + a tab bar logo abaixo.
+// Topbars de cada tela — Library e Analysis. O topbar de análise é o
+// mais rico: back + mapa + matchup + popover de detalhes + chips de
+// jogadores + atalhos (abrir) + a tab bar logo abaixo.
 
 // See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
 #![allow(deprecated)]
@@ -76,7 +76,7 @@ impl AppState {
                     }
 
                     // Reload stays on the right (screen-level action).
-                    // Working dir → Settings, rename → menu View.
+                    // Working dir → Settings.
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
@@ -95,30 +95,6 @@ impl AppState {
         if toggle_sidebar {
             self.library_sidebar_open = !self.library_sidebar_open;
         }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn show_rename_topbar(&mut self, ctx: &egui::Context) {
-        let lang = self.config.language;
-        Panel::top("rename_bar")
-            .frame(
-                egui::Frame::new()
-                    .fill(SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if icon_button(ui, "←", t("topbar.back_tooltip", lang)).clicked() {
-                        self.screen = Screen::Library;
-                    }
-                    ui.add_space(SPACE_S);
-                    ui.label(
-                        RichText::new(t("rename_bar.title", lang))
-                            .size(size_subtitle(&self.config))
-                            .strong(),
-                    );
-                });
-            });
     }
 
     pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
@@ -173,9 +149,9 @@ impl AppState {
 }
 
 /// Renders the rich analysis top bar: back-to-library affordance, map
-/// summary, per-player chips and a details popover. Open/rename live
-/// in the menu bar (File → Open replay…, View → Rename), so this bar
-/// stays focused on the loaded replay's identity.
+/// summary, per-player chips and a details popover. The Open action
+/// lives in the menu bar (File → Open replay…), so this bar stays
+/// focused on the loaded replay's identity.
 fn analysis_topbar(
     ui: &mut egui::Ui,
     loaded: &LoadedReplay,
@@ -249,9 +225,9 @@ fn analysis_topbar(
         });
 
         // ── Flex spacer + right cluster (apenas chips) ──────────
-        // Open/rename foram movidos para a menu bar (File → Open replay
-        // e View → Rename) — a topbar de análise agora só carrega
-        // identidade do replay carregado.
+        // Open foi movido para a menu bar (File → Open replay) — a
+        // topbar de análise agora só carrega identidade do replay
+        // carregado.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Player chips flow right-to-left so P2 sits at the far
             // right edge. We draw P2 first, then "vs", then P1.
