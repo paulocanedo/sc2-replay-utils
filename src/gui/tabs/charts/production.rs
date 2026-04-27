@@ -569,6 +569,31 @@ fn draw_lane(
         } else {
             let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
             painter.rect_filled(rect, 1.5, color);
+
+            // Blocos `Morphing` (CC→Orbital/PF) e `Impeded` (addon Terran
+            // em construção) desenham o ícone do motivo do impedimento
+            // centralizado na faixa: Orbital/PF mostra o destino do
+            // morph; Impeded mostra o Reactor/TechLab. Producing fica
+            // sem ícone — o `player_color` e o ícone da estrutura na
+            // coluna esquerda já comunicam o que está sendo produzido,
+            // e ícones por unidade poluiriam runs longos de Marines/etc.
+            if matches!(block.kind, BlockKind::Morphing | BlockKind::Impeded) {
+                if let Some(name) = block.produced_type {
+                    if let Some(src) = structure_icon(name) {
+                        let icon_size = (block_height - 2.0).max(0.0);
+                        let avail_w = rect.width() - 2.0;
+                        if icon_size >= 6.0 && avail_w >= icon_size {
+                            let icon_rect = Rect::from_center_size(
+                                rect.center(),
+                                Vec2::splat(icon_size),
+                            );
+                            egui::Image::new(src)
+                                .fit_to_exact_size(Vec2::splat(icon_size))
+                                .paint_at(ui, icon_rect);
+                        }
+                    }
+                }
+            }
         }
     }
 }
