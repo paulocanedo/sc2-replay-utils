@@ -189,14 +189,14 @@ mod tests {
 
     #[test]
     fn ui_en_basics() {
-        assert_eq!(t("menu.file", Language::English), "File");
+        assert_eq!(t("menu.tooltip", Language::English), "Menu");
         assert_eq!(t("menu.file.open", Language::English), "Open replay…");
         assert_eq!(t("tab.timeline", Language::English), "Timeline");
     }
 
     #[test]
     fn ui_pt_br_basics() {
-        assert_eq!(t("menu.file", Language::PortugueseBR), "Arquivo");
+        assert_eq!(t("menu.tooltip", Language::PortugueseBR), "Menu");
         assert_eq!(t("menu.file.open", Language::PortugueseBR), "Abrir replay…");
         assert_eq!(t("tab.charts", Language::PortugueseBR), "Gráficos");
     }

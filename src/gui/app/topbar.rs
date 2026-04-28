@@ -26,7 +26,6 @@ impl AppState {
     pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
-        let mut toggle_sidebar = false;
         let working_dir_display = self
             .library
             .working_dir
@@ -40,14 +39,8 @@ impl AppState {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // Sidebar toggle sits left-most — right next to the
-                    // panel it actually controls. Keeping it on the far
-                    // right created a cross-window pointer trip.
-                    if icon_button(ui, "☰", t("library.sidebar.toggle_tooltip", lang))
-                        .clicked()
-                    {
-                        toggle_sidebar = true;
-                    }
+                    // ☰ first — global app menu (open, settings, quit, …).
+                    self.show_menu_button(ui);
                     ui.add_space(SPACE_S);
                     ui.label(
                         RichText::new(t("library.title", lang))
@@ -92,15 +85,12 @@ impl AppState {
         if reload_clicked {
             self.refresh_library();
         }
-        if toggle_sidebar {
-            self.library_sidebar_open = !self.library_sidebar_open;
-        }
     }
 
     pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut back_clicked = false;
-        if let Some(loaded) = self.loaded.as_ref() {
+        if self.loaded.is_some() {
             let user_idx = self
                 .loaded
                 .as_ref()
@@ -112,14 +102,22 @@ impl AppState {
                         .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
                 )
                 .show(ctx, |ui| {
-                    analysis_topbar(
-                        ui,
-                        loaded,
-                        &self.config,
-                        user_idx,
-                        lang,
-                        &mut back_clicked,
-                    );
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(TOPBAR_HEIGHT - (SPACE_S as f32) * 2.0);
+
+                        // ☰ first — global app menu.
+                        self.show_menu_button(ui);
+
+                        let loaded = self.loaded.as_ref().expect("guarded by is_some above");
+                        analysis_topbar_row(
+                            ui,
+                            loaded,
+                            &self.config,
+                            user_idx,
+                            lang,
+                            &mut back_clicked,
+                        );
+                    });
                 });
         }
         if back_clicked {
@@ -148,11 +146,13 @@ impl AppState {
     }
 }
 
-/// Renders the rich analysis top bar: back-to-library affordance, map
-/// summary, per-player chips and a details popover. The Open action
-/// lives in the menu bar (File → Open replay…), so this bar stays
-/// focused on the loaded replay's identity.
-fn analysis_topbar(
+/// Renders the analysis top bar contents (back affordance, map
+/// summary, per-player chips and details popover) into an existing
+/// `ui.horizontal`. The caller is responsible for opening that
+/// horizontal — and for prepending the global ☰ menu button before
+/// us. Open replay lives in the hamburger, so this row stays focused
+/// on the loaded replay's identity.
+fn analysis_topbar_row(
     ui: &mut egui::Ui,
     loaded: &LoadedReplay,
     config: &AppConfig,
@@ -165,9 +165,7 @@ fn analysis_topbar(
     let duration = fmt_time(tl.game_loops, tl.loops_per_second);
     let date_display = format_date_short(&tl.datetime, lang);
 
-    ui.horizontal(|ui| {
-        ui.set_min_height(TOPBAR_HEIGHT - (SPACE_S as f32) * 2.0);
-
+    {
         // ── Back + map summary (whole secondary line is the popover trigger) ──
         // `📚` is the same glyph the menu uses for "view library", so the
         // affordance reads consistently. A bare `←` glyph is missing from
@@ -238,7 +236,7 @@ fn analysis_topbar(
                 player_chip_topbar(ui, &players[0], 0, user_idx == Some(0), config, lang);
             }
         });
-    });
+    }
 }
 
 /// One player chip rendered inside the analysis top bar. Compact card

@@ -69,11 +69,6 @@ pub struct AppState {
     pub library: ReplayLibrary,
     #[cfg(not(target_arch = "wasm32"))]
     pub library_filter: library::LibraryFilter,
-    /// Whether the left filter sidebar on the Library screen is expanded.
-    /// Toggled by the ☰ button in the Library topbar; persisted only in
-    /// session memory (not saved to disk).
-    #[cfg(not(target_arch = "wasm32"))]
-    pub library_sidebar_open: bool,
     /// Caminho do replay atualmente *selecionado* na biblioteca (clique
     /// único). Diferente de `loaded`: selecionar apenas alimenta o card
     /// lateral de detalhes; carregar (duplo-clique ou botão "Abrir
@@ -203,8 +198,6 @@ impl AppState {
             library: ReplayLibrary::new(),
             #[cfg(not(target_arch = "wasm32"))]
             library_filter,
-            #[cfg(not(target_arch = "wasm32"))]
-            library_sidebar_open: true,
             #[cfg(not(target_arch = "wasm32"))]
             library_selection: None,
             #[cfg(not(target_arch = "wasm32"))]
