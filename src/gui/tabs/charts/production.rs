@@ -494,13 +494,6 @@ fn draw_lane(
             if !matches!(b.kind, BlockKind::Producing) {
                 return false;
             }
-            let post_reactor = lane
-                .reactor_since_loop
-                .map(|r| b.start_loop >= r)
-                .unwrap_or(false);
-            if post_reactor {
-                return false;
-            }
             lane_is_zerg_hatch
                 || lane
                     .warpgate_since_loop
@@ -536,12 +529,6 @@ fn draw_lane(
         let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
         let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
 
-        let block_post_reactor = matches!(block.kind, BlockKind::Producing)
-            && lane
-                .reactor_since_loop
-                .map(|r| block.start_loop >= r)
-                .unwrap_or(false);
-
         let color = match block.kind {
             BlockKind::Producing => player_color,
             // Morph in-place (CC→Orbital/PF) e Impeded (addon Terran em
@@ -550,21 +537,7 @@ fn draw_lane(
             BlockKind::Morphing | BlockKind::Impeded => ACCENT_WARNING,
         };
 
-        if block_post_reactor {
-            // Lane Terran com reactor anexado: duas faixas top/bottom
-            // representando capacidade paralela 2x. O `sub_track` do
-            // bloco (0 ou 1) decide qual metade ocupar, com gap fino
-            // entre elas para distinguir visualmente.
-            let gap = 1.0;
-            let half_h = ((block_height - gap) * 0.5).max(3.0);
-            let (top, bot) = if block.sub_track == 0 {
-                (block_top, block_top + half_h)
-            } else {
-                (block_bot - half_h, block_bot)
-            };
-            let rect = Rect::from_min_max(Pos2::new(x0, top), Pos2::new(x1, bot));
-            painter.rect_filled(rect, 1.5, color);
-        } else if let Some(&track_idx) = thin_track_by_block.get(&i) {
+        if let Some(&track_idx) = thin_track_by_block.get(&i) {
             // Sub-trilha thin para Hatch Zerg / WarpGate pós-research:
             // cada produção paralela ganha sua própria linha vertical
             // (interval scheduling). Sem isso, drones nascendo
