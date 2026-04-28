@@ -1,0 +1,314 @@
+//! Loop principal de extração por jogador. Recebe um `PlayerTimeline`
+//! e produz um `PlayerProductionLanes`. A função coordena:
+//!
+//! - Criação de lanes (`ProductionFinished` em estruturas-alvo).
+//! - Detecção de morphs in-place (CC→Orbital/PF, Hatch→Lair→Hive,
+//!   Gateway→WarpGate). O morph impeditivo Terran (CC→Orbital/PF, modo
+//!   Workers) emite bloco `Morphing`; Zerg/Protoss apenas atualizam
+//!   `canonical_type`/`warpgate_since_loop`.
+//! - Janela `Impeded` de addon Terran (Reactor/TechLab em construção).
+//! - Mapa Zerg `larva_tag → hatch_tag` para resolução posterior.
+//! - Casamento `creator_tag` ↔ `production_cmds` para usar o instante
+//!   real do click de Train como `start_loop` do bloco `Producing`.
+
+use std::collections::HashMap;
+
+use crate::balance_data;
+use crate::replay::{
+    is_incapacitating_addon, is_zerg_hatch, EntityEventKind, PlayerTimeline,
+};
+
+use super::classify::{intern_unit_name, is_target_unit, lane_canonical};
+use super::morph::{is_morph_died, is_morph_finish, is_pure_morph_finish, morph_build_loops, morph_old_type};
+use super::resolve::{consume_producer_cmd, merge_continuous, resolve_producer};
+use super::terran::resolve_addon_parent;
+use super::types::{BlockKind, LaneMode, PlayerProductionLanes, ProductionBlock, StructureLane};
+
+pub(super) fn extract_player(
+    player: &PlayerTimeline,
+    base_build: u32,
+    mode: LaneMode,
+) -> PlayerProductionLanes {
+    let events = &player.entity_events;
+    let mut lanes_by_tag: HashMap<i64, StructureLane> = HashMap::new();
+    let mut larva_to_hatch: HashMap<i64, i64> = HashMap::new();
+    // Modo Army Terran: addon_tag → (parent_tag, start_loop, name).
+    // Ao ver Finished/Cancelled/Died do addon, fechamos a janela.
+    let mut pending_addon: HashMap<i64, (i64, u32, &'static str)> = HashMap::new();
+
+    let is_zerg = matches!(player.race.as_str(), "Zerg");
+
+    // Cmd matching: índice cmds_by_producer (creator_tag → cmds). Mesma
+    // estratégia do `build_order::extract` para que o gráfico use o
+    // instante real em que o jogador clicou Train, não uma estimativa
+    // de balance_data subtraída do finish_loop. Mantém duas pipelines
+    // alinhadas no que mostram pra unidades produzidas.
+    let mut cmds_by_producer: HashMap<i64, Vec<usize>> = HashMap::new();
+    if mode == LaneMode::Army {
+        for (i, cmd) in player.production_cmds.iter().enumerate() {
+            if let Some(&p) = cmd.producer_tags.first() {
+                cmds_by_producer.entry(p).or_default().push(i);
+            }
+        }
+    }
+    let mut consumed = vec![false; player.production_cmds.len()];
+
+    // Last finish loop por creator_tag. Cada unidade pareada começa em
+    // `max(cmd_loop, last_finish)` para herdar a semântica de fila do
+    // `build_order` (sem paralelismo: produções concorrentes da mesma
+    // estrutura ficam encostadas em vez de sobrepostas, e o
+    // `merge_continuous` posteriormente as funde no mesmo bloco).
+    let mut last_finish_by_creator: HashMap<i64, u32> = HashMap::new();
+
+    for i in 0..events.len() {
+        let ev = &events[i];
+        match ev.kind {
+            EntityEventKind::ProductionStarted => {
+                let new_type = ev.entity_type.as_str();
+
+                // Morph in-place de estrutura — atualiza canonical_type
+                // ou emite bloco Morphing impeditivo (CC→Orbital/PF).
+                if let Some(new_canonical) = lane_canonical(new_type, mode) {
+                    if let Some(old_type) = morph_old_type(events, i) {
+                        if lane_canonical(old_type, mode).is_some() {
+                            if let Some(lane) = lanes_by_tag.get_mut(&ev.tag) {
+                                let is_impeditive_morph = matches!(
+                                    new_canonical,
+                                    "OrbitalCommand" | "PlanetaryFortress"
+                                );
+                                if mode == LaneMode::Workers && is_impeditive_morph {
+                                    let mt = morph_build_loops(new_canonical, base_build);
+                                    if mt > 0 {
+                                        let start = ev.game_loop.saturating_sub(mt);
+                                        lane.blocks.push(ProductionBlock {
+                                            start_loop: start,
+                                            end_loop: ev.game_loop,
+                                            kind: BlockKind::Morphing,
+                                            // Tipo destino do morph (Orbital/PF) — o
+                                            // render desenha o ícone dentro da faixa
+                                            // pra mostrar o motivo do impedimento.
+                                            produced_type: Some(new_canonical),
+                                        });
+                                    }
+                                }
+                                // Detecta Gateway → WarpGate. A pesquisa
+                                // de Warpgate dispara esse morph na
+                                // mesma tag, simultaneamente em todas
+                                // as Gateways do jogador.
+                                if new_canonical == "WarpGate" && old_type == "Gateway" {
+                                    lane.warpgate_since_loop = Some(ev.game_loop);
+                                }
+                                lane.canonical_type = new_canonical;
+                            }
+                        }
+                    }
+                }
+
+                // Larva nasce: registra para resolução posterior de
+                // unidades larva-born (Drone em workers, ou army units
+                // em Zerg).
+                if new_type == "Larva" {
+                    if let Some(creator) = ev.creator_tag {
+                        larva_to_hatch.insert(ev.tag, creator);
+                    }
+                }
+
+                // Modo Army Terran: addon começou. Abre janela.
+                // O `UnitInitEvent` não carrega creator no protocolo —
+                // `ev.creator_tag` é sempre `None` para Reactor/TechLab.
+                // Caímos em proximidade espacial: addons ficam colados
+                // na estrutura-mãe, então a Barracks/Factory/Starport
+                // viva mais próxima é virtualmente sempre a certa.
+                if mode == LaneMode::Army && is_incapacitating_addon(new_type) {
+                    let parent = ev.creator_tag.or_else(|| {
+                        resolve_addon_parent(
+                            new_type,
+                            ev.pos_x,
+                            ev.pos_y,
+                            ev.game_loop,
+                            &lanes_by_tag,
+                        )
+                    });
+                    if let Some(parent) = parent {
+                        if let Some(name) = intern_unit_name(new_type) {
+                            pending_addon.insert(ev.tag, (parent, ev.game_loop, name));
+                        }
+                    }
+                }
+            }
+            EntityEventKind::ProductionFinished => {
+                // Transforms mecânicos Terran (Hellion↔Hellbat, SiegeTank
+                // siege mode, Viking assault, WidowMine burrow, Liberator
+                // AG) emitem Died(old)→Started(new)→Finished(new) no mesmo
+                // tag/loop via apply_type_change com creator_ability=None.
+                // A unidade original já foi contada quando nasceu — sem
+                // este skip, cada toggle viraria um bloco fantasma
+                // atribuído por proximidade à Factory/Barracks/Starport
+                // mais próxima. Larva-borns e cocoons Zerg passam (são
+                // produções reais consumindo o progenitor).
+                if is_pure_morph_finish(events, i) {
+                    continue;
+                }
+
+                let new_type = ev.entity_type.as_str();
+
+                // Born real de uma estrutura-lane: cria a lane.
+                if let Some(canonical) = lane_canonical(new_type, mode) {
+                    if !is_morph_finish(events, i) && !lanes_by_tag.contains_key(&ev.tag) {
+                        lanes_by_tag.insert(
+                            ev.tag,
+                            StructureLane {
+                                tag: ev.tag,
+                                canonical_type: canonical,
+                                born_loop: ev.game_loop,
+                                died_loop: None,
+                                pos_x: ev.pos_x,
+                                pos_y: ev.pos_y,
+                                blocks: Vec::new(),
+                                warpgate_since_loop: None,
+                            },
+                        );
+                    }
+                }
+
+                // Unidade-alvo concluída.
+                if is_target_unit(new_type, mode, is_zerg) {
+                    // creator_tag vem do `ProductionStarted` companheiro
+                    // (mesmo tag, mesmo game_loop). Para Terran é o tag
+                    // da estrutura produtora; para Zerg morphs é o tag
+                    // da larva. É o mesmo valor que o `producer_tag` em
+                    // `production_cmds`, então cmd matching usa esse.
+                    let creator_tag = events
+                        .get(i.wrapping_sub(1))
+                        .filter(|prev| {
+                            i > 0
+                                && matches!(prev.kind, EntityEventKind::ProductionStarted)
+                                && prev.tag == ev.tag
+                                && prev.game_loop == ev.game_loop
+                        })
+                        .and_then(|prev| prev.creator_tag);
+
+                    let lane_tag = resolve_producer(
+                        events,
+                        i,
+                        new_type,
+                        ev.tag,
+                        ev.pos_x,
+                        ev.pos_y,
+                        ev.game_loop,
+                        &lanes_by_tag,
+                        &larva_to_hatch,
+                        mode,
+                    );
+
+                    if let Some(lane_tag) = lane_tag {
+                        let finish_loop = ev.game_loop;
+                        let expected_bt = balance_data::build_time_loops(new_type, base_build);
+                        let bt_fallback = if expected_bt > 0 { expected_bt } else { 272 };
+                        // Mesma constraint causal do build_order: o cmd
+                        // só é aceito se foi emitido cedo o suficiente
+                        // pra plausivelmente ter produzido essa unidade.
+                        // Filtra Born events de spawn inicial canibalizando
+                        // cmds reais.
+                        let max_cmd_loop = finish_loop.saturating_sub(bt_fallback / 2);
+
+                        let cmd_loop = creator_tag.and_then(|ct| {
+                            consume_producer_cmd(
+                                &cmds_by_producer,
+                                &mut consumed,
+                                &player.production_cmds,
+                                ct,
+                                new_type,
+                                max_cmd_loop,
+                            )
+                        });
+
+                        let start_loop = if let Some(ct) = creator_tag {
+                            let prev = last_finish_by_creator.get(&ct).copied().unwrap_or(0);
+                            let start = match cmd_loop {
+                                Some(c) => c.max(prev),
+                                None => finish_loop.saturating_sub(bt_fallback),
+                            };
+                            last_finish_by_creator.insert(ct, finish_loop);
+                            start
+                        } else {
+                            finish_loop.saturating_sub(bt_fallback)
+                        };
+
+                        if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
+                            lane.blocks.push(ProductionBlock {
+                                start_loop,
+                                end_loop: finish_loop,
+                                kind: BlockKind::Producing,
+                                produced_type: intern_unit_name(new_type),
+                            });
+                        }
+                    }
+                }
+
+                // Modo Army Terran: addon terminou.
+                if mode == LaneMode::Army && is_incapacitating_addon(new_type) {
+                    if let Some((parent, start, name)) = pending_addon.remove(&ev.tag) {
+                        if let Some(lane) = lanes_by_tag.get_mut(&parent) {
+                            lane.blocks.push(ProductionBlock {
+                                start_loop: start,
+                                end_loop: ev.game_loop,
+                                kind: BlockKind::Impeded,
+                                produced_type: Some(name),
+                            });
+                        }
+                    }
+                }
+            }
+            EntityEventKind::ProductionCancelled => {
+                if mode == LaneMode::Army {
+                    if let Some((parent, start, name)) = pending_addon.remove(&ev.tag) {
+                        if let Some(lane) = lanes_by_tag.get_mut(&parent) {
+                            lane.blocks.push(ProductionBlock {
+                                start_loop: start,
+                                end_loop: ev.game_loop,
+                                kind: BlockKind::Impeded,
+                                produced_type: Some(name),
+                            });
+                        }
+                    }
+                }
+            }
+            EntityEventKind::Died => {
+                if !is_morph_died(events, i) {
+                    if let Some(lane) = lanes_by_tag.get_mut(&ev.tag) {
+                        lane.died_loop = Some(ev.game_loop);
+                    }
+                    // Addon morto antes de terminar: trata como cancel.
+                    if mode == LaneMode::Army {
+                        if let Some((parent, start, name)) = pending_addon.remove(&ev.tag) {
+                            if let Some(lane) = lanes_by_tag.get_mut(&parent) {
+                                lane.blocks.push(ProductionBlock {
+                                    start_loop: start,
+                                    end_loop: ev.game_loop,
+                                    kind: BlockKind::Impeded,
+                                    produced_type: Some(name),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut lanes: Vec<StructureLane> = lanes_by_tag.into_values().collect();
+    lanes.sort_by_key(|l| (l.born_loop, l.tag));
+
+    for lane in &mut lanes {
+        lane.blocks.sort_by_key(|b| b.start_loop);
+        // Em estruturas com paralelismo real (Hatch/Lair/Hive em qualquer
+        // modo, ou WarpGate pós-research), preservamos overlaps. Aqui
+        // a lane é per-estrutura, então mesmo Hatch só tem paralelismo
+        // via larvas distintas (cada larva é um creator_tag separado).
+        let parallel_lane = is_zerg_hatch(lane.canonical_type);
+        lane.blocks = merge_continuous(std::mem::take(&mut lane.blocks), parallel_lane);
+    }
+
+    PlayerProductionLanes { lanes }
+}
