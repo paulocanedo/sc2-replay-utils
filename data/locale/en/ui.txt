@@ -10,17 +10,15 @@ app.title = sc2-replay-utils
 app.status.no_replay = (no replay loaded)
 app.status.watching = Watching: {dir}
 
-# ── Menu bar ────────────────────────────────────────────────────────────────
-menu.file = File
+# ── Hamburger menu ──────────────────────────────────────────────────────────
+menu.tooltip = Menu
 menu.file.open = Open replay…
 menu.file.load_latest = Load latest
 menu.file.quit = Quit
-menu.view = View
 menu.view.library = Library
 menu.view.analysis = Analysis
 menu.view.refresh = Refresh library
 menu.view.settings = Settings…
-menu.help = Help
 menu.help.about = About
 
 # ── File dialogs ────────────────────────────────────────────────────────────
@@ -201,6 +199,8 @@ library.detail.open_analysis = Open analysis
 library.detail.section.match = Match
 library.detail.section.players = Players
 library.detail.section.openings = Build orders
+library.detail.section.file = File
+library.detail.show_in_explorer = Show in Explorer
 library.detail.played_at = Played at
 library.detail.duration = Duration
 library.detail.version = Version
@@ -239,7 +239,6 @@ library.sidebar.ascending = Ascending
 library.sidebar.descending = Descending
 library.sidebar.insights_matchup = Matchup winrate
 library.sidebar.insights_maps = Top maps
-library.sidebar.toggle_tooltip = Toggle filter sidebar
 library.filter.clear_all = Clear filters
 library.related.menu.title = Find related
 library.related.menu.vs_opponent = Games vs {name}
