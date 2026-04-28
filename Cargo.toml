@@ -17,12 +17,21 @@ egui_plot   = "0.35"
 rfd         = "0.17"
 bitcode     = { version = "0.6", features = ["serde"] }
 
-# Native-only deps. `dirs` resolves OS config/data directories; `notify`
-# watches replay folder for new SC2Replay files. Neither has a meaningful
-# wasm32 implementation.
+# Native-only deps.
+#   - `dirs`   resolves OS config/data directories.
+#   - `notify` watches the replay folder for new SC2Replay files.
+#   - `blake3` is the content hash used by the library cache to identify
+#     replays by content rather than path+mtime — survives OneDrive sync,
+#     antivirus mtime touches, and `working_dir` casing/separator changes.
+#   - `dunce` canonicalizes Windows paths without the `\\?\` UNC prefix
+#     (std's `fs::canonicalize` adds it, breaking byte-equality with
+#     paths produced by `fs::read_dir`).
+# None of these have meaningful wasm32 implementations.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dirs   = "6"
 notify = "8"
+blake3 = "1"
+dunce  = "1"
 
 # Linux native uses Wayland/X11 backends. Cargo merges feature lists from
 # both this section and `[dependencies]` for the same crate, so the Linux
