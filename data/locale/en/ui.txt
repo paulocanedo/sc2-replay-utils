@@ -88,6 +88,7 @@ status.library.count = {total} replays
 status.library.filtered = {total} replays · {shown} shown
 status.library.scanning = Scanning… ({found} found)
 status.library.parsing = Parsing {pending}/{total}
+status.library.enriching = {total} replays · classifying openings ({remaining})
 
 # ── Analysis top bar (match chrome above the tabs) ──────────────────────────
 topbar.back_tooltip = Back to library
@@ -173,6 +174,7 @@ library.date.this_week = This week
 library.date.this_month = This month
 library.scanning = 🔍 scanning folder… {found} found
 library.parsing = 🔄 {pending}/{total} reading metadata…
+library.enriching = 🧠 classifying openings… {remaining} remaining
 library.setup_hint = Set a 'Working directory' (📂 button above or in Settings) to list your replays here.
 library.no_match = No replay matches the filter.
 library.filter_status = 🔎 {shown}/{total} match the filter

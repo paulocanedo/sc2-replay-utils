@@ -5,6 +5,8 @@ use crate::config::AppConfig;
 use super::date::matches_date_range;
 use super::entry_row::{find_user_index, find_user_player, matchup_code, race_letter};
 use super::types::{LibraryEntry, MetaState};
+#[cfg(test)]
+use super::types::OpeningLabel;
 
 #[derive(Default, Debug, PartialEq, Eq, Clone, Copy)]
 pub enum OutcomeFilter {
@@ -173,7 +175,7 @@ pub fn matches_filter(
                 let matchup_match = mc.to_ascii_lowercase().contains(&needle);
                 let opening_match = meta.players.iter().any(|p| {
                     p.opening
-                        .as_ref()
+                        .as_classified()
                         .map_or(false, |o| o.to_ascii_lowercase().contains(&needle))
                 });
                 if !(name_match || map_match || matchup_match || opening_match) {
@@ -210,7 +212,7 @@ pub fn matches_filter(
                 let any = meta
                     .players
                     .iter()
-                    .any(|p| p.opening.as_deref() == Some(wanted.as_str()));
+                    .any(|p| p.opening.as_classified() == Some(wanted.as_str()));
                 if !any {
                     return false;
                 }
@@ -280,14 +282,14 @@ mod tests {
                         race: user_race.into(),
                         mmr: None,
                         result: user_result.into(),
-                        opening: None,
+                        opening: OpeningLabel::Pending,
                     },
                     PlayerMeta {
                         name: "opp".into(),
                         race: opp_race.into(),
                         mmr: None,
                         result: opp_result.into(),
-                        opening: None,
+                        opening: OpeningLabel::Pending,
                     },
                 ],
             }),
@@ -386,8 +388,8 @@ mod tests {
         let cfg = cfg_with("me");
         let mut parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
         if let MetaState::Parsed(meta) = &mut parsed.meta {
-            meta.players[0].opening = Some("3 Rax Reaper — Stim Timing".into());
-            meta.players[1].opening = Some("Hatch First — Ling/Queen".into());
+            meta.players[0].opening = OpeningLabel::Classified("3 Rax Reaper — Stim Timing".into());
+            meta.players[1].opening = OpeningLabel::Classified("Hatch First — Ling/Queen".into());
         }
         for q in ["reaper", "HATCH", "ling/queen", "stim"] {
             let f = LibraryFilter {
@@ -524,8 +526,8 @@ mod tests {
         let cfg = cfg_with("me");
         let mut parsed = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
         if let MetaState::Parsed(meta) = &mut parsed.meta {
-            meta.players[0].opening = Some("1 Rax FE — Stim Timing".into());
-            meta.players[1].opening = Some("Hatch First — Ling/Queen".into());
+            meta.players[0].opening = OpeningLabel::Classified("1 Rax FE — Stim Timing".into());
+            meta.players[1].opening = OpeningLabel::Classified("Hatch First — Ling/Queen".into());
         }
         let f_user = LibraryFilter {
             opening: Some("1 Rax FE — Stim Timing".into()),

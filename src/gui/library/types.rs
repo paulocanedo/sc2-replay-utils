@@ -48,7 +48,7 @@ impl ParsedMeta {
                     race: p.race.clone(),
                     mmr: p.mmr,
                     result: p.result.clone().unwrap_or_default(),
-                    opening: None,
+                    opening: OpeningLabel::Pending,
                 })
                 .collect(),
         })
@@ -62,17 +62,52 @@ pub struct PlayerMeta {
     pub mmr: Option<i32>,
     pub result: String,
     /// Rótulo estratégico de abertura (ex: "Hatch First — Ling/Queen",
-    /// "1 Rax FE — Stim Timing", "Gate Expand — Stalker/Sentry").
-    /// String já formatada para display — a lógica de classificação
-    /// vive em `crate::build_order::classify_opening` e roda em background
-    /// no pool de enriquecimento do scanner, com o resultado persistido
-    /// no cache bincode.
-    ///
-    /// `None` significa "ainda não calculado" (transiente) ou "não foi
-    /// possível extrair o build order" (raro). A UI renderiza `None`
-    /// como "—" via `library.opening.unknown`; o pool de enriquecimento
-    /// acaba preenchendo em seguida e o cache passa a servir o rótulo.
-    pub opening: Option<String>,
+    /// "1 Rax FE — Stim Timing", "Gate Expand — Stalker/Sentry"). A
+    /// lógica de classificação vive em
+    /// `crate::build_order::classify_opening` e roda em background no
+    /// pool de enriquecimento do scanner; o resultado é persistido no
+    /// cache bincode.
+    pub opening: OpeningLabel,
+}
+
+/// Estado da classificação de abertura para um jogador.
+///
+/// O ciclo de vida vai de `Pending` (logo após o `parse_meta` rápido) →
+/// `Classified` (sucesso, com a string de display) ou `Unclassifiable`
+/// (tentou e o build order não rendeu rótulo — replay curto demais,
+/// extração falhou, etc.).
+///
+/// A distinção entre `Pending` e `Unclassifiable` é load-bearing: sem
+/// ela qualquer falha de classificação faz o pool de enriquecimento
+/// re-tentar o mesmo replay a cada launch do app, gastando minutos por
+/// arquivo para chegar no mesmo `None`. Com a sentinela, replays
+/// definitivamente não-classificáveis ficam quietos.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum OpeningLabel {
+    /// Ainda não tentado — pool de enriquecimento ainda não rodou ou o
+    /// resultado não chegou. UI mostra "—" e o scanner pode enfileirar
+    /// para enriquecimento.
+    Pending,
+    /// Classificado com sucesso. String é o display final.
+    Classified(String),
+    /// Tentado, mas não foi possível extrair um rótulo. Não enfileirar
+    /// de novo nesta ou em sessões futuras. UI mostra "—".
+    Unclassifiable,
+}
+
+impl OpeningLabel {
+    /// Devolve o rótulo de display quando `Classified`, ou `None` para
+    /// os outros estados (a UI mostra "—" nesse caso).
+    pub fn as_classified(&self) -> Option<&str> {
+        match self {
+            OpeningLabel::Classified(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        matches!(self, OpeningLabel::Pending)
+    }
 }
 
 #[derive(Clone)]

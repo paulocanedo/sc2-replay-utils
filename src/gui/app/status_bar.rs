@@ -33,6 +33,8 @@ impl AppState {
         let library_pending = self.library.pending_count();
         #[cfg(not(target_arch = "wasm32"))]
         let library_scanning = self.library.scanning;
+        #[cfg(not(target_arch = "wasm32"))]
+        let library_enriching = self.library.enrichment_in_flight_count();
 
         // `exact_size` pins the reserved height so that `Panel::bottom` always
         // carves out the same strip on every frame. Without it egui falls
@@ -87,6 +89,15 @@ impl AppState {
                                 &[
                                     ("pending", &library_pending.to_string()),
                                     ("total", &library_total.to_string()),
+                                ],
+                            )
+                        } else if library_enriching > 0 {
+                            tf(
+                                "status.library.enriching",
+                                lang,
+                                &[
+                                    ("total", &library_total.to_string()),
+                                    ("remaining", &library_enriching.to_string()),
                                 ],
                             )
                         } else {

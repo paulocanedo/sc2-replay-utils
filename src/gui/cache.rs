@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::library::{MetaState, ParsedMeta, PlayerMeta};
+use crate::library::{MetaState, OpeningLabel, ParsedMeta, PlayerMeta};
 
 // CACHE_VERSION bump 2→3: adicionamos o rótulo de abertura
 // (`CachedPlayerMeta.opening`) e o scanner agora parseia ~5 min de
@@ -28,7 +28,13 @@ use crate::library::{MetaState, ParsedMeta, PlayerMeta};
 // e `cache_handles` (Vec<String>) ao `CachedParsedMeta` para alimentar o
 // card lateral de detalhes da biblioteca (versão do replay + minimapa
 // resolvível pelo cache do Battle.net) sem reparsear o MPQ.
-const CACHE_VERSION: u32 = 5;
+//
+// CACHE_VERSION bump 5→6: `CachedPlayerMeta.opening` virou um enum
+// (`Pending`/`Classified`/`Unclassifiable`) em vez de `Option<String>`.
+// A sentinela `Unclassifiable` evita que o pool de enriquecimento
+// re-parseie ad-eternum replays cujo build order não rende rótulo.
+// Cache antigo é descartado no load.
+const CACHE_VERSION: u32 = 6;
 const CACHE_FILE: &str = "library_meta.bin";
 
 // ── Tipos serializáveis (desacoplados dos tipos da UI) ───────────────
@@ -73,8 +79,15 @@ struct CachedPlayerMeta {
     race: String,
     mmr: Option<i32>,
     result: String,
-    /// Rótulo de abertura já formatado (ver `PlayerMeta::opening`).
-    opening: Option<String>,
+    /// Rótulo de abertura já classificado (ver `PlayerMeta::opening`).
+    opening: CachedOpeningLabel,
+}
+
+#[derive(Serialize, Deserialize)]
+enum CachedOpeningLabel {
+    Pending,
+    Classified(String),
+    Unclassifiable,
 }
 
 // ── Conversões ───────────────────────────────────────────────────────
@@ -106,7 +119,7 @@ fn to_cached_meta(meta: &ParsedMeta) -> CachedParsedMeta {
                 race: p.race.clone(),
                 mmr: p.mmr,
                 result: p.result.clone(),
-                opening: p.opening.clone(),
+                opening: to_cached_opening(&p.opening),
             })
             .collect(),
     }
@@ -128,9 +141,25 @@ fn from_cached_meta(c: CachedParsedMeta) -> ParsedMeta {
                 race: p.race,
                 mmr: p.mmr,
                 result: p.result,
-                opening: p.opening,
+                opening: from_cached_opening(p.opening),
             })
             .collect(),
+    }
+}
+
+fn to_cached_opening(o: &OpeningLabel) -> CachedOpeningLabel {
+    match o {
+        OpeningLabel::Pending => CachedOpeningLabel::Pending,
+        OpeningLabel::Classified(s) => CachedOpeningLabel::Classified(s.clone()),
+        OpeningLabel::Unclassifiable => CachedOpeningLabel::Unclassifiable,
+    }
+}
+
+fn from_cached_opening(c: CachedOpeningLabel) -> OpeningLabel {
+    match c {
+        CachedOpeningLabel::Pending => OpeningLabel::Pending,
+        CachedOpeningLabel::Classified(s) => OpeningLabel::Classified(s),
+        CachedOpeningLabel::Unclassifiable => OpeningLabel::Unclassifiable,
     }
 }
 

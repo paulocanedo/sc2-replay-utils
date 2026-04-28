@@ -10,6 +10,8 @@ use crate::config::AppConfig;
 
 use super::entry_row::{find_user_player, matchup_code};
 use super::types::{LibraryEntry, MetaState};
+#[cfg(test)]
+use super::types::OpeningLabel;
 
 #[derive(Clone, Debug, Default)]
 pub struct MatchupStat {
@@ -208,14 +210,14 @@ mod tests {
                         race: user_race.into(),
                         mmr: user_mmr,
                         result: user_result.into(),
-                        opening: None,
+                        opening: OpeningLabel::Pending,
                     },
                     PlayerMeta {
                         name: "opponent".into(),
                         race: opp_race.into(),
                         mmr: opp_mmr,
                         result: opp_result.into(),
-                        opening: None,
+                        opening: OpeningLabel::Pending,
                     },
                 ],
             }),

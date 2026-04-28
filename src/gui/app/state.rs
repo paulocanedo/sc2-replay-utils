@@ -17,7 +17,7 @@ use egui::Context;
 use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::library::{self, ParsedMeta, ReplayLibrary};
+use crate::library::{self, OpeningLabel, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
 use crate::map_image::MapImage;
 #[cfg(not(target_arch = "wasm32"))]
@@ -551,7 +551,9 @@ fn fill_openings_from_build_order(meta: &mut ParsedMeta, bo: Option<&BuildOrderR
     let Some(bo) = bo else { return };
     for (i, p) in bo.players.iter().enumerate() {
         if let Some(pm) = meta.players.get_mut(i) {
-            pm.opening = Some(classify_opening(p, bo.loops_per_second).to_display_string());
+            pm.opening = OpeningLabel::Classified(
+                classify_opening(p, bo.loops_per_second).to_display_string(),
+            );
         }
     }
 }
