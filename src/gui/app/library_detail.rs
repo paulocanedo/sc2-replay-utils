@@ -220,6 +220,30 @@ fn detail_card_filled(
     for p in meta.players.iter() {
         opening_row(ui, p, config, lang);
     }
+    ui.add_space(SPACE_M);
+
+    // ── File: caminho relativo + reveal no file manager ──
+    section_label(ui, &t("library.detail.section.file", lang), config);
+    let path_display = relative_path_display(path, config.effective_working_dir().as_deref());
+    ui.add(
+        egui::Label::new(
+            RichText::new(path_display)
+                .size(size_caption(config))
+                .monospace()
+                .color(LABEL_STRONG),
+        )
+        .wrap(),
+    );
+    ui.add_space(SPACE_XS);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let btn = egui::Button::new(
+            RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
+        );
+        if ui.add_sized([ui.available_width(), 28.0], btn).clicked() {
+            reveal_in_file_manager(path);
+        }
+    }
 }
 
 /// Estado vazio — convida o usuário a clicar numa entry e explica o
@@ -516,4 +540,44 @@ fn find_user_index(meta: &ParsedMeta, nicknames: &[String]) -> Option<usize> {
 
 fn map_image_to_color_image(img: &MapImage) -> ColorImage {
     ColorImage::from_rgba_unmultiplied([img.width as usize, img.height as usize], &img.rgba)
+}
+
+/// Caminho a exibir na seção "File": relativo à pasta-base do config quando
+/// possível, com fallback para o path absoluto. O `strip_prefix` da std falha
+/// se o replay estiver fora da pasta-base — nesse caso mostramos o absoluto
+/// para o usuário ainda conseguir localizar o arquivo.
+fn relative_path_display(path: &std::path::Path, base: Option<&std::path::Path>) -> String {
+    if let Some(base) = base {
+        if let Ok(rel) = path.strip_prefix(base) {
+            return rel.display().to_string();
+        }
+    }
+    path.display().to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reveal_in_file_manager(path: &std::path::Path) {
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer.exe /select,<path>` exige que `<path>` esteja entre aspas
+        // para nomes com espaços, mas o auto-quoting do `Command::arg` envolveria
+        // a string inteira (`"/select,..."`) — formato que o explorer não
+        // interpreta. Usamos `raw_arg` para montar a linha de comando manualmente.
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // xdg-open não tem "selecionar"; abrir o diretório-pai.
+        if let Some(parent) = path.parent() {
+            let _ = Command::new("xdg-open").arg(parent).spawn();
+        }
+    }
 }

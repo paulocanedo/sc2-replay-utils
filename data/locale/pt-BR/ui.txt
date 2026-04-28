@@ -11,17 +11,15 @@ app.title = sc2-replay-utils
 app.status.no_replay = (nenhum replay carregado)
 app.status.watching = Observando: {dir}
 
-# ── Menu bar ────────────────────────────────────────────────────────────────
-menu.file = Arquivo
+# ── Menu hamburger ──────────────────────────────────────────────────────────
+menu.tooltip = Menu
 menu.file.open = Abrir replay…
 menu.file.load_latest = Carregar mais recente
 menu.file.quit = Sair
-menu.view = Exibir
 menu.view.library = Biblioteca
 menu.view.analysis = Análise
 menu.view.refresh = Atualizar biblioteca
 menu.view.settings = Configurações…
-menu.help = Ajuda
 menu.help.about = Sobre
 
 # ── Diálogos de arquivo ─────────────────────────────────────────────────────
@@ -202,6 +200,8 @@ library.detail.open_analysis = Abrir análise
 library.detail.section.match = Partida
 library.detail.section.players = Jogadores
 library.detail.section.openings = Build orders
+library.detail.section.file = Arquivo
+library.detail.show_in_explorer = Mostrar no Explorer
 library.detail.played_at = Jogado em
 library.detail.duration = Duração
 library.detail.version = Versão
@@ -236,7 +236,6 @@ library.sidebar.ascending = Crescente
 library.sidebar.descending = Decrescente
 library.sidebar.insights_matchup = Winrate por matchup
 library.sidebar.insights_maps = Mapas mais jogados
-library.sidebar.toggle_tooltip = Mostrar/ocultar filtros
 library.filter.clear_all = Limpar filtros
 library.related.menu.title = Encontrar relacionados
 library.related.menu.vs_opponent = Jogos contra {name}
