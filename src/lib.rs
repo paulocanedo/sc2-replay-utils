@@ -84,6 +84,8 @@ mod tokens;
 mod widgets;
 #[path = "gui/replay_state.rs"]
 mod replay_state;
+#[path = "gui/load_progress.rs"]
+mod load_progress;
 #[path = "gui/ui_settings.rs"]
 mod ui_settings;
 #[path = "gui/locale.rs"]

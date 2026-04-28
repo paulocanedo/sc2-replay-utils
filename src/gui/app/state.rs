@@ -166,6 +166,16 @@ pub struct AppState {
     /// o primeiro render pós-load, que resolve pelo nickname do usuário
     /// (cai em 0 se não houver match). Resetado a cada novo replay.
     pub insights_pov: Option<usize>,
+    /// Carga de replay em andamento numa thread de background. `Some`
+    /// enquanto o worker estiver vivo; `None` quando ocioso. Drenado
+    /// frame a frame em `poll_load`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub load_in_flight: Option<crate::load_progress::LoadHandle>,
+    /// Geração monotônica do load atual. Cresce a cada `load_path`;
+    /// uma worker thread "antiga" continua viva mas seu `Sender` fica
+    /// órfão quando `load_in_flight` é substituído (drop do Receiver).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub load_generation: u64,
 }
 
 impl AppState {
@@ -228,6 +238,10 @@ impl AppState {
             timeline_experimental_dismissed_session: false,
             insights_experimental_dismissed_session: false,
             insights_pov: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            load_in_flight: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            load_generation: 0,
         };
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -311,10 +325,10 @@ impl AppState {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn try_load_latest(&mut self) {
+    pub(super) fn try_load_latest(&mut self, ctx: &Context) {
         // Se o scanner já rodou, usa o resultado dele (sem I/O extra).
         if let Some(p) = self.library.scan_latest.clone() {
-            self.load_path(p);
+            self.load_path(p, ctx);
             return;
         }
         let lang = self.config.language;
@@ -323,7 +337,7 @@ impl AppState {
             return;
         };
         match crate::utils::find_latest_replay(&dir) {
-            Some(p) => self.load_path(p),
+            Some(p) => self.load_path(p, ctx),
             None => self.set_toast(tf(
                 "toast.no_replays_found",
                 lang,
@@ -332,19 +346,110 @@ impl AppState {
         }
     }
 
+    /// Spawna uma thread one-shot para carregar o replay em background
+    /// e devolve imediatamente. A thread emite `LoadProgress::Stage(...)`
+    /// para a status bar e termina com `Done`/`Failed`. O frame loop
+    /// drena o canal em `poll_load` e plugga o resultado em `loaded`.
+    ///
+    /// Concorrência (substituir): se já houver uma carga em andamento,
+    /// ela é simplesmente substituída — o `Receiver` antigo é dropado e
+    /// a thread antiga, ao terminar, encontra o `Sender` órfão; suas
+    /// mensagens são silenciosamente descartadas.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn load_path(&mut self, p: PathBuf) {
+    pub(super) fn load_path(&mut self, p: PathBuf, ctx: &Context) {
+        use crate::load_progress::{LoadHandle, LoadProgress, LoadStage};
+
         let max_time = self.config.default_max_time;
-        let lang = self.config.language;
-        match LoadedReplay::load(&p, max_time) {
-            Ok(r) => self.adopt_loaded(r),
-            Err(e) => {
-                self.load_error = Some(tf(
-                    "error.load_failed",
-                    lang,
-                    &[("path", &p.display().to_string()), ("err", &e.to_string())],
-                ));
+        self.load_generation = self.load_generation.wrapping_add(1);
+        let generation = self.load_generation;
+        let (tx, rx) = std::sync::mpsc::channel::<LoadProgress>();
+        let file_name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        self.load_in_flight = Some(LoadHandle {
+            generation,
+            file_name: file_name.clone(),
+            current_stage: LoadStage::ReadingFile,
+            rx,
+        });
+        // Limpa o erro anterior — se este load falhar, será reposto;
+        // se der certo, `adopt_loaded` mantém limpo.
+        self.load_error = None;
+
+        let ctx_thread = ctx.clone();
+        let path_thread = p.clone();
+        std::thread::spawn(move || {
+            let tx_stage = tx.clone();
+            let ctx_stage = ctx_thread.clone();
+            let mut on_stage = move |stage: LoadStage| {
+                let _ = tx_stage.send(LoadProgress::Stage(stage));
+                ctx_stage.request_repaint();
+            };
+            let result =
+                LoadedReplay::load_with_progress(&path_thread, max_time, &mut on_stage);
+            match result {
+                Ok(r) => {
+                    let _ = tx.send(LoadProgress::Done(Box::new(r)));
+                }
+                Err(e) => {
+                    let _ = tx.send(LoadProgress::Failed(e));
+                }
             }
+            ctx_thread.request_repaint();
+        });
+    }
+
+    /// Drena o canal da carga em andamento e atualiza `load_in_flight`,
+    /// `loaded` e `load_error`. Chamado uma vez por frame em `app/mod.rs`.
+    /// Mantém o repaint vivo enquanto o worker não terminou — sem isso,
+    /// uma etapa muito longa (ex.: tracker decoding) deixaria o egui
+    /// dormir entre as mensagens do canal.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn poll_load(&mut self, ctx: &Context) {
+        use crate::load_progress::LoadProgress;
+
+        let Some(handle) = self.load_in_flight.as_mut() else {
+            return;
+        };
+        let lang = self.config.language;
+        let mut finished = false;
+        loop {
+            match handle.rx.try_recv() {
+                Ok(LoadProgress::Stage(s)) => {
+                    handle.current_stage = s;
+                }
+                Ok(LoadProgress::Done(replay)) => {
+                    self.adopt_loaded(*replay);
+                    finished = true;
+                    break;
+                }
+                Ok(LoadProgress::Failed(err)) => {
+                    let path_label = handle.file_name.clone();
+                    self.load_error = Some(tf(
+                        "error.load_failed",
+                        lang,
+                        &[("path", &path_label), ("err", &err)],
+                    ));
+                    finished = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Worker terminou sem enviar Done/Failed — improvável,
+                    // mas por defesa: limpamos o handle e seguimos.
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            self.load_in_flight = None;
+        } else {
+            // Fallback de keep-alive: a etapa de tracker pode demorar
+            // segundos sem emitir nada. Mesmo padrão de `library::keep_alive`.
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
     }
 
@@ -463,20 +568,12 @@ impl AppState {
             let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
 
             if self.config.auto_load_on_new_replay {
-                self.load_path(path.clone());
-                // load_path pode ter falhado (replay corrompido, não-1v1…).
-                // Só derivamos meta quando o LoadedReplay atual é
-                // exatamente este path — caso contrário caímos no
-                // ingest_pending para que o pool da biblioteca tente.
-                let derived = self
-                    .loaded
-                    .as_ref()
-                    .filter(|l| l.path == path)
-                    .and_then(|l| build_ingest_meta(l, self.config.default_max_time));
-                match derived {
-                    Some(meta) => self.library.ingest_parsed(path.clone(), mtime, meta),
-                    None => self.library.ingest_pending(path.clone(), mtime),
-                }
+                self.load_path(path.clone(), ctx);
+                // O load roda em background; ainda não temos `LoadedReplay`
+                // para derivar meta da biblioteca. Empurra como pending —
+                // o pool da biblioteca parseia o header em paralelo
+                // (custo desprezível, max_time=1).
+                self.library.ingest_pending(path.clone(), mtime);
                 self.set_toast(tf(
                     "toast.new_replay_loaded",
                     lang,

@@ -22,7 +22,7 @@ impl AppState {
                         .add_filter(t("dialog.filter.sc2_replay", lang), &["SC2Replay"])
                         .pick_file()
                     {
-                        self.load_path(p);
+                        self.load_path(p, &ctx);
                     }
                     #[cfg(target_arch = "wasm32")]
                     self.spawn_file_pick(&ctx);
@@ -30,7 +30,7 @@ impl AppState {
                 #[cfg(not(target_arch = "wasm32"))]
                 if ui.button(t("menu.file.load_latest", lang)).clicked() {
                     ui.close();
-                    self.try_load_latest();
+                    self.try_load_latest(&ctx);
                 }
 
                 #[cfg(not(target_arch = "wasm32"))]

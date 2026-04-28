@@ -12,6 +12,7 @@ use std::path::Path;
 use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
+use crate::load_progress::LoadStage;
 use crate::map_image::MapImage;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::map_image;
@@ -60,15 +61,33 @@ impl LoadedReplay {
     /// parsing/extraction work to `from_bytes`, then attempts the minimap
     /// lookup (which requires the local Battle.net Cache and is therefore
     /// native-only).
+    ///
+    /// Wrapper sem progress reporting — usado em tests e em fluxos
+    /// (improváveis) que não precisam do feedback. O caminho real da
+    /// GUI é `load_with_progress`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path, max_time: u32) -> Result<Self, String> {
+        Self::load_with_progress(path, max_time, &mut |_| {})
+    }
+
+    /// Igual a `load`, mas reporta `LoadStage` para um callback antes
+    /// de cada bloco de trabalho (read file → parse → extract features
+    /// → load minimap). Usado pelo loader em background.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_with_progress(
+        path: &Path,
+        max_time: u32,
+        on_stage: &mut dyn FnMut(LoadStage),
+    ) -> Result<Self, String> {
+        on_stage(LoadStage::ReadingFile);
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         let file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let mut me = Self::from_bytes(file_name, &bytes, max_time)?;
+        let mut me = Self::from_bytes_with_progress(file_name, &bytes, max_time, on_stage)?;
         me.path = path.to_path_buf();
+        on_stage(LoadStage::LoadingMinimap);
         me.map_image = match map_image::load_for_replay(&me.timeline.map, &me.timeline.cache_handles)
         {
             Ok(img) => Some(img),
@@ -85,7 +104,19 @@ impl LoadedReplay {
     /// to resolve the minimap — that requires the local Battle.net Cache
     /// and is the caller's responsibility on native.
     pub fn from_bytes(file_name: String, bytes: &[u8], max_time: u32) -> Result<Self, String> {
-        let timeline = replay::parse_replay_from_bytes(&file_name, bytes, max_time)?;
+        Self::from_bytes_with_progress(file_name, bytes, max_time, &mut |_| {})
+    }
+
+    /// Igual a `from_bytes`, mas reporta `LoadStage` ao callback.
+    pub fn from_bytes_with_progress(
+        file_name: String,
+        bytes: &[u8],
+        max_time: u32,
+        on_stage: &mut dyn FnMut(LoadStage),
+    ) -> Result<Self, String> {
+        let timeline = replay::parse_replay_from_bytes_with_progress(
+            &file_name, bytes, max_time, on_stage,
+        )?;
 
         // O app só suporta 1v1. Rejeitamos aqui também (além do filtro
         // da biblioteca) para cobrir carregamentos diretos via diálogo
@@ -97,6 +128,7 @@ impl LoadedReplay {
             ));
         }
 
+        on_stage(LoadStage::ExtractingFeatures);
         let build_order = match build_order::extract_build_order(&timeline) {
             Ok(v) => Some(v),
             Err(e) => {

@@ -108,6 +108,8 @@ impl eframe::App for AppState {
             // biblioteca progrida enquanto o usuário está na tela inicial
             // (populando as sugestões de nickname).
             self.poll_watcher(&ctx);
+            // Drena progresso da carga em andamento (replay em background).
+            self.poll_load(&ctx);
             // Drena resultados do worker da biblioteca.
             if self.library.poll() {
                 ctx.request_repaint();
@@ -169,7 +171,7 @@ impl eframe::App for AppState {
             if self.pending_load_latest && !self.library.scanning {
                 self.pending_load_latest = false;
                 if let Some(path) = self.library.scan_latest.clone() {
-                    self.load_path(path);
+                    self.load_path(path, &ctx);
                 }
             }
 
@@ -243,7 +245,7 @@ impl eframe::App for AppState {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let action = self.show_central(&ctx);
-            self.handle_library_action(action);
+            self.handle_library_action(action, &ctx);
         }
         #[cfg(target_arch = "wasm32")]
         self.show_central(&ctx);

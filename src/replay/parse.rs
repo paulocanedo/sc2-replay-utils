@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::load_progress::LoadStage;
 use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
 use super::types::{PlayerTimeline, ReplayTimeline, Toon};
@@ -32,11 +33,29 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
 /// upload via FileReader) and as the implementation backbone of
 /// `parse_replay`. Bypasses `s2protocol::read_mpq` (which reads from
 /// disk) by calling `s2protocol::parser::parse` on the bytes directly.
+///
+/// Wrapper sem progress reporting — usado pelo scanner da biblioteca
+/// e pelos testes. O loader da GUI usa `parse_replay_from_bytes_with_progress`
+/// para alimentar a status bar.
 pub fn parse_replay_from_bytes(
     file_name: &str,
     bytes: &[u8],
     max_time_seconds: u32,
 ) -> Result<ReplayTimeline, String> {
+    parse_replay_from_bytes_with_progress(file_name, bytes, max_time_seconds, &mut |_| {})
+}
+
+/// Igual a `parse_replay_from_bytes`, mas reporta `LoadStage` para um
+/// callback antes de cada bloco custoso (tracker / game / message).
+/// O fast-path metadata-only (`max_time_seconds == 1`) só emite
+/// `ParsingHeader` — as etapas de decoding são puladas.
+pub fn parse_replay_from_bytes_with_progress(
+    file_name: &str,
+    bytes: &[u8],
+    max_time_seconds: u32,
+    on_stage: &mut dyn FnMut(LoadStage),
+) -> Result<ReplayTimeline, String> {
+    on_stage(LoadStage::ParsingHeader);
     let (_, mpq) = s2protocol::parser::parse(bytes).map_err(|e| format!("{:?}", e))?;
     let (_, header) =
         s2protocol::read_protocol_header(&mpq).map_err(|e| format!("{:?}", e))?;
@@ -188,6 +207,7 @@ pub fn parse_replay_from_bytes(
         (max_time_seconds as f64 * loops_per_second).round() as u32
     };
 
+    on_stage(LoadStage::DecodingTracker);
     let mut index_owner: tracker::IndexOwnerMap = HashMap::new();
     tracker::process_tracker_events(
         file_name,
@@ -214,6 +234,7 @@ pub fn parse_replay_from_bytes(
         &details,
     );
 
+    on_stage(LoadStage::DecodingGame);
     game::process_game_events(
         file_name,
         &mpq,
@@ -225,6 +246,7 @@ pub fn parse_replay_from_bytes(
         max_loops,
     )?;
 
+    on_stage(LoadStage::DecodingMessages);
     message::process_message_events(
         file_name,
         &mpq,
