@@ -17,6 +17,10 @@ use crate::locale::{t, Language};
 use crate::locale::tf;
 use crate::tabs::{self, Tab};
 use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::colors::LABEL_DIM;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::load_progress::LoadHandle;
 
 use super::state::{AppState, Screen};
 
@@ -43,6 +47,14 @@ impl AppState {
                         });
                     });
                 ui.add_space(8.0);
+            }
+
+            // Carga em background: substitui o conteúdo da tela
+            // (Library ou Analysis) por uma tela de loading dedicada.
+            // O `loaded` anterior fica intacto e volta se o load falhar.
+            if let Some(handle) = self.load_in_flight.as_ref() {
+                show_loading_screen(ui, handle, lang);
+                return;
             }
 
             match self.screen {
@@ -156,11 +168,11 @@ impl AppState {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn handle_library_action(&mut self, action: LibraryAction) {
+    pub(super) fn handle_library_action(&mut self, action: LibraryAction, ctx: &egui::Context) {
         let lang = self.config.language;
         match action {
             LibraryAction::None => {}
-            LibraryAction::Load(p) => self.load_path(p),
+            LibraryAction::Load(p) => self.load_path(p, ctx),
             LibraryAction::Select(p) => self.set_library_selection(Some(p)),
             LibraryAction::ClearSelection => self.set_library_selection(None),
             LibraryAction::Refresh => self.refresh_library(),
@@ -190,6 +202,22 @@ impl AppState {
             LibraryAction::CopySelected => self.copy_selected_replays(),
         }
     }
+}
+
+/// Tela de loading dedicada exibida no painel central enquanto um
+/// replay está sendo carregado em background. Mostra o nome do arquivo
+/// e a etapa atual (a mesma chave de locale que a status bar).
+#[cfg(not(target_arch = "wasm32"))]
+fn show_loading_screen(ui: &mut egui::Ui, handle: &LoadHandle, lang: Language) {
+    let stage_label = t(handle.current_stage.locale_key(), lang);
+    ui.add_space(SPACE_XXL * 2.0);
+    ui.vertical_centered(|ui| {
+        ui.add(egui::Spinner::new().size(32.0));
+        ui.add_space(SPACE_M);
+        ui.monospace(&handle.file_name);
+        ui.add_space(SPACE_S);
+        ui.label(RichText::new(stage_label).italics().color(LABEL_DIM));
+    });
 }
 
 fn empty_state(ui: &mut egui::Ui, lang: Language) {
