@@ -47,24 +47,22 @@ impl AppState {
 
             match self.screen {
                 Screen::Library => {
-                    if self.library_sidebar_open {
-                        let mut side_action = LibraryAction::None;
-                        egui::Panel::left("library_filters")
-                            .resizable(false)
-                            .exact_size(260.0)
-                            .show_inside(ui, |ui| {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    side_action = library::show_sidebar(
-                                        ui,
-                                        &mut self.library_filter,
-                                        self.library.stats(),
-                                        &self.config,
-                                    );
-                                });
+                    let mut side_action = LibraryAction::None;
+                    egui::Panel::left("library_filters")
+                        .resizable(false)
+                        .exact_size(260.0)
+                        .show_inside(ui, |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                side_action = library::show_sidebar(
+                                    ui,
+                                    &mut self.library_filter,
+                                    self.library.stats(),
+                                    &self.config,
+                                );
                             });
-                        if !matches!(side_action, LibraryAction::None) {
-                            library_action = side_action;
-                        }
+                        });
+                    if !matches!(side_action, LibraryAction::None) {
+                        library_action = side_action;
                     }
                     // Hero (KPI strip) no topo — renderizado num
                     // `Panel::top` para ocupar 100% da largura à direita

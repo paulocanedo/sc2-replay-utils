@@ -229,7 +229,8 @@ impl eframe::App for AppState {
         //
         // The eframe-provided `ui` above is only used for modals / ctx
         // extraction; we deliberately do NOT nest panels inside it.
-        self.show_menu_bar(&ctx);
+        // The hamburger ☰ that used to live here is rendered as the
+        // leftmost widget of each topbar — see `topbar.rs`.
 
         match self.screen {
             #[cfg(not(target_arch = "wasm32"))]
