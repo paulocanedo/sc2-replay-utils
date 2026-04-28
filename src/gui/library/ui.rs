@@ -139,6 +139,7 @@ pub fn show(
         );
     } else {
         let pending = library.pending_count();
+        let enriching = library.enrichment_in_flight_count();
         if pending > 0 {
             ui.small(tf(
                 "library.parsing",
@@ -148,6 +149,16 @@ pub fn show(
                     ("total", &library.entries.len().to_string()),
                 ],
             ));
+        } else if enriching > 0 {
+            ui.small(
+                RichText::new(tf(
+                    "library.enriching",
+                    lang,
+                    &[("remaining", &enriching.to_string())],
+                ))
+                .italics()
+                .color(Color32::from_gray(160)),
+            );
         }
     }
 
@@ -457,5 +468,9 @@ pub fn keep_alive(ctx: &Context, library: &ReplayLibrary) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     } else if library.pending_count() > 0 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    } else if library.enrichment_in_flight_count() > 0 {
+        // Enriquecimento é "best effort" lento — repaint mais espaçado
+        // só pra atualizar o contador visível na status bar / header.
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 }

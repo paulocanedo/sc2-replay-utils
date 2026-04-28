@@ -434,7 +434,7 @@ fn opening_row(
     config: &crate::config::AppConfig,
     lang: Language,
 ) {
-    let opening = p.opening.as_deref().unwrap_or("—");
+    let opening = p.opening.as_classified().unwrap_or("—");
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = SPACE_XS;
         ui.label(

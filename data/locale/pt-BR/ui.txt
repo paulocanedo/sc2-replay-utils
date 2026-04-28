@@ -89,6 +89,7 @@ status.library.count = {total} replays
 status.library.filtered = {total} replays · {shown} exibidos
 status.library.scanning = Escaneando… ({found} encontrados)
 status.library.parsing = Parseando {pending}/{total}
+status.library.enriching = {total} replays · classificando aberturas ({remaining})
 
 # ── Barra superior da análise (chrome da partida acima das abas) ────────────
 topbar.back_tooltip = Voltar à biblioteca
@@ -174,6 +175,7 @@ library.date.this_week = Esta semana
 library.date.this_month = Este mês
 library.scanning = 🔍 varrendo pasta… {found} encontrados
 library.parsing = 🔄 {pending}/{total} lendo metadados…
+library.enriching = 🧠 classificando aberturas… {remaining} restantes
 library.setup_hint = Defina um 'Diretório de trabalho' (botão 📂 acima ou em Configurações) para listar seus replays aqui.
 library.no_match = Nenhum replay corresponde ao filtro.
 library.filter_status = 🔎 {shown}/{total} correspondem ao filtro
