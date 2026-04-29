@@ -21,7 +21,10 @@ use crate::replay::{
 use super::classify::{intern_unit_name, is_target_unit, lane_canonical};
 use super::morph::{is_morph_died, is_morph_finish, is_pure_morph_finish, morph_build_loops, morph_old_type};
 use super::resolve::{consume_producer_cmd, merge_continuous, resolve_producer};
-use super::terran::resolve_addon_parent;
+use super::terran::{
+    resolve_addon_parent_by_exact_offset, resolve_addon_parent_by_proximity,
+    resolve_addon_parent_via_cmd,
+};
 use super::types::{BlockKind, LaneMode, PlayerProductionLanes, ProductionBlock, StructureLane};
 
 pub(super) fn extract_player(
@@ -52,6 +55,12 @@ pub(super) fn extract_player(
         }
     }
     let mut consumed = vec![false; player.production_cmds.len()];
+    // `consumed` separado para resolução de parent de addon via cmd —
+    // são cmds com ability = nome literal do addon (ex.
+    // "BarracksReactor"), distintos dos cmds de Train consumidos por
+    // `consumed`. Manter dois Vecs evita interferência entre as duas
+    // pipelines de pareamento.
+    let mut addon_cmd_consumed = vec![false; player.production_cmds.len()];
 
     // Last finish loop por creator_tag. Cada unidade pareada começa em
     // `max(cmd_loop, last_finish)` para herdar a semântica de fila do
@@ -65,11 +74,30 @@ pub(super) fn extract_player(
         match ev.kind {
             EntityEventKind::ProductionStarted => {
                 let new_type = ev.entity_type.as_str();
+                let morphed_from = morph_old_type(events, i);
+
+                // Land detection: estrutura voadora (`*Flying`) virou de
+                // volta uma estrutura grounded. Atualiza `pos_x/pos_y` da
+                // lane para refletir onde ela está agora — sem isso, a
+                // posição congelada no born_loop fica obsoleta após
+                // qualquer relocate, contaminando a resolução de parent
+                // de addon (offset esperado +3,0) e o fallback de
+                // proximidade do `resolve_by_proximity`. O lift inverso
+                // (`canonical → *Flying`) não importa para nós: enquanto
+                // a estrutura voa ela não produz nem ganha addons.
+                if let Some(old_type) = morphed_from {
+                    if old_type.ends_with("Flying") {
+                        if let Some(lane) = lanes_by_tag.get_mut(&ev.tag) {
+                            lane.pos_x = ev.pos_x;
+                            lane.pos_y = ev.pos_y;
+                        }
+                    }
+                }
 
                 // Morph in-place de estrutura — atualiza canonical_type
                 // ou emite bloco Morphing impeditivo (CC→Orbital/PF).
                 if let Some(new_canonical) = lane_canonical(new_type, mode) {
-                    if let Some(old_type) = morph_old_type(events, i) {
+                    if let Some(old_type) = morphed_from {
                         if lane_canonical(old_type, mode).is_some() {
                             if let Some(lane) = lanes_by_tag.get_mut(&ev.tag) {
                                 let is_impeditive_morph = matches!(
@@ -114,21 +142,72 @@ pub(super) fn extract_player(
                 }
 
                 // Modo Army Terran: addon começou. Abre janela.
-                // O `UnitInitEvent` não carrega creator no protocolo —
-                // `ev.creator_tag` é sempre `None` para Reactor/TechLab.
-                // Caímos em proximidade espacial: addons ficam colados
-                // na estrutura-mãe, então a Barracks/Factory/Starport
-                // viva mais próxima é virtualmente sempre a certa.
-                if mode == LaneMode::Army && is_incapacitating_addon(new_type) {
-                    let parent = ev.creator_tag.or_else(|| {
-                        resolve_addon_parent(
-                            new_type,
-                            ev.pos_x,
-                            ev.pos_y,
-                            ev.game_loop,
-                            &lanes_by_tag,
-                        )
-                    });
+                //
+                // Distingue construção real (UnitInit, sem morph
+                // antecedente) de SWAP de owner (UnitTypeChange via
+                // lift+land de outra estrutura no mesmo addon, ex.
+                // BarracksReactor → FactoryReactor quando o player
+                // decola a Barracks e pousa Factory no mesmo Reactor).
+                // Apenas a construção emite `Impeded` — swap não tem
+                // janela impeditiva (o addon já existe e está pronto).
+                //
+                // Resolução de parent em quatro etapas, em ordem de
+                // confiabilidade decrescente:
+                //   1. `creator_tag` do evento (sempre `None` para
+                //      addons no s2protocol — UnitInitEvent não tem o
+                //      campo — mas mantido na cascata por simetria).
+                //   2. **Offset exato (+3, 0)**: lane do tipo certo
+                //      em `(addon.x - 3, addon.y)` exato. Determinístico
+                //      quando todas as posições estão atualizadas (C),
+                //      e crucial para distinguir entre múltiplas
+                //      Barracks adjacentes — cada addon tem exatamente
+                //      um parent no offset físico canônico.
+                //   3. Cmd matching: como FALLBACK, não primary. Cmd
+                //      é não-confiável quando o player tem control
+                //      group de várias estruturas e emite Build_Addon
+                //      (SC2 despacha pra múltiplas mas o cmd só
+                //      registra `selection.active()[0]`); usar cmd
+                //      como primary atribui múltiplos addons à mesma
+                //      Barracks. Geometria pelo offset físico é mais
+                //      robusta nesse caso.
+                //   4. Proximidade pura por `d²`: last resort, caso
+                //      offset exato e cmd ambos falhem (geometria
+                //      atípica, ou posição da lane ainda stale por
+                //      lift/land não rastreado).
+                let is_swap = morphed_from.is_some();
+                if mode == LaneMode::Army
+                    && is_incapacitating_addon(new_type)
+                    && !is_swap
+                {
+                    let parent = ev
+                        .creator_tag
+                        .or_else(|| {
+                            resolve_addon_parent_by_exact_offset(
+                                new_type,
+                                ev.pos_x,
+                                ev.pos_y,
+                                ev.game_loop,
+                                &lanes_by_tag,
+                            )
+                        })
+                        .or_else(|| {
+                            resolve_addon_parent_via_cmd(
+                                &player.production_cmds,
+                                &mut addon_cmd_consumed,
+                                new_type,
+                                ev.game_loop,
+                                &lanes_by_tag,
+                            )
+                        })
+                        .or_else(|| {
+                            resolve_addon_parent_by_proximity(
+                                new_type,
+                                ev.pos_x,
+                                ev.pos_y,
+                                ev.game_loop,
+                                &lanes_by_tag,
+                            )
+                        });
                     if let Some(parent) = parent {
                         if let Some(name) = intern_unit_name(new_type) {
                             pending_addon.insert(ev.tag, (parent, ev.game_loop, name));
@@ -223,7 +302,7 @@ pub(super) fn extract_player(
                             )
                         });
 
-                        let start_loop = if let Some(ct) = creator_tag {
+                        let raw_start = if let Some(ct) = creator_tag {
                             let prev = last_finish_by_creator.get(&ct).copied().unwrap_or(0);
                             let start = match cmd_loop {
                                 Some(c) => c.max(prev),
@@ -235,13 +314,46 @@ pub(super) fn extract_player(
                             finish_loop.saturating_sub(bt_fallback)
                         };
 
-                        if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
-                            lane.blocks.push(ProductionBlock {
-                                start_loop,
-                                end_loop: finish_loop,
-                                kind: BlockKind::Producing,
-                                produced_type: intern_unit_name(new_type),
-                            });
+                        // Empurra `start_loop` para depois de qualquer
+                        // bloco `Morphing`/`Impeded` da mesma lane que
+                        // sobreponha a janela [raw_start, finish_loop].
+                        // Em SC2 o jogador pode ENFILEIRAR um Train cmd
+                        // enquanto a estrutura está construindo addon
+                        // (Reactor/TechLab) ou morphando (CC→Orbital);
+                        // o cmd entra em `production_cmds` no instante
+                        // do clique, mas o treino real só começa quando
+                        // a janela impeditiva termina. Sem este ajuste
+                        // o bloco `Producing` aparece sobreposto com o
+                        // `Impeded`/`Morphing`, dando a impressão de
+                        // que a estrutura produzia duas coisas ao mesmo
+                        // tempo. Build_order continua usando o cmd_loop
+                        // raw (visualização diferente, intencional).
+                        let start_loop = if let Some(lane) = lanes_by_tag.get(&lane_tag) {
+                            let mut s = raw_start;
+                            for b in &lane.blocks {
+                                if matches!(
+                                    b.kind,
+                                    BlockKind::Morphing | BlockKind::Impeded
+                                ) && b.end_loop > s
+                                    && b.start_loop < finish_loop
+                                {
+                                    s = s.max(b.end_loop);
+                                }
+                            }
+                            s.min(finish_loop)
+                        } else {
+                            raw_start
+                        };
+
+                        if start_loop < finish_loop {
+                            if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
+                                lane.blocks.push(ProductionBlock {
+                                    start_loop,
+                                    end_loop: finish_loop,
+                                    kind: BlockKind::Producing,
+                                    produced_type: intern_unit_name(new_type),
+                                });
+                            }
                         }
                     }
                 }

@@ -26,6 +26,9 @@ mod worker_potential;
 mod production_lanes;
 mod utils;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod debug_addons;
+
 // ── map_image: native real, wasm type stub ──
 //
 // `MapImage` is referenced as `Option<MapImage>` field type in

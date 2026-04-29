@@ -7,13 +7,22 @@ use crate::replay::{EntityEvent, EntityEventKind, ProductionCmd};
 
 use super::types::{LaneMode, ProductionBlock, StructureLane, CONTINUITY_TOLERANCE_LOOPS};
 
-/// Procura o primeiro cmd não-consumido emitido pelo `producer_tag`
-/// cuja `ability` bate com `action` E cujo `game_loop` satisfaz a
-/// constraint de causalidade `cmd_loop <= max_cmd_loop`. Idêntico ao
-/// helper homônimo em `build_order::extract` — manter as duas
-/// pipelines com a mesma lógica de pareamento garante que o gráfico de
-/// produção e a aba de build order mostrem o mesmo conjunto de eventos
-/// pareados aos mesmos cmds.
+/// Procura o cmd não-consumido emitido pelo `producer_tag` cuja
+/// `ability` bate com `action` E cujo `game_loop` satisfaz a constraint
+/// de causalidade `cmd_loop <= max_cmd_loop`. Quando há múltiplos
+/// candidatos, escolhe o **mais recente** (maior `game_loop`) — é o
+/// que tem maior probabilidade de ter realmente produzido a unidade
+/// concluída em `finish_loop`. Cmds "fantasma" mais antigos (cliques
+/// cancelados, double-clicks, queue cheia) ficam não-consumidos e não
+/// poluem a atribuição de produções subsequentes.
+///
+/// **Nota**: a versão homônima em `build_order::extract` faz FIFO
+/// (primeiro cmd válido). As duas pipelines não compartilham este
+/// helper deliberadamente — o build_order mostra o **clique** do
+/// jogador (semântica de input do player), enquanto o
+/// `production_lanes` mostra o **trabalho efetivo** da estrutura
+/// (semântica de timing visual). Cmds fantasma representados em
+/// build_order não devem mover blocos do gráfico para o passado.
 pub(super) fn consume_producer_cmd(
     by_producer: &HashMap<i64, Vec<usize>>,
     consumed: &mut [bool],
@@ -23,6 +32,11 @@ pub(super) fn consume_producer_cmd(
     max_cmd_loop: u32,
 ) -> Option<u32> {
     let queue = by_producer.get(&producer_tag)?;
+    // Queue está em ordem cronológica (insertion order via iteração
+    // sequencial sobre `production_cmds`, que já vem ordenado por
+    // game_loop). Iteramos até bater no primeiro cmd > max_cmd_loop
+    // e retornamos o ÚLTIMO válido visto até lá.
+    let mut last_valid: Option<usize> = None;
     for &i in queue {
         if consumed[i] {
             continue;
@@ -33,6 +47,9 @@ pub(super) fn consume_producer_cmd(
         if cmds[i].game_loop > max_cmd_loop {
             break;
         }
+        last_valid = Some(i);
+    }
+    if let Some(i) = last_valid {
         consumed[i] = true;
         return Some(cmds[i].game_loop);
     }
