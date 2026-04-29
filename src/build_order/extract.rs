@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 
+use s2protocol::tracker_events::unit_tag_index;
+
 use crate::balance_data::build_time_loops;
 use crate::replay::{
     EntityCategory, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
@@ -51,9 +53,37 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     // morreu depois — não afeta o outcome do build order, então é
     // ignorado deliberadamente.
     let mut cancel_by_tag: HashMap<i64, (u32, Option<u8>)> = HashMap::new();
+    // Index tag → entity_type. Construído a partir de qualquer evento
+    // do tracker (ProductionStarted/Finished) que reveste a tag com seu
+    // tipo. Usado para resolver `creator_tag` em "Barracks", "Larva",
+    // "Forge" etc. ao montar o `producer_type` da entry.
+    let mut tag_to_type: HashMap<i64, String> = HashMap::new();
+    // ID sequencial 1-based por tipo, atribuído na primeira vez que
+    // cada `tag` aparece. Permite distinguir "Barracks #1" de
+    // "Barracks #2" no display do produtor. A iteração é feita na
+    // mesma ordem cronológica de `entity_events` (tracker.rs já
+    // garante essa ordem), então a numeração reflete a ordem em que
+    // o jogador construiu/recebeu os produtores.
+    let mut tag_to_producer_id: HashMap<i64, u32> = HashMap::new();
+    let mut next_id_per_type: HashMap<String, u32> = HashMap::new();
+    // Index → producer_id, usado por injects (que carregam só o
+    // `target_tag_index`, sem recycle). Last-write-wins na ordem
+    // cronológica — se o `unit_tag_index` for reciclado, a entrada
+    // mais recente prevalece, que é o estado plausível no momento do
+    // inject (que sempre vem depois da estrutura nascer).
+    let mut index_to_producer_id: HashMap<u32, u32> = HashMap::new();
     for ev in &player.entity_events {
         if ev.kind == EntityEventKind::ProductionCancelled {
             cancel_by_tag.insert(ev.tag, (ev.game_loop, ev.killer_player_id));
+        }
+        if !tag_to_type.contains_key(&ev.tag) {
+            tag_to_type.insert(ev.tag, ev.entity_type.clone());
+            let counter = next_id_per_type
+                .entry(ev.entity_type.clone())
+                .or_insert(0);
+            *counter += 1;
+            tag_to_producer_id.insert(ev.tag, *counter);
+            index_to_producer_id.insert(unit_tag_index(ev.tag), *counter);
         }
     }
 
@@ -275,6 +305,20 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             0
         };
 
+        // Producer: para Trains/Morphs (e par paralelo) o `creator_tag`
+        // aponta diretamente pra estrutura/Larva produtora; UnitInit
+        // (warp-in / construção via worker) e fallbacks ficam sem
+        // producer rastreado — ver "trabalho futuro" no plano de design.
+        let (producer_type, producer_id) = if from_unit_init {
+            (None, None)
+        } else {
+            let t_ = ev.creator_tag.and_then(|t| tag_to_type.get(&t).cloned());
+            let id = ev
+                .creator_tag
+                .and_then(|t| tag_to_producer_id.get(&t).copied());
+            (t_, id)
+        };
+
         raw.push(BuildOrderEntry {
             supply,
             supply_made,
@@ -287,6 +331,8 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             is_structure,
             outcome,
             chrono_boosts,
+            producer_type,
+            producer_id,
         });
     }
 
@@ -303,16 +349,23 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         let finish_loop = u.game_loop;
         let expected_bt = build_time_loops(&u.name, base_build);
         let max_cmd = finish_loop.saturating_sub(expected_bt / 2);
-        let cmd_loop =
+        let cmd_match =
             consume_global_cmd(&mut consumed, &player.production_cmds, &u.name, max_cmd);
-        let start_loop =
-            cmd_loop.unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
-        let chrono_boosts = if player.race == "Protoss" && cmd_loop.is_some() {
+        let start_loop = cmd_match
+            .map(|(loop_, _)| loop_)
+            .unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
+        let chrono_boosts = if player.race == "Protoss" && cmd_match.is_some() {
             let actual_bt = finish_loop.saturating_sub(start_loop);
             estimate_chrono_count(expected_bt, actual_bt)
         } else {
             0
         };
+        // Producer da pesquisa: tag candidato no `producer_tags[0]` do
+        // cmd consumido (estrutura selecionada no momento do click).
+        // Resolvemos via `tag_to_type` para algo como "Forge", "EngBay".
+        let producer_tag = cmd_match.and_then(|(_, tag)| tag);
+        let producer_type = producer_tag.and_then(|t| tag_to_type.get(&t).cloned());
+        let producer_id = producer_tag.and_then(|t| tag_to_producer_id.get(&t).copied());
         let (supply, supply_made) = supply_at(player, start_loop);
         raw.push(BuildOrderEntry {
             supply,
@@ -328,6 +381,8 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             // só emite o evento quando o research conclui).
             outcome: EntryOutcome::Completed,
             chrono_boosts,
+            producer_type,
+            producer_id,
         });
     }
 
@@ -336,21 +391,36 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     // string pra permitir distinguir bases diferentes na UI.
     for inject in &player.inject_cmds {
         let (supply, supply_made) = supply_at(player, inject.game_loop);
+        // Resolve a Hatchery/Lair/Hive alvo pelo `target_tag_index` →
+        // `producer_id`. Quando achamos o ID, codificamos no action
+        // como `InjectLarva@Hatchery#N` (preferido, mais conciso e
+        // estável que coordenadas). Caso o índice não esteja no mapa
+        // (eventos faltando ou recycle ambíguo), caímos no formato
+        // antigo com coordenadas para preservar a desambiguação.
+        let target_id = index_to_producer_id.get(&inject.target_tag_index).copied();
+        let action = match target_id {
+            Some(id) => format!("InjectLarva@{}#{}", inject.target_type, id),
+            None => format!(
+                "InjectLarva@{}@{}_{}",
+                inject.target_type, inject.target_x, inject.target_y
+            ),
+        };
         raw.push(BuildOrderEntry {
             supply,
             supply_made,
             game_loop: inject.game_loop,
             finish_loop: inject.game_loop, // ação instantânea
             seq: u32::MAX,
-            action: format!(
-                "InjectLarva@{}@{}_{}",
-                inject.target_type, inject.target_x, inject.target_y
-            ),
+            action,
             count: 1,
             is_upgrade: false,
             is_structure: false,
             outcome: EntryOutcome::Completed,
             chrono_boosts: 0,
+            // Queen produtora ainda não é capturada em inject_cmds —
+            // trabalho futuro.
+            producer_type: None,
+            producer_id: None,
         });
     }
 
@@ -411,13 +481,15 @@ fn consume_producer_cmd(
 /// Match global por nome de ação (sem filtrar por produtor). Usado
 /// para upgrades, que são one-shot e não enfileiram — basta o primeiro
 /// cmd disponível com a ability certa que respeite a mesma constraint
-/// de causalidade `cmd_loop <= max_cmd_loop`.
+/// de causalidade `cmd_loop <= max_cmd_loop`. Retorna o `game_loop` do
+/// cmd e o primeiro `producer_tag` candidato (a estrutura selecionada
+/// no momento do click), quando disponível.
 fn consume_global_cmd(
     consumed: &mut [bool],
     cmds: &[ProductionCmd],
     action: &str,
     max_cmd_loop: u32,
-) -> Option<u32> {
+) -> Option<(u32, Option<i64>)> {
     for (i, cmd) in cmds.iter().enumerate() {
         if consumed[i] {
             continue;
@@ -429,7 +501,7 @@ fn consume_global_cmd(
             continue;
         }
         consumed[i] = true;
-        return Some(cmd.game_loop);
+        return Some((cmd.game_loop, cmd.producer_tags.first().copied()));
     }
     None
 }
@@ -504,6 +576,11 @@ fn supply_at(player: &PlayerTimeline, loop_: u32) -> (u16, u16) {
 /// incrementado. Só funde se o **outcome** também for igual — um
 /// SupplyDepot cancelado seguido de um SupplyDepot que completou precisam
 /// aparecer como linhas separadas para que o usuário veja a diferença.
+///
+/// Também só funde quando o **produtor** é o mesmo (mesmo `producer_id`):
+/// duas Marines treinadas em Barracks diferentes no mesmo instante
+/// devem aparecer como linhas separadas, caso contrário a coluna de
+/// produtor mostra só uma das fontes e a outra se perde.
 fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
     let mut out: Vec<BuildOrderEntry> = Vec::new();
     for entry in entries {
@@ -511,6 +588,7 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
             Some(last)
                 if last.action == entry.action
                     && last.outcome == entry.outcome
+                    && last.producer_id == entry.producer_id
                     && !last.action.starts_with("InjectLarva") =>
             {
                 last.count += 1;

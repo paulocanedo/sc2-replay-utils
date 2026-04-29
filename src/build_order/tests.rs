@@ -171,12 +171,12 @@ fn render_golden_csv(player: &PlayerBuildOrder, lps: f64) -> String {
         player.mmr.map(|v| v.to_string()).unwrap_or_else(|| "?".into()),
     ));
     out.push_str(
-        "# columns: start,finish,supply_used,supply_made,kind,action,count,outcome\n",
+        "# columns: start,finish,supply_used,supply_made,kind,action,count,outcome,producer,producer_id\n",
     );
     for entry in &player.entries {
         let kind = classify_entry(entry).short_letter();
         out.push_str(&format!(
-            "{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{}\n",
             format_time(entry.game_loop, lps),
             format_time(entry.finish_loop, lps),
             entry.supply,
@@ -185,6 +185,11 @@ fn render_golden_csv(player: &PlayerBuildOrder, lps: f64) -> String {
             entry.action,
             entry.count,
             entry.outcome.short_letter(),
+            entry.producer_type.as_deref().unwrap_or(""),
+            entry
+                .producer_id
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
         ));
     }
     out
@@ -337,6 +342,48 @@ fn golden_supply_depot_at_0343_is_cancelled_by_player() {
     assert!(
         finish_mmss == "03:44" || finish_mmss == "03:45",
         "finish_loop do depot cancelado deveria estar em 03:44/03:45, veio {finish_mmss}",
+    );
+}
+
+#[test]
+fn inject_action_uses_producer_id_format() {
+    // Replay com Zerg: as entradas de InjectLarva devem codificar a
+    // Hatchery alvo via `#N` (ID sequencial do produtor) no `action`,
+    // permitindo distinguir bases sem depender de coordenadas.
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/serral.SC2Replay");
+    let t = parse_replay(&path, 0).expect("parse");
+    let bo = extract_build_order(&t).expect("bo");
+
+    let zerg = bo
+        .players
+        .iter()
+        .find(|p| p.race == "Zerg")
+        .expect("zerg player");
+    let injects: Vec<&BuildOrderEntry> = zerg
+        .entries
+        .iter()
+        .filter(|e| e.action.starts_with("InjectLarva"))
+        .collect();
+    assert!(
+        !injects.is_empty(),
+        "esperava ao menos um InjectLarva no replay zerg",
+    );
+    let with_id = injects
+        .iter()
+        .filter(|e| {
+            e.action
+                .strip_prefix("InjectLarva@")
+                .map(|rest| rest.contains('#'))
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        with_id > 0,
+        "esperava ao menos um inject com formato `#N` (resolvido via target_tag_index); \
+         viram só {} de {} no formato antigo com coordenadas",
+        injects.len() - with_id,
+        injects.len(),
     );
 }
 
