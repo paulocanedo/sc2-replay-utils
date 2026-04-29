@@ -54,6 +54,8 @@ fn entry(action: &str, loop_secs: f64, supply: u16) -> BuildOrderEntry {
         ),
         outcome: EntryOutcome::Completed,
         chrono_boosts: 0,
+        producer_type: None,
+        producer_id: None,
     }
 }
 

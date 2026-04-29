@@ -383,6 +383,8 @@ mod tests {
                     is_structure: true,
                     outcome: EntryOutcome::Completed,
                     chrono_boosts: 0,
+                    producer_type: None,
+                    producer_id: None,
                 },
             ],
         };

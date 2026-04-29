@@ -75,6 +75,42 @@ impl BuildOrderFilter {
     }
 }
 
+/// Seleção de colunas visíveis no Build Order. `Action` é sempre
+/// exibida (a ação é o conteúdo principal da entrada) e não é
+/// toggleável; o resto pode ser ligado/desligado pelo usuário. O
+/// "copiar para área de trabalho" honra a mesma seleção.
+#[derive(Clone, Copy, Debug)]
+struct BuildOrderColumns {
+    id: bool,
+    start: bool,
+    end: bool,
+    supply: bool,
+    producer: bool,
+}
+
+impl Default for BuildOrderColumns {
+    fn default() -> Self {
+        Self {
+            id: false,
+            start: true,
+            end: true,
+            supply: true,
+            producer: true,
+        }
+    }
+}
+
+impl BuildOrderColumns {
+    /// Total de colunas visíveis (incluindo `action`, sempre on).
+    fn count(&self) -> usize {
+        1 + self.id as usize
+            + self.start as usize
+            + self.end as usize
+            + self.supply as usize
+            + self.producer as usize
+    }
+}
+
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let lang = config.language;
     let Some(bo) = loaded.build_order.as_ref() else {
@@ -111,6 +147,12 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         .ctx()
         .data(|d| d.get_temp::<bool>(icons_id))
         .unwrap_or(true);
+
+    let columns_id = Id::new("bo_columns");
+    let mut columns: BuildOrderColumns = ui
+        .ctx()
+        .data(|d| d.get_temp::<BuildOrderColumns>(columns_id))
+        .unwrap_or_default();
 
     // ── Campo de busca (lupa dentro do input) ────────────────────
     let resp = ui.add_sized(
@@ -168,6 +210,33 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         ui.add_space(SPACE_S);
         toggle_chip_bool(ui, t("build_order.filter.icons", lang), &mut show_icons, None);
         icons_changed = show_icons != prev_icons;
+
+        ui.add_space(SPACE_S);
+        let prev_cols = columns;
+        ui.menu_button(t("build_order.columns.button", lang), |ui| {
+            ui.set_min_width(160.0);
+            ui.checkbox(&mut columns.id, t("build_order.col.id", lang));
+            ui.checkbox(&mut columns.start, t("build_order.col.start", lang));
+            ui.checkbox(&mut columns.end, t("build_order.col.end", lang));
+            ui.checkbox(&mut columns.supply, t("build_order.col.supply", lang));
+            // `Action` é obrigatória: checkbox sempre marcada e
+            // desabilitada, com tooltip explicando o porquê.
+            let mut action_locked = true;
+            ui.add_enabled(
+                false,
+                egui::Checkbox::new(&mut action_locked, t("build_order.col.action", lang)),
+            )
+            .on_hover_text(t("build_order.columns.action_required_tooltip", lang));
+            ui.checkbox(&mut columns.producer, t("build_order.col.producer", lang));
+        });
+        if columns.id != prev_cols.id
+            || columns.start != prev_cols.start
+            || columns.end != prev_cols.end
+            || columns.supply != prev_cols.supply
+            || columns.producer != prev_cols.producer
+        {
+            ui.ctx().data_mut(|d| d.insert_temp(columns_id, columns));
+        }
     });
     if filter_changed {
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
@@ -203,6 +272,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
                     is_user,
                     &query_lower,
                     &filter,
+                    &columns,
                     show_icons,
                     config,
                     lang,
@@ -321,6 +391,7 @@ fn player_column(
     is_user: bool,
     query_lower: &str,
     filter: &BuildOrderFilter,
+    columns: &BuildOrderColumns,
     show_icons: bool,
     config: &AppConfig,
     lang: locale::Language,
@@ -351,7 +422,9 @@ fn player_column(
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if copy_icon_button(ui, t("build_order.copy_tooltip", lang)).clicked() {
-                        let text = format_clipboard_single(player, lps, lang);
+                        let text = format_clipboard_single(
+                            player, lps, columns, filter, query_lower, lang,
+                        );
                         ui.ctx().copy_text(text);
                     }
                     let salt_modal_id = Id::new(format!("salt_modal_{}", index));
@@ -397,15 +470,27 @@ fn player_column(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             Grid::new(format!("bo_grid_{}", index))
-                .num_columns(4)
+                .num_columns(columns.count())
                 .spacing([12.0, 2.0])
                 .min_row_height(row_min_h)
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label(RichText::new(t("build_order.col.start", lang)).small().strong());
-                    ui.label(RichText::new(t("build_order.col.end", lang)).small().strong());
-                    ui.label(RichText::new(t("build_order.col.supply", lang)).small().strong());
+                    if columns.id {
+                        ui.label(RichText::new(t("build_order.col.id", lang)).small().strong());
+                    }
+                    if columns.start {
+                        ui.label(RichText::new(t("build_order.col.start", lang)).small().strong());
+                    }
+                    if columns.end {
+                        ui.label(RichText::new(t("build_order.col.end", lang)).small().strong());
+                    }
+                    if columns.supply {
+                        ui.label(RichText::new(t("build_order.col.supply", lang)).small().strong());
+                    }
                     ui.label(RichText::new(t("build_order.col.action", lang)).small().strong());
+                    if columns.producer {
+                        ui.label(RichText::new(t("build_order.col.producer", lang)).small().strong());
+                    }
                     ui.end_row();
 
                     let mut rendered = 0usize;
@@ -443,19 +528,32 @@ fn player_column(
                         };
                         let strike = outcome != EntryOutcome::Completed;
 
-                        ui.monospace(fmt_time(entry.game_loop, lps));
-                        let mut finish_rt =
-                            RichText::new(fmt_time(entry.finish_loop, lps)).monospace();
-                        if let Some(c) = outcome_tint {
-                            finish_rt = finish_rt.color(c);
+                        // ID sequencial 1-based dentro da lista filtrada
+                        // (mesmo conjunto que o copy emite).
+                        let id_num = rendered + 1;
+
+                        if columns.id {
+                            ui.monospace(format!("{:>3}", id_num));
                         }
-                        ui.label(finish_rt);
+                        if columns.start {
+                            ui.monospace(fmt_time(entry.game_loop, lps));
+                        }
+                        if columns.end {
+                            let mut finish_rt =
+                                RichText::new(fmt_time(entry.finish_loop, lps)).monospace();
+                            if let Some(c) = outcome_tint {
+                                finish_rt = finish_rt.color(c);
+                            }
+                            ui.label(finish_rt);
+                        }
                         // Clampa `supply_made` ao cap visual de 200 (igual ao painel
                         // da Timeline e ao HUD do próprio SC2). O `supply_used` cru
                         // pode estourar transientemente durante morphs/mortes e fica
                         // sem clamp pra deixar o glitch real do tracker visível.
-                        let supply_cap = entry.supply_made.min(200);
-                        ui.monospace(format!("{:>3}/{:<3}", entry.supply, supply_cap));
+                        if columns.supply {
+                            let supply_cap = entry.supply_made.min(200);
+                            ui.monospace(format!("{:>3}/{:<3}", entry.supply, supply_cap));
+                        }
 
                         let action_text = if entry.count > 1 {
                             format!("{} x{}", display_name, entry.count)
@@ -508,6 +606,24 @@ fn player_column(
                             }
                         });
 
+                        if columns.producer {
+                            match entry.producer_type.as_deref() {
+                                Some(t_) => {
+                                    ui.label(
+                                        RichText::new(format_producer(t_, entry.producer_id, lang))
+                                            .weak(),
+                                    );
+                                }
+                                None => {
+                                    ui.label(RichText::new("—").weak())
+                                        .on_hover_text(t(
+                                            "build_order.producer.untracked_tooltip",
+                                            lang,
+                                        ));
+                                }
+                            }
+                        }
+
                         ui.end_row();
                         rendered += 1;
                     }
@@ -537,15 +653,40 @@ fn build_order_icon(action: &str) -> Option<egui::ImageSource<'static>> {
     unit_icon(action).or_else(|| structure_icon(action))
 }
 
-/// Formata o nome de exibição de uma entrada. Para injects, parseia o
-/// formato `InjectLarva@Type@X_Y` e exibe como
-/// "Inject Larva @ Hatchery (45, 67)". Para tudo o mais, delega ao
-/// `locale::localize`.
+/// Formata o produtor para exibição: "Type #N" quando há ID,
+/// só "Type" quando não. Localiza o tipo via `locale::localize`.
+fn format_producer(
+    producer_type: &str,
+    producer_id: Option<u32>,
+    lang: locale::Language,
+) -> String {
+    let label = locale::localize(producer_type, lang);
+    match producer_id {
+        Some(id) => format!("{label} #{id}"),
+        None => label.to_string(),
+    }
+}
+
+/// Formata o nome de exibição de uma entrada. Para injects, parseia
+/// dois formatos possíveis:
+/// - `InjectLarva@Type#N` (preferido) → "Inject Larva @ Hatchery #2"
+/// - `InjectLarva@Type@X_Y` (fallback) → "Inject Larva @ Hatchery (45, 67)"
+///
+/// O caminho `#N` resolve a Hatchery alvo pelo ID sequencial do
+/// produtor, computado em `extract.rs`. O caminho com coordenadas
+/// só é usado quando o `target_tag_index` não pôde ser resolvido —
+/// preserva desambiguação entre bases mesmo sem ID.
+///
+/// Para tudo o mais, delega ao `locale::localize`.
 fn format_display_name(action: &str, lang: locale::Language) -> String {
     if let Some(rest) = action.strip_prefix("InjectLarva@") {
-        // rest = "Hatchery@45_67"
         let inject_label = locale::localize("InjectLarva", lang);
-        if let Some((target_type, coords)) = rest.split_once('@') {
+        if let Some((target_type, id_str)) = rest.split_once('#') {
+            // Formato preferido: "InjectLarva@Hatchery#2"
+            let target_label = locale::localize(target_type, lang);
+            format!("{inject_label} @ {target_label} #{id_str}")
+        } else if let Some((target_type, coords)) = rest.split_once('@') {
+            // Fallback legado: "InjectLarva@Hatchery@45_67"
             let target_label = locale::localize(target_type, lang);
             let coords_display = coords.replace('_', ", ");
             format!("{inject_label} @ {target_label} ({coords_display})")
@@ -582,19 +723,68 @@ fn race_initial(race: &str) -> char {
     }
 }
 
-/// Formata build order de um jogador como texto para clipboard.
-fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::Language) -> String {
+/// Formata o build order de um jogador como texto para clipboard.
+/// Honra `columns` (omite colunas desligadas), `filter` (categorias)
+/// e `query_lower` (busca textual ativa) — o copy emite exatamente o
+/// mesmo conjunto que está visível na tela. O ID na coluna ID é
+/// sequencial 1-based dentro da lista filtrada.
+fn format_clipboard_single(
+    player: &PlayerBuildOrder,
+    lps: f64,
+    columns: &BuildOrderColumns,
+    filter: &BuildOrderFilter,
+    query_lower: &str,
+    lang: locale::Language,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "=== ({}) {} ===\n",
         race_initial(&player.race),
         player.name,
     ));
-    out.push_str(t("build_order.clipboard.header", lang));
+
+    // Header line — montado dinamicamente para refletir as colunas
+    // ativas, com larguras casadas ao formato das linhas de dados.
+    // Os 3 espaços iniciais reservam o slot do indicador de categoria
+    // (W/U/S/R/P/I), que sempre aparece como prefixo de cada linha.
+    let mut header = String::from("   ");
+    if columns.id {
+        header.push_str(&format!("{:>3}  ", t("build_order.col.id", lang)));
+    }
+    if columns.start {
+        header.push_str(&format!("{:>5}  ", t("build_order.col.start", lang)));
+    }
+    if columns.end {
+        header.push_str(&format!("{:>5}  ", t("build_order.col.end", lang)));
+    }
+    if columns.supply {
+        header.push_str(&format!("{:>7}  ", t("build_order.col.supply", lang)));
+    }
+    header.push_str(t("build_order.col.action", lang));
+    if columns.producer {
+        header.push_str("  ");
+        header.push_str(t("build_order.col.producer", lang));
+    }
+    out.push_str(&header);
     out.push('\n');
+
+    // Linhas filtradas. Mesma lógica de filtro+busca do render para
+    // garantir que copy e tela emitam o mesmo conjunto.
+    let mut id_num = 0usize;
     for entry in &player.entries {
         let kind = classify_entry(entry);
+        if !filter.allows(kind) {
+            continue;
+        }
         let display = format_display_name(&entry.action, lang);
+        if !query_lower.is_empty()
+            && !entry.action.to_ascii_lowercase().contains(query_lower)
+            && !display.to_lowercase().contains(query_lower)
+        {
+            continue;
+        }
+        id_num += 1;
+
         let action_text = if entry.count > 1 {
             format!("{} x{}", display, entry.count)
         } else {
@@ -605,16 +795,36 @@ fn format_clipboard_single(player: &PlayerBuildOrder, lps: f64, lang: locale::La
             EntryOutcome::Cancelled => t("build_order.clipboard.cancelled_mark", lang),
             EntryOutcome::DestroyedInProgress => t("build_order.clipboard.destroyed_mark", lang),
         };
-        out.push_str(&format!(
-            "{}     {:>5}  {:>5}  {:>3}/{:<3}  {}{}\n",
-            kind.short_letter(),
-            fmt_time(entry.game_loop, lps),
-            fmt_time(entry.finish_loop, lps),
-            entry.supply,
-            entry.supply_made.min(200),
-            action_text,
-            outcome_mark,
-        ));
+
+        let mut line = format!("{}  ", kind.short_letter());
+        if columns.id {
+            line.push_str(&format!("{:>3}  ", id_num));
+        }
+        if columns.start {
+            line.push_str(&format!("{:>5}  ", fmt_time(entry.game_loop, lps)));
+        }
+        if columns.end {
+            line.push_str(&format!("{:>5}  ", fmt_time(entry.finish_loop, lps)));
+        }
+        if columns.supply {
+            line.push_str(&format!(
+                "{:>3}/{:<3}  ",
+                entry.supply,
+                entry.supply_made.min(200),
+            ));
+        }
+        line.push_str(&action_text);
+        line.push_str(outcome_mark);
+        if columns.producer {
+            let prod_text = entry
+                .producer_type
+                .as_deref()
+                .map(|t_| format_producer(t_, entry.producer_id, lang))
+                .unwrap_or_else(|| "—".to_string());
+            line.push_str(&format!("  ({})", prod_text));
+        }
+        line.push('\n');
+        out.push_str(&line);
     }
     out
 }
