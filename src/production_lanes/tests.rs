@@ -911,46 +911,46 @@ fn army_terran_addon_swap_does_not_emit_extra_impeded_block() {
     );
 }
 
-// ─── Cmd matching (A) ───────────────────────────────────────────────
+// ─── Cmd matching como FALLBACK (não primary) ───────────────────────
 
-/// Duas Barracks vivas; o Reactor poderia geometricamente cair na
-/// errada. O cmd `BarracksReactor` aponta com `producer_tag` para a
-/// Barracks correta. Verificamos que A vence sobre B+nearest.
+/// Cmd matching é fallback secundário — usado quando offset exato não
+/// bate. Cenário: única Barracks viva, mas o addon spawnou em posição
+/// que NÃO bate (+3, 0) — ex. lane com posição ainda stale antes do
+/// land detection capturar relocate. Sem candidato exato, a cascata
+/// recorre ao cmd; se o cmd dá um producer_tag válido, ele resolve.
 #[test]
-fn army_terran_addon_parent_resolved_via_cmd_when_geometry_ambiguous() {
+fn army_terran_addon_uses_cmd_when_no_exact_offset_match() {
     let events = vec![
-        // Barracks-A: parent geometricamente "natural" (offset 3,0).
         ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
-        // Barracks-B: parent que o cmd identifica (offset diferente).
-        ev_at(110, 1, EntityEventKind::ProductionFinished, "Barracks", 2, None, 47, 53),
-        // Reactor em (53, 50): Δ pra A = (3, 0) ✓, Δ pra B = (6, -3) ✗.
-        // Geometria sozinha pegaria A. Cmd diz que producer é B (tag 2).
-        ev_at(200, 2, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
-        ev_at(600, 3, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+        // Reactor em (60, 70) — Δ pra única Barracks = (10, -20), nada de exato (3, 0).
+        // Cmd diz que producer é Barracks tag 1.
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 60, 70),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 60, 70),
     ];
-    let cmds = vec![cmd(200, "BarracksReactor", 2)];
+    let cmds = vec![cmd(200, "BarracksReactor", 1)];
     let p = player_with_events_and_cmds(events, cmds, "Terran");
     let out = extract_player(&p, 0, LaneMode::Army);
 
-    let lane_a = out.lanes.iter().find(|l| l.tag == 1).unwrap();
-    let lane_b = out.lanes.iter().find(|l| l.tag == 2).unwrap();
-    let count = |l: &super::types::StructureLane| {
-        l.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count()
-    };
-    assert_eq!(count(lane_a), 0, "A não deveria receber Impeded — cmd diz que B é o parent");
-    assert_eq!(count(lane_b), 1, "B (cmd's producer_tag) recebe o Impeded");
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    assert_eq!(
+        lane.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count(),
+        1,
+        "sem offset exato, cmd resolve corretamente"
+    );
 }
 
 /// Cmd com `producer_tag` apontando para uma estrutura **morta** ou
-/// inexistente é descartado (cmd órfão); a resolução cai no fallback
-/// geométrico. Sem essa validação, um cmd ruim levaria o Impeded para
-/// uma lane inválida e o block não apareceria em lane nenhuma.
+/// inexistente é descartado (cmd órfão). A cascata pula pra
+/// proximidade. Cenário: addon em geometria atípica (offset não
+/// canônico), cmd inválido — sem essa validação a resolução pararia
+/// num cmd ruim e nenhum Impeded seria emitido.
 #[test]
-fn army_terran_addon_cmd_with_invalid_producer_tag_falls_back_to_geometry() {
+fn army_terran_addon_cmd_with_invalid_producer_tag_falls_through_to_proximity() {
     let events = vec![
         ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
-        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
-        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+        // Addon em (60, 70) — sem offset (+3, 0), proximidade vai cair em B (única).
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 60, 70),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 60, 70),
     ];
     // Cmd com producer_tag=999 (não existe nenhuma lane com esse tag).
     let cmds = vec![cmd(200, "BarracksReactor", 999)];
@@ -961,7 +961,55 @@ fn army_terran_addon_cmd_with_invalid_producer_tag_falls_back_to_geometry() {
     assert_eq!(
         lane.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count(),
         1,
-        "fallback geométrico atribui à única Barracks viva"
+        "cmd inválido descartado, proximidade pega a única Barracks"
+    );
+}
+
+// ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
+
+/// Regression: o player tem duas Barracks B-A e B-B em control group;
+/// emite um único `Build_BarracksReactor` cmd, e o engine SC2 despacha
+/// a ordem para AMBAS, gerando dois UnitInits de Reactor quase
+/// simultâneos. Mas o cmd stream só registra UM `producer_tag` (a
+/// primeira da seleção). Se o cmd fosse primary, ambos os Reactors
+/// seriam atribuídos à mesma Barracks e o outro ficaria sem Impeded.
+///
+/// Com offset exato (+3, 0) como primary, cada Reactor encontra sua
+/// própria Barracks pelo encaixe físico, independente do cmd.
+#[test]
+fn army_terran_two_addons_built_simultaneously_via_control_group() {
+    let events = vec![
+        // B-A em (50, 50) — fonte do "cmd's producer_tag".
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // B-B em (60, 60) — também recebeu a ordem mas não está no cmd.
+        ev_at(110, 1, EntityEventKind::ProductionFinished, "Barracks", 2, None, 60, 60),
+        // Reactor R1 fisicamente colado em B-A — Δ=(+3, 0) exato.
+        ev_at(200, 2, EntityEventKind::ProductionStarted, "BarracksReactor", 91, None, 53, 50),
+        // Reactor R2 fisicamente colado em B-B — Δ=(+3, 0) exato.
+        ev_at(202, 3, EntityEventKind::ProductionStarted, "BarracksReactor", 92, None, 63, 60),
+        ev_at(600, 4, EntityEventKind::ProductionFinished, "BarracksReactor", 91, None, 53, 50),
+        ev_at(602, 5, EntityEventKind::ProductionFinished, "BarracksReactor", 92, None, 63, 60),
+    ];
+    // Único cmd, com producer_tag = B-A. O segundo Reactor não tem cmd
+    // dedicado — o despacho do control group não gera dois cmds.
+    let cmds = vec![cmd(200, "BarracksReactor", 1)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane_a = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let lane_b = out.lanes.iter().find(|l| l.tag == 2).unwrap();
+    let count = |l: &super::types::StructureLane| {
+        l.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count()
+    };
+    assert_eq!(
+        count(lane_a),
+        1,
+        "B-A deve ganhar EXATAMENTE 1 Impeded (R1, casado por offset exato), não dois"
+    );
+    assert_eq!(
+        count(lane_b),
+        1,
+        "B-B deve ganhar 1 Impeded (R2, casado por offset exato) — sem isso o bug do Winter Madness reaparece"
     );
 }
 

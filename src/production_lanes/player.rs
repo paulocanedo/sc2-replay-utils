@@ -21,7 +21,10 @@ use crate::replay::{
 use super::classify::{intern_unit_name, is_target_unit, lane_canonical};
 use super::morph::{is_morph_died, is_morph_finish, is_pure_morph_finish, morph_build_loops, morph_old_type};
 use super::resolve::{consume_producer_cmd, merge_continuous, resolve_producer};
-use super::terran::{resolve_addon_parent_by_offset, resolve_addon_parent_via_cmd};
+use super::terran::{
+    resolve_addon_parent_by_exact_offset, resolve_addon_parent_by_proximity,
+    resolve_addon_parent_via_cmd,
+};
 use super::types::{BlockKind, LaneMode, PlayerProductionLanes, ProductionBlock, StructureLane};
 
 pub(super) fn extract_player(
@@ -148,18 +151,29 @@ pub(super) fn extract_player(
                 // Apenas a construção emite `Impeded` — swap não tem
                 // janela impeditiva (o addon já existe e está pronto).
                 //
-                // Resolução de parent em três etapas:
+                // Resolução de parent em quatro etapas, em ordem de
+                // confiabilidade decrescente:
                 //   1. `creator_tag` do evento (sempre `None` para
                 //      addons no s2protocol — UnitInitEvent não tem o
                 //      campo — mas mantido na cascata por simetria).
-                //   2. Cmd matching: procura cmd `Build*Reactor`/
-                //      `Build*TechLab` cujo `producer_tags` aponta pra
-                //      uma lane viva, dentro de janela de ±50 loops
-                //      em torno do init.
-                //   3. Geometria: parent no offset canônico (+3, 0)
-                //      relativo ao addon, com fallback de proximidade
-                //      (lane mais próxima por d²) se o offset exato
-                //      não casar.
+                //   2. **Offset exato (+3, 0)**: lane do tipo certo
+                //      em `(addon.x - 3, addon.y)` exato. Determinístico
+                //      quando todas as posições estão atualizadas (C),
+                //      e crucial para distinguir entre múltiplas
+                //      Barracks adjacentes — cada addon tem exatamente
+                //      um parent no offset físico canônico.
+                //   3. Cmd matching: como FALLBACK, não primary. Cmd
+                //      é não-confiável quando o player tem control
+                //      group de várias estruturas e emite Build_Addon
+                //      (SC2 despacha pra múltiplas mas o cmd só
+                //      registra `selection.active()[0]`); usar cmd
+                //      como primary atribui múltiplos addons à mesma
+                //      Barracks. Geometria pelo offset físico é mais
+                //      robusta nesse caso.
+                //   4. Proximidade pura por `d²`: last resort, caso
+                //      offset exato e cmd ambos falhem (geometria
+                //      atípica, ou posição da lane ainda stale por
+                //      lift/land não rastreado).
                 let is_swap = morphed_from.is_some();
                 if mode == LaneMode::Army
                     && is_incapacitating_addon(new_type)
@@ -167,6 +181,15 @@ pub(super) fn extract_player(
                 {
                     let parent = ev
                         .creator_tag
+                        .or_else(|| {
+                            resolve_addon_parent_by_exact_offset(
+                                new_type,
+                                ev.pos_x,
+                                ev.pos_y,
+                                ev.game_loop,
+                                &lanes_by_tag,
+                            )
+                        })
                         .or_else(|| {
                             resolve_addon_parent_via_cmd(
                                 &player.production_cmds,
@@ -177,7 +200,7 @@ pub(super) fn extract_player(
                             )
                         })
                         .or_else(|| {
-                            resolve_addon_parent_by_offset(
+                            resolve_addon_parent_by_proximity(
                                 new_type,
                                 ev.pos_x,
                                 ev.pos_y,

@@ -1,17 +1,32 @@
-//! Lógica específica da raça Terran. Cobre:
+//! Lógica específica da raça Terran. Cobre três modos de resolução de
+//! parent (estrutura-mãe) de um addon, usados em cascata:
 //!
-//! - Resolução do parent (estrutura-mãe) de um addon via cmd matching
-//!   (`resolve_addon_parent_via_cmd`) — primary, usa `producer_tags`
-//!   do `production_cmds` quando o player emitiu Build_*Reactor/
-//!   Build_*TechLab. É determinístico quando funciona (cobertura típica
-//!   ~80% das construções reais).
+//! 1. **Offset exato (`resolve_addon_parent_by_exact_offset`)** —
+//!    primary. Procura uma lane do tipo certo cuja posição bate
+//!    EXATAMENTE `(addon.x - 3, addon.y)`. O offset `(+3, 0)` é o
+//!    encaixe físico canônico do jogo (verificado empiricamente em
+//!    todos os pares parent×addon Terran). Quando todas as posições
+//!    estão atualizadas (i.e. lift/land foi rastreado), esta função
+//!    discrimina perfeitamente — cada addon tem exatamente uma lane no
+//!    offset canônico e só uma. Retorna `None` se nenhum candidato
+//!    bate o offset exato (típico em janelas com lift/land ainda não
+//!    capturado, ou em geometrias atípicas raras).
 //!
-//! - Resolução do parent por geometria com offset esperado
-//!   (`resolve_addon_parent_by_offset`) — fallback, usado quando o cmd
-//!   não está disponível. Prefere o parent no offset canônico (+3, 0)
-//!   relativo ao addon (verificado empiricamente em todos os pares
-//!   parent×addon Terran). Cai em proximidade pura por `d²` apenas
-//!   quando nenhum candidato bate o offset exato.
+//! 2. **Cmd matching (`resolve_addon_parent_via_cmd`)** — fallback
+//!    secundário. Usa `producer_tags` do `production_cmds` quando o
+//!    player emitiu Build_*Reactor/Build_*TechLab. Útil para os casos
+//!    em que (1) falhou. **Importante**: cmd não é primary porque
+//!    quando o jogador tem control group com várias Barracks/etc., o
+//!    SC2 despacha o build para múltiplas estruturas mas registra
+//!    apenas UM `producer_tag` (a primeira da seleção). Confiar no
+//!    cmd nesse cenário ataca o addon errado — ver
+//!    `army_terran_two_addons_built_simultaneously_via_control_group`
+//!    nos testes.
+//!
+//! 3. **Proximidade pura (`resolve_addon_parent_by_proximity`)** —
+//!    last resort. Lane mais próxima por `d²`. Usada apenas quando os
+//!    dois caminhos acima falharam. Reproduz o comportamento legacy
+//!    como rede de segurança.
 //!
 //! A produção paralela 2x via Reactor não é mais modelada — qualquer
 //! produção de uma estrutura Terran vira uma única lane simples. Veja
@@ -104,21 +119,12 @@ pub(super) fn resolve_addon_parent_via_cmd(
     None
 }
 
-/// Resolve o parent de um addon por geometria. Estratégia em duas
-/// camadas:
-///
-/// 1. **Offset canônico**: prefere a lane viva do tipo certo cuja
-///    posição bate exatamente `(addon.x - 3, addon.y)`. Quando duas
-///    Barracks estão adjacentes (caso comum em wall-offs), só uma
-///    delas tem o addon no offset correto — essa camada discrimina
-///    perfeitamente.
-///
-/// 2. **Proximidade**: se nenhuma lane bate o offset exato (typically:
-///    desfase causado por relocate ainda não capturado, ou por addon
-///    construído em geometria atípica), cai na lane mais próxima por
-///    `d²`. Comportamento equivalente ao heurístico legacy, preservado
-///    como rede de segurança.
-pub(super) fn resolve_addon_parent_by_offset(
+/// Procura a lane viva do tipo certo cuja posição bate **exatamente**
+/// `(addon.x - 3, addon.y)`. Retorna `None` se nenhum candidato
+/// satisfaz. Não cai em fallback por proximidade — quando esta função
+/// retorna `None`, a cascata em `player.rs` tenta o cmd matching antes
+/// de cair na lane mais próxima.
+pub(super) fn resolve_addon_parent_by_exact_offset(
     addon: &str,
     addon_x: u8,
     addon_y: u8,
@@ -129,9 +135,6 @@ pub(super) fn resolve_addon_parent_by_offset(
     let expected_x = addon_x as i32 - EXPECTED_DX;
     let expected_y = addon_y as i32 - EXPECTED_DY;
 
-    // Primary: parent no offset exato (+3, 0).
-    let mut exact: Option<i64> = None;
-    let mut nearest: Option<(i64, i32)> = None;
     for lane in lanes.values() {
         if lane.canonical_type != parent_type {
             continue;
@@ -142,17 +145,43 @@ pub(super) fn resolve_addon_parent_by_offset(
         if lane.died_loop.map(|d| d <= at_loop).unwrap_or(false) {
             continue;
         }
-        let lx = lane.pos_x as i32;
-        let ly = lane.pos_y as i32;
-        if lx == expected_x && ly == expected_y && exact.is_none() {
-            exact = Some(lane.tag);
-        }
-        let dx = lx - addon_x as i32;
-        let dy = ly - addon_y as i32;
-        let d2 = dx * dx + dy * dy;
-        if nearest.map(|(_, b)| d2 < b).unwrap_or(true) {
-            nearest = Some((lane.tag, d2));
+        if lane.pos_x as i32 == expected_x && lane.pos_y as i32 == expected_y {
+            return Some(lane.tag);
         }
     }
-    exact.or_else(|| nearest.map(|(tag, _)| tag))
+    None
+}
+
+/// Lane mais próxima por `d²` entre os candidatos vivos do tipo
+/// correto. Last-resort da cascata — reproduz o heurístico legacy só
+/// quando offset exato e cmd matching falharam. Sem garantia de
+/// correção em cenários de control-group / addons construídos
+/// simultaneamente.
+pub(super) fn resolve_addon_parent_by_proximity(
+    addon: &str,
+    addon_x: u8,
+    addon_y: u8,
+    at_loop: u32,
+    lanes: &HashMap<i64, StructureLane>,
+) -> Option<i64> {
+    let parent_type = addon_parent_canonical(addon)?;
+    let mut best: Option<(i64, i32)> = None;
+    for lane in lanes.values() {
+        if lane.canonical_type != parent_type {
+            continue;
+        }
+        if lane.born_loop > at_loop {
+            continue;
+        }
+        if lane.died_loop.map(|d| d <= at_loop).unwrap_or(false) {
+            continue;
+        }
+        let dx = lane.pos_x as i32 - addon_x as i32;
+        let dy = lane.pos_y as i32 - addon_y as i32;
+        let d2 = dx * dx + dy * dy;
+        if best.map(|(_, b)| d2 < b).unwrap_or(true) {
+            best = Some((lane.tag, d2));
+        }
+    }
+    best.map(|(tag, _)| tag)
 }
