@@ -91,41 +91,162 @@ fn upgrade_start_time_subtracts_build_time() {
     assert_eq!(stimpack_entry.finish_loop, stimpack_finish);
 }
 
-/// Invariante: nenhuma entrada de unidade ou pesquisa pode ter
-/// `game_loop == finish_loop` (duração zero, "instantânea") — não
-/// existe unidade ou upgrade que treine em zero loops no jogo.
+/// Invariante: nenhuma entrada **Completed** com build time conhecido
+/// pode ter `game_loop == finish_loop` — não existe unidade ou upgrade
+/// que treine em zero loops no jogo.
 ///
-/// O sintoma mais comum dessa quebra era o "Marine instantâneo às
-/// 8:48" reportado no replay Winter Madness LE: numa Barracks com
-/// Reactor o player clica Train_Marine uma vez e o tracker emite 2
-/// `UnitBornEvent`s no mesmo `game_loop`. Sem detecção de par
-/// paralelo, a segunda Marine caía em
-/// `cmd_loop.max(prev_finish=projected_finish)` e o `start_loop`
-/// virava o próprio `finish_loop`, gerando uma entrada com duração
-/// zero.
+/// O sintoma original era o "Marine instantâneo às 8:48" no replay
+/// Winter Madness LE (69): numa Barracks com Reactor adquirido via
+/// Lift/Land swap (sem cmd `BarracksReactor` próprio), o tracker
+/// emite 2 `UnitBornEvent`s no mesmo `game_loop`. A pré-passada
+/// antiga via `production_cmds` não captava o swap, marcava
+/// `reactor_active = false`, e a 2ª unidade caía em
+/// `cmd_loop.max(slots[0]=projected_finish)` colapsando para o
+/// próprio `finish_loop`. O fix consome `reactor_since_loop` do
+/// `production_lanes` (pipeline canônico com 3-stage parent
+/// resolution + lift/land tracking) + guarda de invariante no slot
+/// logic.
 ///
-/// `InjectLarva` é instantâneo por natureza (cmd, não unidade
-/// produzida) e fica fora do invariante.
+/// Itera todos os replays disponíveis em `examples/` para capturar
+/// regressões em qualquer um deles, não só no `replay1` original.
+///
+/// Filtros (cobrindo casos legítimos com duração ≈ 0):
+/// - `InjectLarva`: ação instantânea por natureza.
+/// - Outcome != `Completed`: cancels/destroys atribuem `finish_loop =
+///   cancel_loop`, o que pode bater com o `start_loop` se o cancel
+///   foi imediato.
+/// - `build_time_loops == 0`: balance data não conhece a ação (ex.:
+///   `AssimilatorRich` em alguns base_builds). Caso pré-existente
+///   ortogonal à regressão de Reactor.
 #[test]
 fn no_entries_have_zero_duration() {
-    let t = parse_replay(&example(), 0).expect("parse");
-    let bo = extract_build_order(&t).expect("bo");
+    use crate::balance_data::build_time_loops;
+
+    let examples = std::fs::read_dir(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples"),
+    )
+    .expect("ler examples/");
+    let mut tested = 0usize;
+    for entry in examples {
+        let path = entry.expect("dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("SC2Replay") {
+            continue;
+        }
+        let replay_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("?")
+            .to_string();
+        let t = parse_replay(&path, 0).unwrap_or_else(|e| {
+            panic!("parse {replay_name}: {e}");
+        });
+        let bo = extract_build_order(&t).unwrap_or_else(|e| {
+            panic!("extract {replay_name}: {e}");
+        });
+        let base_build = t.base_build;
+        for player in &bo.players {
+            for entry in &player.entries {
+                if entry.action.starts_with("InjectLarva") {
+                    continue;
+                }
+                if entry.outcome != EntryOutcome::Completed {
+                    continue;
+                }
+                if build_time_loops(&entry.action, base_build) == 0 {
+                    continue;
+                }
+                assert!(
+                    entry.game_loop < entry.finish_loop,
+                    "entry de duração zero em {replay_name} / {}: \
+                     action={}, start={} finish={} \
+                     (provável regressão da detecção de Reactor / slot-tracking)",
+                    player.name,
+                    entry.action,
+                    entry.game_loop,
+                    entry.finish_loop,
+                );
+            }
+        }
+        tested += 1;
+    }
+    assert!(tested > 0, "nenhum replay encontrado em examples/");
+}
+
+/// Regressão específica: no replay Winter Madness LE (69), uma Barracks
+/// adquire Reactor via Lift/Land swap. Antes do fix, isso gerava uma
+/// Marine em ~08:48 com `start_loop == finish_loop`. Verifica que essa
+/// entry específica agora tem duração próxima do build time esperado
+/// (~268 loops normal speed para Marine, com folga para variação).
+#[test]
+fn winter_madness_69_marine_at_8_48_has_nonzero_duration() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/winter_madness_69.SC2Replay");
+    let t = parse_replay(&path, 0).expect("parse winter_madness_69");
+    let bo = extract_build_order(&t).expect("extract winter_madness_69");
+    let lps = bo.loops_per_second;
+    // Janela 08:30..08:55 (de loop ≈ 8160 a ≈ 8800 a 16 lps), pra
+    // capturar a Marine reportada no replay sem falsos positivos com
+    // outras Marines do mesmo jogador.
+    let win_start = (8 * 60 + 30) as f64 * lps;
+    let win_end = (8 * 60 + 55) as f64 * lps;
+    let mut found_in_window = 0usize;
+    let mut total_count_in_window = 0u32;
     for player in &bo.players {
         for entry in &player.entries {
-            if entry.action.starts_with("InjectLarva") {
+            if entry.action != "Marine" {
                 continue;
             }
+            // Cancels/destroys têm finish_loop = cancel_loop e podem
+            // ter duração legitimamente baixa. A regressão original
+            // afeta produções **completadas**.
+            if entry.outcome != EntryOutcome::Completed {
+                continue;
+            }
+            let f = entry.finish_loop as f64;
+            if f < win_start || f > win_end {
+                continue;
+            }
+            found_in_window += 1;
+            total_count_in_window += entry.count as u32;
             assert!(
                 entry.game_loop < entry.finish_loop,
-                "entry de duração zero em {}: action={}, start={} finish={} \
-                 (provável regressão da detecção de par paralelo do Reactor)",
-                player.name,
-                entry.action,
+                "Marine 08:48 voltou: start={} finish={} (player {})",
                 entry.game_loop,
                 entry.finish_loop,
+                player.name,
+            );
+            // Sanity: duração no mínimo 1/3 do build time esperado.
+            // Marine bt = ~268 loops normal speed; 1/3 ≈ 90 loops.
+            let duration = entry.finish_loop - entry.game_loop;
+            assert!(
+                duration >= 90,
+                "Marine com duração suspeitamente curta em {}: \
+                 start={} finish={} (duração {} loops)",
+                player.name,
+                entry.game_loop,
+                entry.finish_loop,
+                duration,
             );
         }
     }
+    assert!(
+        found_in_window > 0,
+        "esperava ao menos uma Marine na janela 08:30–08:55 do replay \
+         winter_madness_69 — replay mudou ou não tem Marines aí?",
+    );
+    // Reactor parallel pair: o engine emite 2 Born events por click,
+    // que devem ser fundidos em uma row `Marine` com `count >= 2`.
+    // Antes do fix, o segundo aparecia como uma row separada com
+    // duração zero. Agora esperamos que o `count` total na janela
+    // seja >= 2 (cobre o pair) — evita falso positivo de só conferir
+    // duração e perder o sumiço da segunda Marine.
+    assert!(
+        total_count_in_window >= 2,
+        "esperava ao menos 2 Marines na janela 08:30–08:55 (par paralelo \
+         do Reactor) — total_count={} em {} entries",
+        total_count_in_window,
+        found_in_window,
+    );
 }
 
 #[test]
