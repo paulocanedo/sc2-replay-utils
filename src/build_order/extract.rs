@@ -75,14 +75,31 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     let mut consumed = vec![false; player.production_cmds.len()];
     let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
     // Último `start_loop` computado por produtor — usado para detectar
-    // pares paralelos (Reactor): quando duas unidades têm o mesmo
-    // `finish_loop` no mesmo producer, são "siblings" do mesmo cmd
-    // (1 click, Reactor emite 2 unidades simultâneas). A segunda do
-    // par herda o `start` da primeira em vez de tentar consumir um cmd
-    // separado e cair no override `cmd.max(prev_finish=projected_finish)`
-    // — esse override transformava a segunda Marine em entrada
-    // instantânea (start = finish, ex.: "Marine às 8:48 → 8:48").
+    // pares paralelos (Reactor): quando duas unidades têm
+    // `finish_loop` PRÓXIMO no mesmo producer (gap ≤
+    // PARALLEL_PAIR_TOLERANCE), são "siblings" do mesmo cmd (1 click,
+    // Reactor emite 2 unidades simultâneas que o engine reporta com
+    // 0-15 loops de offset). A segunda do par herda o `start` da
+    // primeira em vez de tentar consumir um cmd separado e cair no
+    // override `cmd.max(prev_finish=projected_finish)` — esse
+    // override transformava a segunda Marine em entrada instantânea
+    // (start = finish, ex.: "Marine às 8:48 → 8:48").
     let mut prev_start_by_producer: HashMap<i64, u32> = HashMap::new();
+    // Tolerância em game loops para detectar par paralelo do Reactor
+    // (mecânica exclusiva Terran — Reactor é o único caso onde uma
+    // estrutura emite 2 unidades por 1 cmd no SC2). Pares paralelos
+    // observados no replay Winter Madness LE têm gap de 0-37 loops
+    // entre os dois Born events.
+    //
+    // Sequencial mínimo para qualquer unidade SC2:
+    //   - Marine (Terran, build fixo): 380 loops.
+    //   - Probe (Protoss) com chronoboost máximo: ~179 loops.
+    //   - Drone (Zerg, larva-born): ~269 loops.
+    //
+    // 50 cobre o pior par paralelo observado com folga ~3.5× para o
+    // sequencial mais curto teórico (Probe+chrono). Sem falso
+    // positivo conhecido.
+    const PARALLEL_PAIR_TOLERANCE: u32 = 50;
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
@@ -140,10 +157,11 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
 
         // Detecção de par paralelo (Reactor) ANTES de tentar cmd
         // matching: se já houve uma unidade emitida pelo mesmo
-        // `creator_tag` com EXATAMENTE o mesmo `projected_finish`,
-        // esta é a "irmã" do mesmo cmd — não consumimos cmd novo e
-        // herdamos o `start_loop`. Sem isso, a segunda Marine cairia
-        // no `cmd_loop.max(prev_finish=projected_finish)` e renderiza
+        // `creator_tag` com `projected_finish` PRÓXIMO (gap ≤
+        // PARALLEL_PAIR_TOLERANCE), esta é a "irmã" do mesmo cmd —
+        // não consumimos cmd novo e herdamos o `start_loop`. Sem
+        // isso, a segunda Marine cairia no
+        // `cmd_loop.max(prev_finish=projected_finish)` e renderiza
         // como entrada instantânea (start = finish).
         let is_parallel_pair = !from_unit_init
             && ev.creator_tag
@@ -151,7 +169,11 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
                     prev_finish_by_producer
                         .get(&t)
                         .copied()
-                        .map(|f| f == projected_finish)
+                        .map(|prev| {
+                            prev > 0
+                                && projected_finish.saturating_sub(prev)
+                                    <= PARALLEL_PAIR_TOLERANCE
+                        })
                         .unwrap_or(false)
                 })
                 .unwrap_or(false);
@@ -199,12 +221,19 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // Encadeia o próximo cmd do mesmo produtor no `projected_finish`
         // observado — assim a próxima unidade da fila não pode começar
         // antes do término da atual, mesmo que o jogador tenha clicado
-        // o train cedo (queue de cmds enquanto a anterior produz). Em
-        // par paralelo NÃO atualizamos: a primeira do par já avançou o
-        // chain, e a segunda compartilha a mesma janela.
+        // o train cedo (queue de cmds enquanto a anterior produz).
         if let Some((producer_tag, _)) = cmd_match {
             prev_finish_by_producer.insert(producer_tag, projected_finish);
             prev_start_by_producer.insert(producer_tag, start_loop);
+        } else if is_parallel_pair {
+            // Em par paralelo, a segunda da dupla tem `projected_finish`
+            // alguns loops após a primeira (engine emite com pequeno
+            // offset). Avança o chain para o finish da SEGUNDA — caso
+            // contrário a próxima unidade sequencial encadearia do
+            // finish da primeira, ficando 2-15 loops antes do real.
+            if let Some(t) = ev.creator_tag {
+                prev_finish_by_producer.insert(t, projected_finish);
+            }
         }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou

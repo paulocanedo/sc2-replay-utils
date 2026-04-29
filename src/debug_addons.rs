@@ -19,9 +19,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::build_order::extract_build_order;
 use crate::replay::{
     is_incapacitating_addon, parse_replay, EntityEvent, EntityEventKind, PlayerTimeline,
-    ProductionCmd,
+    ProductionCmd, ReplayTimeline,
 };
 
 /// Janela em game_loops em torno do `UnitInit` do addon onde aceitamos
@@ -208,12 +209,14 @@ fn candidates_for_addon(
 
 pub fn run(replay_path: &Path) -> Result<(), String> {
     let timeline = parse_replay(replay_path, 0)?;
+    let bo = extract_build_order(&timeline)?;
     println!(
         "Replay        : {}",
         replay_path.file_name().and_then(|s| s.to_str()).unwrap_or("?")
     );
     println!("Base build    : {}", timeline.base_build);
     println!("Players       : {}", timeline.players.len());
+    println!("Loops/sec     : {:.2}", timeline.loops_per_second);
     println!();
 
     // Distribuição de offsets agregada cross-player no final.
@@ -225,6 +228,7 @@ pub fn run(replay_path: &Path) -> Result<(), String> {
             continue;
         }
         report_player(player, idx, &mut offset_samples);
+        report_marines(player, idx, &timeline, &bo);
     }
 
     println!("=== OFFSET SUMMARY (Δx, Δy) por (parent_type → addon_type) ===");
@@ -445,5 +449,197 @@ fn report_player(
     println!("    cmd matches geo-closest     : {}", cmd_matches_geo_closest);
     println!("    cmd matches a NON-closest   : {}  (← casos interessantes)", cmd_matches_geo_other);
     println!("    no cmd matched              : {}", no_cmd);
+    println!();
+}
+
+/// Converte um `game_loop` em string `mm:ss`, usando os loops_per_second
+/// do replay. Útil pra cruzar com a UI da GUI.
+fn fmt_loop(game_loop: u32, lps: f64) -> String {
+    let secs = (game_loop as f64) / lps;
+    let m = (secs / 60.0).floor() as u32;
+    let s = (secs - (m as f64) * 60.0).floor() as u32;
+    format!("{:02}:{:02}", m, s)
+}
+
+/// Dump focado em Marines: lista todos os UnitBornEvents de Marine,
+/// todos os Train_Marine cmds, e os entries do build_order com action=
+/// Marine. Marca entries com `start == finish` (sintoma "instantâneo").
+/// Também imprime trace de pares paralelos detectáveis pelo predicado
+/// `prev_finish_by_producer == projected_finish` para ajudar a entender
+/// quais Marines deveriam ter sido detectados como par paralelo do
+/// Reactor.
+fn report_marines(
+    player: &PlayerTimeline,
+    idx: usize,
+    timeline: &ReplayTimeline,
+    bo: &crate::build_order::BuildOrderResult,
+) {
+    let lps = timeline.loops_per_second;
+    println!(
+        "--- Player {}: {} ({}) — Marines ---",
+        idx + 1,
+        player.name,
+        player.race
+    );
+    println!();
+
+    // [M1] Eventos de Marine (ProductionStarted + Finished, Born events
+    // emitem ambos no mesmo loop).
+    let marine_events: Vec<&EntityEvent> = player
+        .entity_events
+        .iter()
+        .filter(|e| {
+            e.entity_type == "Marine"
+                && matches!(e.kind, EntityEventKind::ProductionStarted)
+        })
+        .collect();
+    println!("[M1] MARINE BORN EVENTS (ProductionStarted, {}):", marine_events.len());
+    if marine_events.is_empty() {
+        println!("    (nenhum)");
+    } else {
+        println!(
+            "    {:>6} {:8}  {:>10}  {:>15}  ability",
+            "loop", "(mm:ss)", "tag", "creator_tag"
+        );
+        for e in &marine_events {
+            let creator = e
+                .creator_tag
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            let ability = e.creator_ability.as_deref().unwrap_or("(none)");
+            println!(
+                "    {:>6} ({:6})  {:>10}  {:>15}  {}",
+                e.game_loop,
+                fmt_loop(e.game_loop, lps),
+                e.tag,
+                creator,
+                ability,
+            );
+        }
+    }
+    println!();
+
+    // [M2] Cmds Train_Marine.
+    let marine_cmds: Vec<(usize, &ProductionCmd)> = player
+        .production_cmds
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.ability == "Marine" || c.ability.contains("Marine"))
+        .collect();
+    println!("[M2] MARINE CMDS ({}):", marine_cmds.len());
+    if marine_cmds.is_empty() {
+        println!("    (nenhum)");
+    } else {
+        println!(
+            "    {:>6} {:8}  {:24}  {:>15}",
+            "loop", "(mm:ss)", "ability", "producer_tag"
+        );
+        for (_, c) in &marine_cmds {
+            let tag = c
+                .producer_tags
+                .first()
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "(none)".to_string());
+            println!(
+                "    {:>6} ({:6})  {:24}  {:>15}",
+                c.game_loop,
+                fmt_loop(c.game_loop, lps),
+                c.ability,
+                tag,
+            );
+        }
+    }
+    println!();
+
+    // [M3] Trace de detecção de par paralelo: para cada Marine, qual o
+    // estado de prev_finish_by_producer no momento do processamento?
+    // Reproduz o predicado do build_order/extract.rs para mostrar quais
+    // Marines o detector identificaria como par paralelo.
+    println!("[M3] PARALLEL-PAIR DETECTION TRACE:");
+    println!(
+        "    {:>6} {:8}  {:>10}  {:>15}  {:>14}  {}",
+        "loop", "(mm:ss)", "tag", "creator_tag", "prev_finish", "is_parallel?"
+    );
+    const TOLERANCE: u32 = 50;
+    let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
+    let mut instant_count = 0usize;
+    for e in &marine_events {
+        let projected_finish = e.game_loop;
+        let creator = e.creator_tag;
+        let prev_finish = creator
+            .and_then(|t| prev_finish_by_producer.get(&t).copied())
+            .unwrap_or(0);
+        let is_parallel = prev_finish > 0
+            && projected_finish.saturating_sub(prev_finish) <= TOLERANCE;
+
+        let creator_str = creator
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "(none)".to_string());
+        let prev_str = if prev_finish > 0 {
+            prev_finish.to_string()
+        } else {
+            "—".to_string()
+        };
+        println!(
+            "    {:>6} ({:6})  {:>10}  {:>15}  {:>14}  {}",
+            e.game_loop,
+            fmt_loop(e.game_loop, lps),
+            e.tag,
+            creator_str,
+            prev_str,
+            if is_parallel { "YES (parallel — no cmd consumed)" } else { "no" },
+        );
+
+        // Avança chain SEMPRE — para par paralelo, atualiza para o
+        // finish do segundo (que é o real fim da janela do par).
+        if let Some(t) = creator {
+            prev_finish_by_producer.insert(t, projected_finish);
+        }
+    }
+    println!();
+
+    // [M4] Entries do build_order action="Marine" — saída final que o
+    // usuário vê na GUI (após dedup). Marca entries com start == finish.
+    let bo_player = bo.players.iter().find(|p| p.name == player.name);
+    if let Some(bo_player) = bo_player {
+        let marine_entries: Vec<&crate::build_order::BuildOrderEntry> = bo_player
+            .entries
+            .iter()
+            .filter(|e| e.action == "Marine")
+            .collect();
+        println!("[M4] BUILD_ORDER MARINE ENTRIES (post-dedup, {}):", marine_entries.len());
+        println!(
+            "    {:>6} {:8}  {:>6} {:8}  count  outcome  duration  comment",
+            "start", "(mm:ss)", "finish", "(mm:ss)"
+        );
+        for e in &marine_entries {
+            let dur = e.finish_loop.saturating_sub(e.game_loop);
+            let comment = if e.game_loop == e.finish_loop {
+                instant_count += 1;
+                "← INSTANT (start == finish, BUG)"
+            } else if dur < 100 {
+                "← suspeito (duração muito curta)"
+            } else {
+                ""
+            };
+            println!(
+                "    {:>6} ({:6})  {:>6} ({:6})  {:>5}  {:?}  {:>8}  {}",
+                e.game_loop,
+                fmt_loop(e.game_loop, lps),
+                e.finish_loop,
+                fmt_loop(e.finish_loop, lps),
+                e.count,
+                e.outcome,
+                dur,
+                comment,
+            );
+        }
+    }
+    println!();
+
+    println!("[M5] PLAYER MARINE SUMMARY:");
+    println!("    born events           : {}", marine_events.len());
+    println!("    cmds                  : {}", marine_cmds.len());
+    println!("    instant entries (BUG) : {}", instant_count);
     println!();
 }
