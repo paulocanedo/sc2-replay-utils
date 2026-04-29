@@ -293,16 +293,22 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     deduplicate(raw)
 }
 
-/// Procura o primeiro cmd não-consumido emitido pelo `producer_tag`
-/// cuja `ability` bate com `action` E cujo `game_loop` satisfaz
-/// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Marca o
-/// cmd como consumido e retorna seu `game_loop`. Quando não há match,
-/// retorna `None` e o caller cai no fallback `subtract_build_time`.
+/// Procura o cmd não-consumido emitido pelo `producer_tag` cuja
+/// `ability` bate com `action` E cujo `game_loop` satisfaz
+/// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Quando há
+/// múltiplos candidatos, escolhe o **mais recente** (maior
+/// `game_loop`) — é o que tem maior probabilidade de ter realmente
+/// produzido a unidade concluída em `finish_loop`. Cmds "fantasma"
+/// mais antigos (cliques cancelados, double-clicks, queue cheia)
+/// ficam não-consumidos e não roubam o cmd da próxima unidade real,
+/// evitando entries com `start_loop` muito anterior ao treino e o
+/// sintoma de "Marine instantâneo" quando uma unidade real depois
+/// fica sem cmd e cai no fallback `subtract_build_time`.
 ///
 /// Iteramos a fila inteira (não só o front) porque um produtor pode
 /// receber cmds de tipos diferentes intercalados (ex.: Stargate
-/// alternando Phoenix/Voidray) e queremos sempre achar a próxima
-/// ocorrência da ação certa, não a primeira da fila.
+/// alternando Phoenix/Voidray) e queremos a ocorrência mais recente
+/// dentro da janela válida.
 fn consume_producer_cmd(
     by_producer: &HashMap<i64, Vec<usize>>,
     consumed: &mut [bool],
@@ -312,6 +318,7 @@ fn consume_producer_cmd(
     max_cmd_loop: u32,
 ) -> Option<u32> {
     let queue = by_producer.get(&producer_tag)?;
+    let mut last_valid: Option<usize> = None;
     for &i in queue {
         if consumed[i] {
             continue;
@@ -324,6 +331,9 @@ fn consume_producer_cmd(
             // próximos seriam ainda mais tarde, então paramos aqui.
             break;
         }
+        last_valid = Some(i);
+    }
+    if let Some(i) = last_valid {
         consumed[i] = true;
         return Some(cmds[i].game_loop);
     }
