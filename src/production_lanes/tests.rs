@@ -1146,6 +1146,44 @@ fn army_terran_sequential_marines_chain_normally() {
     assert_eq!(prod.last().unwrap().end_loop, 1800);
 }
 
+/// Variação do par paralelo onde o engine emite os 2 Born events com
+/// um pequeno offset (2-15 game loops) em vez de exatamente o mesmo
+/// loop. Verificado empiricamente no replay Winter Madness LE — sem
+/// tolerância, a detecção de igualdade exata falha e a 2ª Marine
+/// vira entrada instantânea.
+#[test]
+fn army_terran_reactor_parallel_pair_with_small_offset_still_detected() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Marine 1 finisha em 2000.
+        ev_at(2000, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(2000, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+        // Marine 2 (sibling do mesmo cmd) finisha em 2013 — 13 loops
+        // depois, dentro da tolerância de 20.
+        ev_at(2013, 3, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
+        ev_at(2013, 4, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
+    ];
+    let cmds = vec![cmd(1500, "Marine", 1)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    // Sem tolerância: 2 blocos — primeiro 1500..2000 (correto), segundo
+    // 2000..2013 (instant-like, herda prev=2000). Após merge_continuous,
+    // viraria 1 bloco 1500..2013.
+    // Com tolerância: 2 blocos com mesmo start=1500 e finishes 2000/2013.
+    // Após merge, 1 bloco 1500..2013. O start=1500 confirma que o
+    // segundo herdou e não caiu no override.
+    assert_eq!(prod.len(), 1);
+    assert_eq!(prod[0].start_loop, 1500, "start deve ser cmd_loop, não prev_finish");
+    assert_eq!(prod[0].end_loop, 2013);
+}
+
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
 
 /// Regression: o player tem duas Barracks B-A e B-B em control group;

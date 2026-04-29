@@ -69,12 +69,30 @@ pub(super) fn extract_player(
     // `merge_continuous` posteriormente as funde no mesmo bloco).
     let mut last_finish_by_creator: HashMap<i64, u32> = HashMap::new();
     // Last start loop por creator_tag — usado para detectar pares
-    // paralelos do Reactor: quando duas unidades têm o mesmo
-    // finish_loop no mesmo producer, são "siblings" do mesmo cmd
-    // (ex.: 2 Marines treinando em paralelo numa Barracks com
-    // Reactor). A segunda do par herda o start da primeira em vez de
+    // paralelos do Reactor: quando duas unidades têm finish_loops
+    // **próximos** no mesmo producer (gap ≤ PARALLEL_PAIR_TOLERANCE),
+    // são "siblings" do mesmo cmd (ex.: 2 Marines treinando em
+    // paralelo numa Barracks com Reactor — o engine emite os Born
+    // events com 0-15 loops de diferença, não exatamente o mesmo
+    // loop). A segunda do par herda o start da primeira em vez de
     // consumir um cmd separado.
     let mut last_start_by_creator: HashMap<i64, u32> = HashMap::new();
+    // Tolerância em game loops para detectar par paralelo do Reactor
+    // (mecânica exclusiva Terran — Reactor é o único caso onde uma
+    // estrutura emite 2 unidades por 1 cmd no SC2). Pares paralelos
+    // observados no replay Winter Madness LE têm gap de 0-37 loops
+    // entre os dois Born events (engine emite com pequeno offset por
+    // razões internas de tick/serialização).
+    //
+    // Sequencial mínimo para qualquer unidade SC2:
+    //   - Marine (Terran, build fixo, sem chrono): 380 loops.
+    //   - Probe (Protoss) com chronoboost máximo (1.5×): ~179 loops.
+    //   - Drone (Zerg, larva-born): ~269 loops.
+    //
+    // 50 cobre o pior par paralelo observado com folga de ~3.5× para
+    // o sequencial mais curto teórico (Probe+chrono). Sem risco de
+    // falso positivo.
+    const PARALLEL_PAIR_TOLERANCE: u32 = 50;
 
     for i in 0..events.len() {
         let ev = &events[i];
@@ -300,9 +318,11 @@ pub(super) fn extract_player(
 
                         // Detecção de par paralelo (Reactor): se já há
                         // uma unidade emitida pelo mesmo `creator_tag`
-                        // com EXATAMENTE o mesmo `finish_loop`, esta é
-                        // a "irmã" — o player clicou Train uma vez e o
-                        // Reactor produziu 2 unidades simultâneas. Não
+                        // com `finish_loop` PRÓXIMO (dentro de
+                        // PARALLEL_PAIR_TOLERANCE), esta é a "irmã" —
+                        // o player clicou Train uma vez e o Reactor
+                        // produziu 2 unidades simultâneas (que o
+                        // engine emite com 0-15 loops de offset). Não
                         // consumimos um cmd novo (compartilham o cmd
                         // da primeira) e herdamos o `start_loop`. Sem
                         // esta detecção, a segunda Marine cairia no
@@ -312,10 +332,17 @@ pub(super) fn extract_player(
                         let raw_start = if let Some(ct) = creator_tag {
                             let prev_finish =
                                 last_finish_by_creator.get(&ct).copied().unwrap_or(0);
-                            let is_parallel_pair =
-                                prev_finish > 0 && prev_finish == finish_loop;
+                            let is_parallel_pair = prev_finish > 0
+                                && finish_loop.saturating_sub(prev_finish)
+                                    <= PARALLEL_PAIR_TOLERANCE;
 
                             if is_parallel_pair {
+                                // Avança chain para o finish da SEGUNDA
+                                // do par (que é tipicamente alguns loops
+                                // depois da primeira). A próxima unidade
+                                // sequencial chega só depois do par
+                                // inteiro liberar a estrutura.
+                                last_finish_by_creator.insert(ct, finish_loop);
                                 last_start_by_creator
                                     .get(&ct)
                                     .copied()
