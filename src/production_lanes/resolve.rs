@@ -56,6 +56,39 @@ pub(super) fn consume_producer_cmd(
     None
 }
 
+/// Como `consume_global_cmd` do `build_order::extract`, mas devolve
+/// também o primeiro `producer_tag` do cmd (via `Vec::first`) — modos
+/// Research/Upgrades roteiam o bloco para a lane do produtor.
+///
+/// Match global por nome de ação (sem filtrar por produtor) — pesquisas
+/// não enfileiram, então o primeiro cmd disponível com a ability certa
+/// que respeite a constraint de causalidade `cmd_loop <= max_cmd_loop`
+/// é o match correto. FIFO em vez de last-valid: pesquisas one-shot e
+/// progressões de níveis são raramente canceladas, e cmds-fantasma
+/// "esquecidos" no início do replay não disputam slots porque a
+/// constraint causal os filtra naturalmente.
+pub(super) fn consume_global_cmd_with_producer(
+    consumed: &mut [bool],
+    cmds: &[ProductionCmd],
+    action: &str,
+    max_cmd_loop: u32,
+) -> Option<(u32, Option<i64>)> {
+    for (i, cmd) in cmds.iter().enumerate() {
+        if consumed[i] {
+            continue;
+        }
+        if cmd.ability != action {
+            continue;
+        }
+        if cmd.game_loop > max_cmd_loop {
+            continue;
+        }
+        consumed[i] = true;
+        return Some((cmd.game_loop, cmd.producer_tags.first().copied()));
+    }
+    None
+}
+
 pub(super) fn merge_continuous(
     blocks: Vec<ProductionBlock>,
     parallel_lane: bool,
@@ -159,6 +192,10 @@ fn resolve_by_proximity(
             "Lair",
             "Hive",
         ],
+        // Research/Upgrades não usam proximidade — atribuição é direta
+        // via `producer_tag` do cmd. `resolve_producer` não é chamado
+        // nesses modos, mas mantemos exaustividade do match.
+        (LaneMode::Research | LaneMode::Upgrades, _) => return None,
     };
 
     let mut best: Option<(i64, i32)> = None;

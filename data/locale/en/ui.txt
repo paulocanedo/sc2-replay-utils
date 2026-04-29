@@ -348,6 +348,8 @@ charts.production.coming_soon = Coming soon.
 charts.production.player = Player:
 charts.production.empty.workers = No worker-producing structures found.
 charts.production.empty.army = No army-producing structures found.
+charts.production.empty.research = No research recorded for this player.
+charts.production.empty.upgrades = No upgrades recorded for this player.
 charts.production.reset_view = Reset view
 charts.production.reset_view.hint = Reset zoom and pan. Tip: scroll to zoom, drag to pan, double-click to reset.
 

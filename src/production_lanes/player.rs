@@ -18,9 +18,11 @@ use crate::replay::{
     is_incapacitating_addon, is_zerg_hatch, EntityEventKind, PlayerTimeline,
 };
 
-use super::classify::{intern_unit_name, is_target_unit, lane_canonical};
+use super::classify::{intern_unit_name, is_leveled_upgrade, is_target_unit, lane_canonical};
 use super::morph::{is_morph_died, is_morph_finish, is_pure_morph_finish, morph_build_loops, morph_old_type};
-use super::resolve::{consume_producer_cmd, merge_continuous, resolve_producer};
+use super::resolve::{
+    consume_global_cmd_with_producer, consume_producer_cmd, merge_continuous, resolve_producer,
+};
 use super::terran::{
     resolve_addon_parent_by_exact_offset, resolve_addon_parent_by_proximity,
     resolve_addon_parent_via_cmd,
@@ -461,6 +463,66 @@ pub(super) fn extract_player(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Research/Upgrades: pass adicional sobre `player.upgrades`. Cada
+    // entrada vira um bloco `Producing` na lane do produtor, resolvido
+    // via `producer_tag` do cmd casado por nome de ability. Pesquisas
+    // não enfileiram (one-shot) — match global FIFO. Cmds órfãos ou
+    // produtor sem lane (estrutura fora da whitelist
+    // `research_producer_canonical`, ex.: pesquisa em estrutura
+    // não-rastreada por algum reason) são descartados silenciosamente.
+    if matches!(mode, LaneMode::Research | LaneMode::Upgrades) {
+        for u in &player.upgrades {
+            if u.game_loop == 0 {
+                continue;
+            }
+            let leveled = is_leveled_upgrade(&u.name);
+            let belongs = match mode {
+                LaneMode::Upgrades => leveled,
+                LaneMode::Research => !leveled,
+                _ => unreachable!(),
+            };
+            if !belongs {
+                continue;
+            }
+            let finish_loop = u.game_loop;
+            let expected_bt = balance_data::build_time_loops(&u.name, base_build);
+            // Mesma constraint causal usada pelo build_order para
+            // upgrades — o cmd só é aceito se foi emitido cedo o
+            // suficiente pra plausivelmente ter completado em
+            // `finish_loop`.
+            let max_cmd = finish_loop.saturating_sub(expected_bt / 2);
+            let matched = consume_global_cmd_with_producer(
+                &mut consumed,
+                &player.production_cmds,
+                &u.name,
+                max_cmd,
+            );
+            let (start_loop, producer_tag) = match matched {
+                Some((cmd_loop, tag)) => (cmd_loop, tag),
+                None => (finish_loop.saturating_sub(expected_bt), None),
+            };
+            // Sem producer_tag não dá pra rotear pra uma lane —
+            // descarta. Lanes fantasmas (born/canonical desconhecidos)
+            // não fazem sentido visual.
+            let Some(tag) = producer_tag else { continue };
+            if start_loop >= finish_loop {
+                continue;
+            }
+            if let Some(lane) = lanes_by_tag.get_mut(&tag) {
+                lane.blocks.push(ProductionBlock {
+                    start_loop,
+                    end_loop: finish_loop,
+                    kind: BlockKind::Producing,
+                    // Nome do upgrade não é interno (`u.name` é `String`)
+                    // e o render v1 não desenha ícone dentro do bloco —
+                    // a estrutura na coluna esquerda já comunica a fonte
+                    // da pesquisa.
+                    produced_type: None,
+                });
             }
         }
     }
