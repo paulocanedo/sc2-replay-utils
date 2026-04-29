@@ -1018,6 +1018,54 @@ fn army_terran_marine_queued_during_reactor_starts_after_impeded_ends() {
     assert_eq!(imp[0].end_loop, 600);
 }
 
+// ─── Cmd matching prefere o mais recente sobre fantasmas antigos ────
+
+/// Regression: o jogador clica `Train Marine` em algum momento (cmd
+/// fantasma — pode ter sido double-click, queue cheia, ou cancelado),
+/// depois clica de novo no instante real do treino. Se o `consume_
+/// producer_cmd` fizesse FIFO, o cmd fantasma seria emparelhado com
+/// o Marine real, fazendo o bloco `Producing` começar muito antes do
+/// treino real. A política latest-within-window prefere o cmd mais
+/// recente válido — o fantasma fica não-consumido, o real produz a
+/// atribuição correta.
+///
+/// Cenário concreto (visto no Winter Madness LE):
+///   Reactor terminou em ~8:14, Marines reais treinaram 8:31..8:48.
+///   Existe um cmd fantasma em ~7:50 que sem este fix seria pareado
+///   com o Marine, fazendo o bloco aparecer 7:50..8:48 (ou 8:14..8:48
+///   após o push-past-Impeded).
+#[test]
+fn army_terran_marine_paired_with_latest_cmd_not_phantom_old_cmd() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Marine completa em 1500. Train time típico ~380 loops, então
+        // bt_fallback/2 ≈ 190 → max_cmd_loop = 1500 - 190 = 1310.
+        // Tanto o cmd fantasma (200) quanto o real (1100) entram na
+        // janela; FIFO pegaria 200, latest pega 1100.
+        ev_at(1500, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(1500, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+    ];
+    let cmds = vec![
+        cmd(200, "Marine", 1),  // fantasma — clique antigo sem unidade real
+        cmd(1100, "Marine", 1), // real — clique no instante do treino
+    ];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    assert_eq!(prod.len(), 1);
+    assert_eq!(
+        prod[0].start_loop, 1100,
+        "deve usar o cmd mais recente (1100), não o fantasma (200)"
+    );
+    assert_eq!(prod[0].end_loop, 1500);
+}
+
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
 
 /// Regression: o player tem duas Barracks B-A e B-B em control group;
