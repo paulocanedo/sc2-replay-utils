@@ -34,6 +34,13 @@ pub struct ProductionBlock {
     /// blocos onde o tipo não é interessante (worker mode — o ícone à
     /// esquerda já comunica) ou desconhecido.
     pub produced_type: Option<&'static str>,
+    /// Trilha vertical dentro da lane. 0 = trilha única (full-height) ou
+    /// trilha superior. 1 = trilha inferior — usada apenas em lanes
+    /// Terran com Reactor anexado, para a SEGUNDA unidade de cada par
+    /// paralelo. O renderer pinta em half-height top/bottom quando
+    /// `lane.reactor_since_loop.is_some()` e `block.start_loop >=
+    /// reactor_since_loop`.
+    pub sub_track: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +58,12 @@ pub struct StructureLane {
     /// estilo "thin sub-tracks" (warp-in discreto). `None` para
     /// estruturas que nunca foram WarpGate.
     pub warpgate_since_loop: Option<u32>,
+    /// Para lanes Terran: loop em que um Reactor terminou de ser
+    /// construído nesta estrutura. Blocos `Producing` com `start_loop
+    /// >= reactor_since_loop` ganham `sub_track` 0 ou 1 (renderizados
+    /// em duas faixas top/bottom representando a capacidade paralela
+    /// 2x). `None` se nunca teve reactor.
+    pub reactor_since_loop: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]

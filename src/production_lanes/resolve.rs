@@ -100,6 +100,14 @@ pub(super) fn merge_continuous(
             if prev.kind != b.kind {
                 continue;
             }
+            // Não mesclar blocos com sub_track diferente: a 2ª unidade
+            // do par paralelo (sub_track=1) precisa ficar como bloco
+            // distinto pra ser pintada na metade inferior. Sem este
+            // guarda os 2 blocos do par mesclam num único e o efeito
+            // visual de duas faixas paralelas se perde.
+            if prev.sub_track != b.sub_track {
+                continue;
+            }
             // Não mesclar blocos com produced_type diferente: preserva
             // distinção visual entre unidades sequenciais (ícone muda).
             if prev.produced_type != b.produced_type {

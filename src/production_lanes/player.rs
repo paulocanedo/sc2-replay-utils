@@ -143,6 +143,7 @@ pub(super) fn extract_player(
                                             // render desenha o ícone dentro da faixa
                                             // pra mostrar o motivo do impedimento.
                                             produced_type: Some(new_canonical),
+                                            sub_track: 0,
                                         });
                                     }
                                 }
@@ -272,6 +273,7 @@ pub(super) fn extract_player(
                                 pos_y: ev.pos_y,
                                 blocks: Vec::new(),
                                 warpgate_since_loop: None,
+                                reactor_since_loop: None,
                             },
                         );
                     }
@@ -331,26 +333,27 @@ pub(super) fn extract_player(
                         // `cmd_loop.max(prev=finish)` e renderizaria
                         // como bloco instantâneo (start = finish),
                         // sobreposto à primeira.
-                        let raw_start = if let Some(ct) = creator_tag {
+                        let (raw_start, is_parallel_pair) = if let Some(ct) = creator_tag {
                             let prev_finish =
                                 last_finish_by_creator.get(&ct).copied().unwrap_or(0);
-                            let is_parallel_pair = prev_finish > 0
+                            let is_pair = prev_finish > 0
                                 && finish_loop.saturating_sub(prev_finish)
                                     <= PARALLEL_PAIR_TOLERANCE;
 
-                            if is_parallel_pair {
+                            if is_pair {
                                 // Avança chain para o finish da SEGUNDA
                                 // do par (que é tipicamente alguns loops
                                 // depois da primeira). A próxima unidade
                                 // sequencial chega só depois do par
                                 // inteiro liberar a estrutura.
                                 last_finish_by_creator.insert(ct, finish_loop);
-                                last_start_by_creator
+                                let inherited = last_start_by_creator
                                     .get(&ct)
                                     .copied()
                                     .unwrap_or_else(|| {
                                         finish_loop.saturating_sub(bt_fallback)
-                                    })
+                                    });
+                                (inherited, true)
                             } else {
                                 let cmd_loop = consume_producer_cmd(
                                     &cmds_by_producer,
@@ -366,10 +369,10 @@ pub(super) fn extract_player(
                                 };
                                 last_finish_by_creator.insert(ct, finish_loop);
                                 last_start_by_creator.insert(ct, start);
-                                start
+                                (start, false)
                             }
                         } else {
-                            finish_loop.saturating_sub(bt_fallback)
+                            (finish_loop.saturating_sub(bt_fallback), false)
                         };
 
                         // Empurra `start_loop` para depois de qualquer
@@ -405,18 +408,32 @@ pub(super) fn extract_player(
 
                         if start_loop < finish_loop {
                             if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
+                                // sub_track=1 marca a SEGUNDA unidade do
+                                // par paralelo de Reactor, que o renderer
+                                // pinta na metade inferior da faixa
+                                // (top/bottom split). Para todas as outras
+                                // unidades (incluindo a primeira do par e
+                                // produção sequencial) sub_track=0.
+                                let sub_track =
+                                    if is_parallel_pair { 1u8 } else { 0u8 };
                                 lane.blocks.push(ProductionBlock {
                                     start_loop,
                                     end_loop: finish_loop,
                                     kind: BlockKind::Producing,
                                     produced_type: intern_unit_name(new_type),
+                                    sub_track,
                                 });
                             }
                         }
                     }
                 }
 
-                // Modo Army Terran: addon terminou.
+                // Modo Army Terran: addon terminou. Emite o `Impeded`
+                // de fechamento na lane do parent. Se o addon for um
+                // Reactor (não TechLab), também marca
+                // `reactor_since_loop` na lane — o renderer usa isso
+                // para pintar produção subsequente em duas faixas
+                // top/bottom (capacidade paralela 2x).
                 if mode == LaneMode::Army && is_incapacitating_addon(new_type) {
                     if let Some((parent, start, name)) = pending_addon.remove(&ev.tag) {
                         if let Some(lane) = lanes_by_tag.get_mut(&parent) {
@@ -425,7 +442,11 @@ pub(super) fn extract_player(
                                 end_loop: ev.game_loop,
                                 kind: BlockKind::Impeded,
                                 produced_type: Some(name),
+                                sub_track: 0,
                             });
+                            if name.ends_with("Reactor") {
+                                lane.reactor_since_loop = Some(ev.game_loop);
+                            }
                         }
                     }
                 }
@@ -439,6 +460,7 @@ pub(super) fn extract_player(
                                 end_loop: ev.game_loop,
                                 kind: BlockKind::Impeded,
                                 produced_type: Some(name),
+                                sub_track: 0,
                             });
                         }
                     }
@@ -458,6 +480,7 @@ pub(super) fn extract_player(
                                     end_loop: ev.game_loop,
                                     kind: BlockKind::Impeded,
                                     produced_type: Some(name),
+                                    sub_track: 0,
                                 });
                             }
                         }
@@ -522,6 +545,7 @@ pub(super) fn extract_player(
                     // a estrutura na coluna esquerda já comunica a fonte
                     // da pesquisa.
                     produced_type: None,
+                    sub_track: 0,
                 });
             }
         }
@@ -531,7 +555,7 @@ pub(super) fn extract_player(
     lanes.sort_by_key(|l| (l.born_loop, l.tag));
 
     for lane in &mut lanes {
-        lane.blocks.sort_by_key(|b| b.start_loop);
+        lane.blocks.sort_by_key(|b| (b.start_loop, b.sub_track));
         // Em estruturas com paralelismo real (Hatch/Lair/Hive em qualquer
         // modo, ou WarpGate pós-research), preservamos overlaps. Aqui
         // a lane é per-estrutura, então mesmo Hatch só tem paralelismo
