@@ -302,7 +302,7 @@ pub(super) fn extract_player(
                             )
                         });
 
-                        let start_loop = if let Some(ct) = creator_tag {
+                        let raw_start = if let Some(ct) = creator_tag {
                             let prev = last_finish_by_creator.get(&ct).copied().unwrap_or(0);
                             let start = match cmd_loop {
                                 Some(c) => c.max(prev),
@@ -314,13 +314,46 @@ pub(super) fn extract_player(
                             finish_loop.saturating_sub(bt_fallback)
                         };
 
-                        if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
-                            lane.blocks.push(ProductionBlock {
-                                start_loop,
-                                end_loop: finish_loop,
-                                kind: BlockKind::Producing,
-                                produced_type: intern_unit_name(new_type),
-                            });
+                        // Empurra `start_loop` para depois de qualquer
+                        // bloco `Morphing`/`Impeded` da mesma lane que
+                        // sobreponha a janela [raw_start, finish_loop].
+                        // Em SC2 o jogador pode ENFILEIRAR um Train cmd
+                        // enquanto a estrutura está construindo addon
+                        // (Reactor/TechLab) ou morphando (CC→Orbital);
+                        // o cmd entra em `production_cmds` no instante
+                        // do clique, mas o treino real só começa quando
+                        // a janela impeditiva termina. Sem este ajuste
+                        // o bloco `Producing` aparece sobreposto com o
+                        // `Impeded`/`Morphing`, dando a impressão de
+                        // que a estrutura produzia duas coisas ao mesmo
+                        // tempo. Build_order continua usando o cmd_loop
+                        // raw (visualização diferente, intencional).
+                        let start_loop = if let Some(lane) = lanes_by_tag.get(&lane_tag) {
+                            let mut s = raw_start;
+                            for b in &lane.blocks {
+                                if matches!(
+                                    b.kind,
+                                    BlockKind::Morphing | BlockKind::Impeded
+                                ) && b.end_loop > s
+                                    && b.start_loop < finish_loop
+                                {
+                                    s = s.max(b.end_loop);
+                                }
+                            }
+                            s.min(finish_loop)
+                        } else {
+                            raw_start
+                        };
+
+                        if start_loop < finish_loop {
+                            if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
+                                lane.blocks.push(ProductionBlock {
+                                    start_loop,
+                                    end_loop: finish_loop,
+                                    kind: BlockKind::Producing,
+                                    produced_type: intern_unit_name(new_type),
+                                });
+                            }
                         }
                     }
                 }

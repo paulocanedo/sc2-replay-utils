@@ -965,6 +965,59 @@ fn army_terran_addon_cmd_with_invalid_producer_tag_falls_through_to_proximity() 
     );
 }
 
+// ─── Marine queueado durante Reactor não fica sobreposto com Impeded ─
+
+/// Em SC2 o jogador pode enfileirar Train_Marine enquanto a Barracks
+/// está construindo addon (Reactor/TechLab). O cmd entra em
+/// `production_cmds` no instante do clique, mas o treino real só
+/// começa quando a janela impeditiva termina. Sem o ajuste
+/// `start_loop = max(raw_start, Impeded.end_loop)`, o bloco
+/// `Producing` apareceria sobreposto com o `Impeded` no chart,
+/// passando a impressão visual de que a Barracks estava produzindo
+/// Marine enquanto construía Reactor — o "Marine fantasma" relatado
+/// no replay Winter Madness LE.
+#[test]
+fn army_terran_marine_queued_during_reactor_starts_after_impeded_ends() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Reactor: Impeded de 200 a 600.
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+        // Marine completa em 1000. cmd queueado em 400 (DURANTE o Reactor).
+        ev_at(1000, 3, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(1000, 4, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+    ];
+    let cmds = vec![cmd(400, "Marine", 1)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    assert_eq!(prod.len(), 1, "deve haver um bloco Producing pra esse Marine");
+    // O cmd_loop foi 400 (durante Impeded 200..600). Sem o ajuste, o
+    // bloco começaria em 400 — sobrepondo com o Impeded. Com o
+    // ajuste, começa em 600 (fim do Impeded).
+    assert_eq!(
+        prod[0].start_loop, 600,
+        "start_loop deve ser empurrado para o fim do Impeded, não o cmd_loop raw"
+    );
+    assert_eq!(prod[0].end_loop, 1000);
+
+    // Sanity: o Impeded continua intacto (200..600).
+    let imp: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Impeded)
+        .collect();
+    assert_eq!(imp.len(), 1);
+    assert_eq!(imp[0].start_loop, 200);
+    assert_eq!(imp[0].end_loop, 600);
+}
+
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
 
 /// Regression: o player tem duas Barracks B-A e B-B em control group;
