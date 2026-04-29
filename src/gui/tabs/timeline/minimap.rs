@@ -324,7 +324,7 @@ fn pixels_per_tile(rect: Rect, b: PlayableBounds) -> f32 {
 /// rich em amarelo-dourado, gás em verde vivo, rich vespene em violeta.
 fn resource_color(kind: ResourceKind) -> Color32 {
     match kind {
-        ResourceKind::Mineral => Color32::from_rgb(100, 180, 220),
+        ResourceKind::Mineral => Color32::from_rgb(70, 215, 230),
         ResourceKind::RichMineral => Color32::from_rgb(235, 200, 80),
         ResourceKind::Vespene => Color32::from_rgb(60, 200, 110),
         ResourceKind::RichVespene => Color32::from_rgb(170, 90, 220),
