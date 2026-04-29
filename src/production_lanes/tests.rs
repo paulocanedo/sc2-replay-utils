@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::replay::{is_larva_born_army, EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline};
+use crate::replay::{is_larva_born_army, EntityCategory, EntityEvent, EntityEventKind, PlayerTimeline, ProductionCmd};
 
 use super::morph::is_consumable_progenitor;
 use super::player::extract_player;
@@ -797,4 +797,199 @@ fn army_zerg_overlord_via_cocoon_creates_block() {
         .collect();
     assert_eq!(prod.len(), 1, "Overlord via cocoon deve gerar 1 bloco");
     assert_eq!(prod[0].produced_type, Some("Overlord"));
+}
+
+// ─── Helpers para os testes de resolução de parent de addon ─────────
+// (`ev_at` já está definido acima — reusamos.)
+
+fn cmd(game_loop: u32, ability: &str, producer_tag: i64) -> ProductionCmd {
+    ProductionCmd {
+        game_loop,
+        ability: ability.to_string(),
+        producer_tags: vec![producer_tag],
+        consumed: false,
+    }
+}
+
+fn player_with_events_and_cmds(
+    events: Vec<EntityEvent>,
+    cmds: Vec<ProductionCmd>,
+    race: &str,
+) -> PlayerTimeline {
+    let mut p = player_with_events(events, race);
+    p.production_cmds = cmds;
+    p
+}
+
+// ─── Lift/land refresh (C) ──────────────────────────────────────────
+
+/// Barracks nasce em (50, 50), decola, pousa em (80, 80). Depois um
+/// Reactor é construído em (83, 80). Pela geometria atualizada o offset
+/// (+3, 0) bate com a NOVA posição da Barracks. Sem o refresh em land,
+/// a lane.pos ficaria congelada em (50, 50) e a resolução do parent
+/// falharia (ou cairia no nearest sem semântica).
+#[test]
+fn army_terran_barracks_lift_and_land_updates_lane_position() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Lift-off: Died(Barracks) + Started/Finished(BarracksFlying) no mesmo loop.
+        ev_at(1000, 1, EntityEventKind::Died, "Barracks", 1, None, 50, 50),
+        ev_at(1000, 2, EntityEventKind::ProductionStarted, "BarracksFlying", 1, None, 50, 50),
+        ev_at(1000, 3, EntityEventKind::ProductionFinished, "BarracksFlying", 1, None, 50, 50),
+        // Land em (80, 80): Died(BarracksFlying) + Started/Finished(Barracks).
+        ev_at(2000, 4, EntityEventKind::Died, "BarracksFlying", 1, None, 80, 80),
+        ev_at(2000, 5, EntityEventKind::ProductionStarted, "Barracks", 1, None, 80, 80),
+        ev_at(2000, 6, EntityEventKind::ProductionFinished, "Barracks", 1, None, 80, 80),
+        // Reactor construído em (83, 80) — offset exato (+3, 0) da NOVA pos.
+        ev_at(2200, 7, EntityEventKind::ProductionStarted, "BarracksReactor", 2, None, 83, 80),
+        ev_at(2600, 8, EntityEventKind::ProductionFinished, "BarracksReactor", 2, None, 83, 80),
+    ];
+    let p = player_with_events(events, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    // Posição da lane reflete o pouso, não o born.
+    assert_eq!((lane.pos_x, lane.pos_y), (80, 80));
+    // Impeded foi atribuído à Barracks (única candidata) corretamente.
+    let imp: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Impeded)
+        .collect();
+    assert_eq!(imp.len(), 1);
+    assert_eq!(imp[0].start_loop, 2200);
+    assert_eq!(imp[0].end_loop, 2600);
+}
+
+// ─── Swap-skip (addon swap não emite Impeded duplicado) ─────────────
+
+/// BarracksReactor construído em uma Barracks. Player decola a Barracks
+/// e pousa uma Factory no mesmo Reactor — tracker emite UnitTypeChange
+/// que vira morph (Died + Started + Finished triplet) no MESMO tag do
+/// addon, com novo tipo "FactoryReactor". Esperado: apenas 1 Impeded
+/// (do construction original); o swap não tem janela impeditiva.
+#[test]
+fn army_terran_addon_swap_does_not_emit_extra_impeded_block() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        ev_at(105, 1, EntityEventKind::ProductionFinished, "Factory", 2, None, 60, 60),
+        // Construção original do Reactor na Barracks (loops 200..600).
+        ev_at(200, 2, EntityEventKind::ProductionStarted, "BarracksReactor", 99, Some(1), 53, 50),
+        ev_at(600, 3, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+        // Swap em loop 2000: Died(BarracksReactor) + Started/Finished(FactoryReactor)
+        // mesmo tag/loop. is_pure_morph_finish filtra o Finished e o
+        // is_swap (morph_old_type) filtra o Started — nenhum novo
+        // Impeded é registrado.
+        ev_at(2000, 4, EntityEventKind::Died, "BarracksReactor", 99, None, 53, 50),
+        ev_at(2000, 5, EntityEventKind::ProductionStarted, "FactoryReactor", 99, None, 53, 50),
+        ev_at(2000, 6, EntityEventKind::ProductionFinished, "FactoryReactor", 99, None, 53, 50),
+    ];
+    let p = player_with_events(events, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let total_impeded: usize = out
+        .lanes
+        .iter()
+        .map(|l| l.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count())
+        .sum();
+    assert_eq!(
+        total_impeded, 1,
+        "swap não deve adicionar Impeded; só a construção original conta"
+    );
+    // E o único Impeded ficou na Barracks (parent original), não na Factory.
+    let lane_b = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let lane_f = out.lanes.iter().find(|l| l.tag == 2).unwrap();
+    assert_eq!(
+        lane_b.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count(),
+        1,
+        "Barracks (tag 1) é o parent original; ela ganha o Impeded"
+    );
+    assert_eq!(
+        lane_f.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count(),
+        0,
+        "Factory (tag 2) não construiu o addon; não tem Impeded"
+    );
+}
+
+// ─── Cmd matching (A) ───────────────────────────────────────────────
+
+/// Duas Barracks vivas; o Reactor poderia geometricamente cair na
+/// errada. O cmd `BarracksReactor` aponta com `producer_tag` para a
+/// Barracks correta. Verificamos que A vence sobre B+nearest.
+#[test]
+fn army_terran_addon_parent_resolved_via_cmd_when_geometry_ambiguous() {
+    let events = vec![
+        // Barracks-A: parent geometricamente "natural" (offset 3,0).
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Barracks-B: parent que o cmd identifica (offset diferente).
+        ev_at(110, 1, EntityEventKind::ProductionFinished, "Barracks", 2, None, 47, 53),
+        // Reactor em (53, 50): Δ pra A = (3, 0) ✓, Δ pra B = (6, -3) ✗.
+        // Geometria sozinha pegaria A. Cmd diz que producer é B (tag 2).
+        ev_at(200, 2, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
+        ev_at(600, 3, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+    ];
+    let cmds = vec![cmd(200, "BarracksReactor", 2)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane_a = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let lane_b = out.lanes.iter().find(|l| l.tag == 2).unwrap();
+    let count = |l: &super::types::StructureLane| {
+        l.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count()
+    };
+    assert_eq!(count(lane_a), 0, "A não deveria receber Impeded — cmd diz que B é o parent");
+    assert_eq!(count(lane_b), 1, "B (cmd's producer_tag) recebe o Impeded");
+}
+
+/// Cmd com `producer_tag` apontando para uma estrutura **morta** ou
+/// inexistente é descartado (cmd órfão); a resolução cai no fallback
+/// geométrico. Sem essa validação, um cmd ruim levaria o Impeded para
+/// uma lane inválida e o block não apareceria em lane nenhuma.
+#[test]
+fn army_terran_addon_cmd_with_invalid_producer_tag_falls_back_to_geometry() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+    ];
+    // Cmd com producer_tag=999 (não existe nenhuma lane com esse tag).
+    let cmds = vec![cmd(200, "BarracksReactor", 999)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    assert_eq!(
+        lane.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count(),
+        1,
+        "fallback geométrico atribui à única Barracks viva"
+    );
+}
+
+// ─── Offset (+3, 0) preferido sobre nearest (B refinado) ────────────
+
+/// Cenário discriminante: a lane geometricamente mais próxima por d²
+/// NÃO é a que tem o offset canônico (+3, 0). Sem cmd disponível,
+/// o resolver deve preferir o offset exato sobre o nearest.
+#[test]
+fn army_terran_addon_resolver_prefers_canonical_offset_over_nearest() {
+    let events = vec![
+        // Barracks-A em (50, 50): Reactor em (53, 50) → Δ=(3, 0) ✓ canônico, d²=9.
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Barracks-B em (51, 51): Δ=(2, -1) → d²=5 (mais perto por d²!), mas
+        // offset não-canônico.
+        ev_at(110, 1, EntityEventKind::ProductionFinished, "Barracks", 2, None, 51, 51),
+        // Reactor sem cmd associado (creator_tag=None, sem production_cmds).
+        ev_at(200, 2, EntityEventKind::ProductionStarted, "BarracksReactor", 99, None, 53, 50),
+        ev_at(600, 3, EntityEventKind::ProductionFinished, "BarracksReactor", 99, None, 53, 50),
+    ];
+    let p = player_with_events(events, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane_a = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let lane_b = out.lanes.iter().find(|l| l.tag == 2).unwrap();
+    let count = |l: &super::types::StructureLane| {
+        l.blocks.iter().filter(|b| b.kind == BlockKind::Impeded).count()
+    };
+    assert_eq!(count(lane_a), 1, "A tem offset canônico (+3, 0); deveria ganhar mesmo sendo mais distante por d²");
+    assert_eq!(count(lane_b), 0, "B é mais próxima por d² mas offset errado");
 }
