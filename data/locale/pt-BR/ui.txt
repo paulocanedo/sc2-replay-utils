@@ -345,6 +345,8 @@ charts.production.coming_soon = Em breve.
 charts.production.player = Jogador:
 charts.production.empty.workers = Nenhuma estrutura produtora de worker encontrada.
 charts.production.empty.army = Nenhuma estrutura produtora de army encontrada.
+charts.production.empty.research = Nenhuma pesquisa registrada para este jogador.
+charts.production.empty.upgrades = Nenhum upgrade registrado para este jogador.
 charts.production.reset_view = Redefinir
 charts.production.reset_view.hint = Redefinir zoom e pan. Dica: scroll para zoom, arraste para pan, duplo-clique para redefinir.
 

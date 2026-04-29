@@ -1260,3 +1260,127 @@ fn army_terran_addon_resolver_prefers_canonical_offset_over_nearest() {
     assert_eq!(count(lane_a), 1, "A tem offset canônico (+3, 0); deveria ganhar mesmo sendo mais distante por d²");
     assert_eq!(count(lane_b), 0, "B é mais próxima por d² mas offset errado");
 }
+
+// ── Research / Upgrades ─────────────────────────────────────────────
+
+fn upgrade(gl: u32, seq: u32, name: &str) -> crate::replay::UpgradeEntry {
+    crate::replay::UpgradeEntry {
+        game_loop: gl,
+        seq,
+        name: name.into(),
+    }
+}
+
+#[test]
+fn research_emits_block_on_producer_lane() {
+    // BarracksTechLab viva pesquisa Stimpack. Stimpack tem build_time
+    // de ~1760 loops no balance_data — escolhemos cmd/finish com gap
+    // suficiente pra satisfazer `cmd_loop <= finish_loop - bt/2`.
+    let events = vec![
+        ev(100, 0, EntityEventKind::ProductionFinished, "BarracksTechLab", 1, None),
+    ];
+    let mut p = player_with_events(events, "Terran");
+    p.upgrades = vec![upgrade(2200, 10, "Stimpack")];
+    p.production_cmds = vec![cmd(1000, "Stimpack", 1)];
+
+    let out = extract_player(&p, 0, LaneMode::Research);
+    assert_eq!(out.lanes.len(), 1);
+    let lane = &out.lanes[0];
+    assert_eq!(lane.canonical_type, "BarracksTechLab");
+    assert_eq!(lane.blocks.len(), 1);
+    assert_eq!(lane.blocks[0].kind, BlockKind::Producing);
+    assert_eq!(lane.blocks[0].start_loop, 1000, "start vem do cmd_loop");
+    assert_eq!(lane.blocks[0].end_loop, 2200, "end vem do upgrade.game_loop");
+}
+
+#[test]
+fn upgrades_emits_sequential_blocks_on_producer_lane() {
+    // Forge fazendo W1 → W2. Build_time real do W1 é ~4032 loops, W2
+    // ~4928 — precisamos de gap mínimo bt/2 entre cmd e finish para
+    // satisfazer a constraint causal.
+    let events = vec![
+        ev(100, 0, EntityEventKind::ProductionFinished, "Forge", 1, None),
+    ];
+    let mut p = player_with_events(events, "Protoss");
+    p.upgrades = vec![
+        upgrade(5000, 10, "ProtossGroundWeaponsLevel1"),
+        upgrade(11000, 11, "ProtossGroundWeaponsLevel2"),
+    ];
+    p.production_cmds = vec![
+        cmd(1000, "ProtossGroundWeaponsLevel1", 1),
+        cmd(6000, "ProtossGroundWeaponsLevel2", 1),
+    ];
+
+    let out = extract_player(&p, 0, LaneMode::Upgrades);
+    assert_eq!(out.lanes.len(), 1);
+    let lane = &out.lanes[0];
+    assert_eq!(lane.canonical_type, "Forge");
+    assert_eq!(lane.blocks.len(), 2);
+    assert_eq!(lane.blocks[0].start_loop, 1000);
+    assert_eq!(lane.blocks[0].end_loop, 5000);
+    assert_eq!(lane.blocks[1].start_loop, 6000);
+    assert_eq!(lane.blocks[1].end_loop, 11000);
+}
+
+#[test]
+fn research_mode_filters_out_leveled_upgrades() {
+    // Mesma fixture com leveled upgrade — em modo Research, lane some
+    // (sem blocos = sem lane se ela não recebeu nenhum upgrade do tipo
+    // certo; mas a estrutura é criada como lane porque
+    // `lane_canonical("Forge", Research) = Some`. Então ela aparece
+    // mas sem blocos).
+    let events = vec![
+        ev(100, 0, EntityEventKind::ProductionFinished, "Forge", 1, None),
+    ];
+    let mut p = player_with_events(events, "Protoss");
+    p.upgrades = vec![upgrade(900, 10, "ProtossGroundWeaponsLevel1")];
+    p.production_cmds = vec![cmd(500, "ProtossGroundWeaponsLevel1", 1)];
+
+    let out = extract_player(&p, 0, LaneMode::Research);
+    assert_eq!(out.lanes.len(), 1);
+    assert!(
+        out.lanes[0].blocks.is_empty(),
+        "leveled upgrade não deve aparecer no modo Research"
+    );
+}
+
+#[test]
+fn upgrades_mode_filters_out_one_shot_research() {
+    let events = vec![
+        ev(100, 0, EntityEventKind::ProductionFinished, "EngineeringBay", 1, None),
+    ];
+    let mut p = player_with_events(events, "Terran");
+    p.upgrades = vec![upgrade(800, 10, "Stimpack")];
+    p.production_cmds = vec![cmd(500, "Stimpack", 1)];
+
+    let out = extract_player(&p, 0, LaneMode::Upgrades);
+    assert_eq!(out.lanes.len(), 1);
+    assert!(
+        out.lanes[0].blocks.is_empty(),
+        "research one-shot não deve aparecer no modo Upgrades"
+    );
+}
+
+#[test]
+fn research_orphan_cmd_drops_block_silently() {
+    // Cmd sem producer_tags (cmd órfão) — não conseguimos rotear pra
+    // uma lane, então o bloco é descartado silenciosamente em vez de
+    // criar uma lane fantasma.
+    let events = vec![
+        ev(100, 0, EntityEventKind::ProductionFinished, "EngineeringBay", 1, None),
+    ];
+    let mut p = player_with_events(events, "Terran");
+    p.upgrades = vec![upgrade(800, 10, "Stimpack")];
+    p.production_cmds = vec![ProductionCmd {
+        game_loop: 500,
+        ability: "Stimpack".into(),
+        producer_tags: vec![],
+        consumed: false,
+    }];
+
+    let out = extract_player(&p, 0, LaneMode::Research);
+    // EngineeringBay vira lane (lane_canonical reconhece em modo
+    // Research) mas sem blocos atribuídos.
+    assert_eq!(out.lanes.len(), 1);
+    assert!(out.lanes[0].blocks.is_empty());
+}

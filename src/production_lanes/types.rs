@@ -5,6 +5,14 @@
 pub enum LaneMode {
     Workers,
     Army,
+    /// Pesquisas one-shot (Stimpack, Blink, WarpGate, etc.). Lane =
+    /// estrutura-de-pesquisa; bloco = janela `[cmd_loop, finish_loop]`
+    /// do upgrade não-leveled. Filtra entradas que terminem em
+    /// `Level1/2/3` (essas vão para o modo `Upgrades`).
+    Research,
+    /// Upgrades leveled (Weapons/Armor/Shields 1-3). Mesma estrutura
+    /// visual que `Research`, com filtro inverso por sufixo de nível.
+    Upgrades,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

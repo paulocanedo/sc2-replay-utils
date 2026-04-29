@@ -3,10 +3,10 @@
 //
 //   Workers | Army | Pesquisas | Upgrades
 //
-// `Workers` e `Army` compartilham o pipeline de extração e render
-// (`production_lanes`), variando apenas o `LaneMode` consumido. As lanes
-// se desenham igual: ícone da estrutura à esquerda + Gantt horizontal
-// com baseline fina + blocos de produção/morph/impeded.
+// Todos os modos compartilham o mesmo pipeline de extração e render
+// (`production_lanes`), variando apenas o `LaneMode` consumido. As
+// lanes se desenham igual: ícone da estrutura à esquerda + Gantt
+// horizontal com baseline fina + blocos de produção/morph/impeded.
 //
 // `Army` adiciona o bloco `Impeded` (Terran com addon em construção,
 // renderizado em `ACCENT_WARNING` — mesma cor do morph CC→Orbital, já
@@ -16,8 +16,11 @@
 // que warpgates podem warpinar várias unidades em rajadas paralelas
 // entre estruturas distintas.
 //
-// `Pesquisas` e `Upgrades` ficam como stubs por enquanto — só o seletor
-// fica visível com label "Em breve".
+// `Pesquisas` e `Upgrades` constroem lanes a partir das estruturas-de-
+// pesquisa (EngineeringBay, Forge, EvoChamber, TechLabs, etc.) e
+// atribuem cada `UpgradeEntry` ao produtor via `producer_tag` do cmd
+// casado por nome. A separação entre os dois modos é por sufixo do
+// nome: leveled (`*Level1/2/3`) → Upgrades, demais → Research.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -116,24 +119,11 @@ pub fn show(
         opts.selected_player = 0;
     }
 
-    // Pesquisas/Upgrades continuam como stubs até serem implementados.
-    // Workers e Army usam o mesmo pipeline (`production_lanes`), variando
-    // apenas o `LaneMode` consumido.
-    match opts.view {
-        ProductionView::Research | ProductionView::Upgrades => {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(t("charts.production.coming_soon", lang)).italics(),
-            );
-            return;
-        }
-        _ => {}
-    }
-
     let mode = match opts.view {
         ProductionView::Workers => LaneMode::Workers,
         ProductionView::Army => LaneMode::Army,
-        _ => unreachable!(),
+        ProductionView::Research => LaneMode::Research,
+        ProductionView::Upgrades => LaneMode::Upgrades,
     };
 
     // Cabeçalho: seletor de jogador + reset.
@@ -176,6 +166,8 @@ pub fn show(
         let key = match mode {
             LaneMode::Workers => "charts.production.empty.workers",
             LaneMode::Army => "charts.production.empty.army",
+            LaneMode::Research => "charts.production.empty.research",
+            LaneMode::Upgrades => "charts.production.empty.upgrades",
         };
         ui.label(egui::RichText::new(t(key, lang)).italics());
         return;
@@ -193,10 +185,15 @@ pub fn show(
     let row_height = match mode {
         LaneMode::Workers => ROW_HEIGHT_WORKERS,
         LaneMode::Army => ROW_HEIGHT_ARMY,
+        // Pesquisas/Upgrades reaproveitam as mesmas dimensões que
+        // Workers — mesma altura de ícone (28) e bloco (22) deixa as
+        // quatro views consistentes na altura de cada lane.
+        LaneMode::Research | LaneMode::Upgrades => ROW_HEIGHT_WORKERS,
     };
     let block_height = match mode {
         LaneMode::Workers => BLOCK_HEIGHT_WORKERS,
         LaneMode::Army => BLOCK_HEIGHT_ARMY,
+        LaneMode::Research | LaneMode::Upgrades => BLOCK_HEIGHT_WORKERS,
     };
 
     let total_w = ui.available_width();

@@ -39,15 +39,71 @@ pub(super) fn army_producer_canonical(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Estruturas que pesquisam upgrades (modo Research/Upgrades). As duas
+/// views compartilham o mesmo conjunto de produtores — só muda o
+/// filtro de quais upgrades cada uma exibe (leveled vs one-shot,
+/// `is_leveled_upgrade`).
+pub(super) fn research_producer_canonical(name: &str) -> Option<&'static str> {
+    Some(match name {
+        // Terran
+        "EngineeringBay" => "EngineeringBay",
+        "Armory" => "Armory",
+        "GhostAcademy" => "GhostAcademy",
+        "FusionCore" => "FusionCore",
+        "BarracksTechLab" => "BarracksTechLab",
+        "FactoryTechLab" => "FactoryTechLab",
+        "StarportTechLab" => "StarportTechLab",
+        // Protoss
+        "Forge" => "Forge",
+        "CyberneticsCore" => "CyberneticsCore",
+        "TwilightCouncil" => "TwilightCouncil",
+        "TemplarArchive" => "TemplarArchive",
+        "DarkShrine" => "DarkShrine",
+        "RoboticsBay" => "RoboticsBay",
+        "FleetBeacon" => "FleetBeacon",
+        // Zerg
+        "EvolutionChamber" => "EvolutionChamber",
+        "Spire" => "Spire",
+        "GreaterSpire" => "GreaterSpire",
+        "HydraliskDen" => "HydraliskDen",
+        "LurkerDen" | "LurkerDenMP" => "LurkerDen",
+        "BanelingNest" => "BanelingNest",
+        "RoachWarren" => "RoachWarren",
+        "InfestationPit" => "InfestationPit",
+        "UltraliskCavern" => "UltraliskCavern",
+        "NydusNetwork" => "NydusNetwork",
+        // Townhalls Zerg pesquisam Burrow / PneumatizedCarapace.
+        "Hatchery" => "Hatchery",
+        "Lair" => "Lair",
+        "Hive" => "Hive",
+        _ => return None,
+    })
+}
+
 pub(super) fn lane_canonical(name: &str, mode: LaneMode) -> Option<&'static str> {
     match mode {
         LaneMode::Workers => townhall_canonical(name),
         LaneMode::Army => army_producer_canonical(name),
+        LaneMode::Research | LaneMode::Upgrades => research_producer_canonical(name),
     }
+}
+
+/// SC2 sufixa upgrades com níveis com `Level1/2/3` (ex.
+/// `TerranInfantryWeaponsLevel2`, `ProtossGroundArmorLevel1`). Pesquisas
+/// one-shot (`Stimpack`, `WarpGateResearch`, `Blink`, `Burrow`, …) não
+/// têm esse sufixo. Heurística canônica usada também pelo
+/// `build_order::classify` — duplicada aqui pra evitar dependência
+/// cruzada entre os módulos.
+pub(super) fn is_leveled_upgrade(name: &str) -> bool {
+    name.ends_with("Level1") || name.ends_with("Level2") || name.ends_with("Level3")
 }
 
 pub(super) fn is_target_unit(name: &str, mode: LaneMode, is_zerg: bool) -> bool {
     match mode {
+        // Modos baseados em `player.upgrades` em vez de unit-production —
+        // o pass principal sobre `entity_events` só usa o early-return
+        // de `lane_canonical` pra criar lanes; nenhuma unit é alvo.
+        LaneMode::Research | LaneMode::Upgrades => false,
         LaneMode::Workers => matches!(name, "SCV" | "Probe" | "Drone"),
         LaneMode::Army => {
             if is_worker_name(name) {
