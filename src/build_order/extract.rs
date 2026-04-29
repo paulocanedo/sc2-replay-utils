@@ -72,6 +72,13 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     // mais recente prevalece, que é o estado plausível no momento do
     // inject (que sempre vem depois da estrutura nascer).
     let mut index_to_producer_id: HashMap<u32, u32> = HashMap::new();
+    // Larva → tag da Hatchery/Lair/Hive que a originou. Usado para
+    // "saltar" a Larva ao exibir o produtor de unidades Zerg: um
+    // Zergling tem `creator_tag = larva_tag`, mas o produtor
+    // humanamente significativo é a base que gerou aquela larva.
+    // O engine popula `creator_unit_tag_*` em 100% dos UnitBorn de
+    // Larva (auditado via diagnóstico no replay do Serral).
+    let mut larva_to_creator: HashMap<i64, i64> = HashMap::new();
     for ev in &player.entity_events {
         if ev.kind == EntityEventKind::ProductionCancelled {
             cancel_by_tag.insert(ev.tag, (ev.game_loop, ev.killer_player_id));
@@ -84,6 +91,13 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             *counter += 1;
             tag_to_producer_id.insert(ev.tag, *counter);
             index_to_producer_id.insert(unit_tag_index(ev.tag), *counter);
+            // Captura larva → criador na primeira aparição da tag.
+            // Só registra Larvae cujo `creator_tag` está disponível.
+            if ev.entity_type == "Larva" {
+                if let Some(creator) = ev.creator_tag {
+                    larva_to_creator.insert(ev.tag, creator);
+                }
+            }
         }
     }
 
@@ -311,10 +325,19 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         let (producer_type, producer_id) = if from_unit_init {
             (None, None)
         } else {
-            let t_ = ev.creator_tag.and_then(|t| tag_to_type.get(&t).cloned());
-            let id = ev
+            // Hop através da Larva: pra unidades Zerg morfadas (Drone,
+            // Zergling, Roach, etc.), `creator_tag` aponta pra Larva
+            // consumida — sem informação útil pro usuário. Substitui
+            // pelo criador da Larva (Hatchery/Lair/Hive) quando temos
+            // esse mapeamento. Pra outros casos (trains de Marine,
+            // Zealot, etc., e morphs in-place tipo CC→Orbital) não há
+            // entrada em `larva_to_creator`, então o tag passa
+            // inalterado.
+            let resolved = ev
                 .creator_tag
-                .and_then(|t| tag_to_producer_id.get(&t).copied());
+                .map(|t| larva_to_creator.get(&t).copied().unwrap_or(t));
+            let t_ = resolved.and_then(|t| tag_to_type.get(&t).cloned());
+            let id = resolved.and_then(|t| tag_to_producer_id.get(&t).copied());
             (t_, id)
         };
 

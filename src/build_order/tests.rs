@@ -388,6 +388,75 @@ fn inject_action_uses_producer_id_format() {
 }
 
 #[test]
+fn zerg_units_show_hatch_as_producer_not_larva() {
+    // Para unidades Zerg morfadas a partir de Larva (Drone, Zergling,
+    // Overlord, etc.), o `producer_type` deve ser a Hatchery/Lair/Hive
+    // de origem, não "Larva" — o engine populamos `creator_unit_tag_*`
+    // de cada Larva com a base que a gerou, então conseguimos saltar
+    // a Larva no display.
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/serral.SC2Replay");
+    let t = parse_replay(&path, 0).expect("parse");
+    let bo = extract_build_order(&t).expect("bo");
+
+    let zerg = bo
+        .players
+        .iter()
+        .find(|p| p.race == "Zerg")
+        .expect("zerg player");
+
+    let larva_morphs: Vec<&BuildOrderEntry> = zerg
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.action.as_str(),
+                "Drone" | "Zergling" | "Overlord" | "Roach" | "Hydralisk" | "Mutalisk"
+            )
+        })
+        .collect();
+
+    assert!(
+        !larva_morphs.is_empty(),
+        "esperava ao menos uma unidade Zerg morfada de Larva no replay",
+    );
+
+    // Nenhuma entry deve mostrar "Larva" como producer_type — todas
+    // devem apontar pra Hatchery/Lair/Hive.
+    let leaked: Vec<&BuildOrderEntry> = larva_morphs
+        .iter()
+        .copied()
+        .filter(|e| e.producer_type.as_deref() == Some("Larva"))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "{} entrada(s) de unidade Zerg ainda mostram 'Larva' como producer (hop falhou): {:?}",
+        leaked.len(),
+        leaked
+            .iter()
+            .take(3)
+            .map(|e| (e.action.clone(), e.producer_id))
+            .collect::<Vec<_>>(),
+    );
+
+    // E pelo menos uma deve apontar pra Hatchery/Lair/Hive.
+    let hatched: usize = larva_morphs
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.producer_type.as_deref(),
+                Some("Hatchery") | Some("Lair") | Some("Hive")
+            )
+        })
+        .count();
+    assert!(
+        hatched > 0,
+        "esperava ao menos uma unidade Zerg com producer Hatchery/Lair/Hive; viram 0 de {}",
+        larva_morphs.len(),
+    );
+}
+
+#[test]
 fn structure_unit_init_populates_finish_loop() {
     // Estruturas vindas de UnitInit têm `game_loop` no instante de
     // início (quando o SCV/Probe começa a construir). O extractor

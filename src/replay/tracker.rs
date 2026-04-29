@@ -192,11 +192,19 @@ pub(super) fn process_tracker_events(
 
                 let category = classify_entity(&e.unit_type_name);
                 let creator_ability = e.creator_ability_name.clone().filter(|s| !s.is_empty());
-                // Tag completo do prédio produtor (Gateway/Robo/Stargate/
-                // Nexus/CC/etc.). Disponível pra unidades treinadas; vem
-                // como None pra spawns iniciais e larvas. O build_order
-                // usa esse tag pra encadear `start = max(cmd, prev_finish)`
-                // por produtor; quando é None ele cai no fallback antigo.
+                // Tag completo do produtor de uma `UnitBornEvent`:
+                // - Para unidades treinadas (Marine, Zealot, etc.): a estrutura produtora
+                //   (Barracks/Gateway/etc.).
+                // - Para larvas: a Hatchery/Lair/Hive de origem — o engine popula esse
+                //   campo em 100% dos UnitBorn de Larva (auditado via diagnóstico em
+                //   serral.SC2Replay: 827/827 larvae com creator_unit_tag_* setado).
+                //   `creator_ability_name` vem vazia, mas o tag está lá.
+                // - None apenas em spawns iniciais sem produtor (recursos neutros
+                //   já são filtrados antes).
+                //
+                // O build_order usa esse tag pra encadear `start = max(cmd, prev_finish)`
+                // por produtor e pra resolver a coluna de "producer" no display
+                // (incluindo o salto Larva → Hatch para unidades Zerg morfadas).
                 let creator_tag = match (e.creator_unit_tag_index, e.creator_unit_tag_recycle) {
                     (Some(ci), Some(cr)) => Some(unit_tag(ci, cr)),
                     _ => None,
