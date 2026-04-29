@@ -1096,19 +1096,18 @@ fn army_terran_reactor_parallel_pair_shares_start_loop() {
         .iter()
         .filter(|b| b.kind == BlockKind::Producing)
         .collect();
-    // Ambas as Marines devem ter `start_loop = 1500` (cmd_loop). Sem o
-    // fix, a segunda teria start = 2000 (instant), mergeria com a
-    // primeira via `merge_continuous`, e o resultado seria 1 bloco
-    // 1500..2000 — o teste passaria por acidente. Aqui forçamos a
-    // verificação ANTES do merge: as 2 entries individuais devem ter
-    // start_loop idêntico.
-    //
-    // Após `merge_continuous`, ambos os blocks (start=1500, finish=2000,
-    // mesmo produced_type) viram um só bloco. Verificamos que o bloco
-    // resultante tem start correto (não é o "instant" do bug).
-    assert_eq!(prod.len(), 1, "merge_continuous funde os 2 blocks com mesmo start em 1");
-    assert_eq!(prod[0].start_loop, 1500, "start_loop deve ser o cmd, não o finish (instant)");
+    // Após restauração da render dual-track: os 2 blocks do par têm
+    // sub_tracks distintos (0 e 1) e o `merge_continuous` preserva
+    // ambos pra que o renderer pinte top/bottom. Ambos compartilham o
+    // mesmo start_loop (=cmd) e end_loop (=finish da segunda).
+    assert_eq!(prod.len(), 2, "par paralelo mantém 2 blocks distintos (sub_track 0 e 1)");
+    assert_eq!(prod[0].start_loop, 1500);
     assert_eq!(prod[0].end_loop, 2000);
+    assert_eq!(prod[1].start_loop, 1500);
+    assert_eq!(prod[1].end_loop, 2000);
+    let mut tracks: Vec<u8> = prod.iter().map(|b| b.sub_track).collect();
+    tracks.sort();
+    assert_eq!(tracks, vec![0, 1], "primeira sibling sub_track=0, segunda sub_track=1");
 }
 
 /// Sanity: produção sequencial NÃO é par paralelo, mesmo com 2
@@ -1174,14 +1173,17 @@ fn army_terran_reactor_parallel_pair_with_small_offset_still_detected() {
         .filter(|b| b.kind == BlockKind::Producing)
         .collect();
     // Sem tolerância: 2 blocos — primeiro 1500..2000 (correto), segundo
-    // 2000..2013 (instant-like, herda prev=2000). Após merge_continuous,
-    // viraria 1 bloco 1500..2013.
-    // Com tolerância: 2 blocos com mesmo start=1500 e finishes 2000/2013.
-    // Após merge, 1 bloco 1500..2013. O start=1500 confirma que o
-    // segundo herdou e não caiu no override.
-    assert_eq!(prod.len(), 1);
-    assert_eq!(prod[0].start_loop, 1500, "start deve ser cmd_loop, não prev_finish");
-    assert_eq!(prod[0].end_loop, 2013);
+    // 2000..2013 (instant-like, herda prev=2000). Com tolerância: 2
+    // blocos com mesmo start=1500 (segundo herda do primeiro), em
+    // sub_tracks distintos pra render dual-track. Não mesclam.
+    assert_eq!(prod.len(), 2, "par paralelo (gap=13) mantém 2 blocks distintos");
+    assert_eq!(prod[0].start_loop, 1500, "primeiro do par");
+    assert_eq!(prod[0].end_loop, 2000);
+    assert_eq!(prod[1].start_loop, 1500, "segundo herda start do primeiro, não cai no instant");
+    assert_eq!(prod[1].end_loop, 2013);
+    let mut tracks: Vec<u8> = prod.iter().map(|b| b.sub_track).collect();
+    tracks.sort();
+    assert_eq!(tracks, vec![0, 1]);
 }
 
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
