@@ -103,33 +103,47 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         }
     }
     let mut consumed = vec![false; player.production_cmds.len()];
-    let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
-    // Último `start_loop` computado por produtor — usado para detectar
-    // pares paralelos (Reactor): quando duas unidades têm
-    // `finish_loop` PRÓXIMO no mesmo producer (gap ≤
-    // PARALLEL_PAIR_TOLERANCE), são "siblings" do mesmo cmd (1 click,
-    // Reactor emite 2 unidades simultâneas que o engine reporta com
-    // 0-15 loops de offset). A segunda do par herda o `start` da
-    // primeira em vez de tentar consumir um cmd separado e cair no
-    // override `cmd.max(prev_finish=projected_finish)` — esse
-    // override transformava a segunda Marine em entrada instantânea
-    // (start = finish, ex.: "Marine às 8:48 → 8:48").
-    let mut prev_start_by_producer: HashMap<i64, u32> = HashMap::new();
-    // Tolerância em game loops para detectar par paralelo do Reactor
-    // (mecânica exclusiva Terran — Reactor é o único caso onde uma
-    // estrutura emite 2 unidades por 1 cmd no SC2). Pares paralelos
-    // observados no replay Winter Madness LE têm gap de 0-37 loops
-    // entre os dois Born events.
+    // Slot-tracking per-producer: end_loop da última unidade computada
+    // em cada slot. Slot 0 = trilha única (sem Reactor) ou superior
+    // (com Reactor); Slot 1 = inferior (apenas com Reactor ativo).
     //
-    // Sequencial mínimo para qualquer unidade SC2:
-    //   - Marine (Terran, build fixo): 380 loops.
-    //   - Probe (Protoss) com chronoboost máximo: ~179 loops.
-    //   - Drone (Zerg, larva-born): ~269 loops.
-    //
-    // 50 cobre o pior par paralelo observado com folga ~3.5× para o
-    // sequencial mais curto teórico (Probe+chrono). Sem falso
-    // positivo conhecido.
-    const PARALLEL_PAIR_TOLERANCE: u32 = 50;
+    // Modelo: 1 click = 1 unidade. O Reactor não emite par 1→2 — apenas
+    // habilita capacidade-2 concorrente. Cada Marine consome seu próprio
+    // cmd; quando o Reactor está ativo e há slot livre em `raw_start`,
+    // o `start_loop` da entry é o cmd_loop direto (sem clamping ao
+    // finish da unidade anterior).
+    let mut slot_end_by_producer: HashMap<i64, [u32; 2]> = HashMap::new();
+
+    // Pré-passada: detecta janelas em que cada producer tem Reactor
+    // ativo. Usa cmds de Build_Reactor (`BarracksReactor`/`FactoryReactor`/
+    // `StarportReactor`): após `cmd.game_loop + reactor_build_time`, o
+    // parent tem capacidade dupla. Cancellations/destructions são raras
+    // o suficiente que o over-counting marginal não justifica complexidade
+    // adicional — o pior caso é tratar uma única unidade como paralela
+    // quando deveria ter sido sequencial.
+    let mut reactor_finish_by_parent: HashMap<i64, u32> = HashMap::new();
+    for cmd in &player.production_cmds {
+        let is_reactor = matches!(
+            cmd.ability.as_str(),
+            "BarracksReactor" | "FactoryReactor" | "StarportReactor"
+        );
+        if !is_reactor {
+            continue;
+        }
+        let Some(&parent) = cmd.producer_tags.first() else {
+            continue;
+        };
+        let bt = build_time_loops(&cmd.ability, base_build);
+        let finish = cmd.game_loop.saturating_add(bt);
+        reactor_finish_by_parent
+            .entry(parent)
+            .and_modify(|e| {
+                if finish < *e {
+                    *e = finish;
+                }
+            })
+            .or_insert(finish);
+    }
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
@@ -185,30 +199,14 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         let max_cmd_loop = projected_finish
             .saturating_sub(build_time_loops(&ev.entity_type, base_build) / 2);
 
-        // Detecção de par paralelo (Reactor) ANTES de tentar cmd
-        // matching: se já houve uma unidade emitida pelo mesmo
-        // `creator_tag` com `projected_finish` PRÓXIMO (gap ≤
-        // PARALLEL_PAIR_TOLERANCE), esta é a "irmã" do mesmo cmd —
-        // não consumimos cmd novo e herdamos o `start_loop`. Sem
-        // isso, a segunda Marine cairia no
-        // `cmd_loop.max(prev_finish=projected_finish)` e renderiza
-        // como entrada instantânea (start = finish).
-        let is_parallel_pair = !from_unit_init
-            && ev.creator_tag
-                .map(|t| {
-                    prev_finish_by_producer
-                        .get(&t)
-                        .copied()
-                        .map(|prev| {
-                            prev > 0
-                                && projected_finish.saturating_sub(prev)
-                                    <= PARALLEL_PAIR_TOLERANCE
-                        })
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-
-        let cmd_match: Option<(i64, u32)> = if from_unit_init || is_parallel_pair {
+        // Cada unidade-target consome seu próprio cmd (1 click = 1
+        // unidade). O Reactor não emite par 1→2 — apenas dobra a
+        // capacidade de produção concorrente do producer. Mantemos
+        // last-valid no matching (filtra phantom cmds antigos); slot-
+        // tracking abaixo aceita atribuições eventualmente cruzadas
+        // como custo aceitável para preservar a robustez contra
+        // phantoms vista em replays reais.
+        let cmd_match: Option<(i64, u32)> = if from_unit_init {
             None
         } else {
             ev.creator_tag.and_then(|t| {
@@ -224,22 +222,41 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             })
         };
 
+        // Slot-tracking: determina `start_loop` respeitando capacidade
+        // do producer. Sem Reactor: 1 slot, próxima unidade enfileira
+        // após a anterior (start = max(cmd_loop, slot0_end)). Com
+        // Reactor ativo em `raw_start`: 2 slots; se houver livre, o
+        // start é o cmd_loop direto (paralelismo real). Se ambos
+        // ocupados em raw_start, enfileira no que liberar primeiro.
         let start_loop = if from_unit_init {
             raw_loop
-        } else if is_parallel_pair {
-            // Par paralelo: herda o `start_loop` da primeira do par.
-            // `creator_tag` está garantidamente Some pelo `is_parallel_pair`.
-            ev.creator_tag
-                .and_then(|t| prev_start_by_producer.get(&t).copied())
-                .unwrap_or_else(|| {
-                    subtract_build_time(raw_loop, &ev.entity_type, base_build)
-                })
         } else if let Some((producer_tag, cmd_loop)) = cmd_match {
-            let prev = prev_finish_by_producer
+            let reactor_active = reactor_finish_by_parent
                 .get(&producer_tag)
-                .copied()
-                .unwrap_or(0);
-            cmd_loop.max(prev)
+                .map(|&r| r <= cmd_loop)
+                .unwrap_or(false);
+            let slots = slot_end_by_producer
+                .entry(producer_tag)
+                .or_insert([0, 0]);
+            let (start, slot_idx) = if reactor_active {
+                let s0_free = slots[0] <= cmd_loop;
+                let s1_free = slots[1] <= cmd_loop;
+                match (s0_free, s1_free) {
+                    (true, _) => (cmd_loop, 0usize),
+                    (false, true) => (cmd_loop, 1usize),
+                    (false, false) => {
+                        if slots[0] <= slots[1] {
+                            (slots[0], 0usize)
+                        } else {
+                            (slots[1], 1usize)
+                        }
+                    }
+                }
+            } else {
+                (cmd_loop.max(slots[0]), 0usize)
+            };
+            slots[slot_idx] = projected_finish;
+            start
         } else {
             // Fallback: mantém o cálculo legado para entradas sem
             // produtor identificável (warp-ins e ramos onde game.rs
@@ -247,24 +264,6 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             // data não conhece o `(producer, ability_id, cmd_index)`).
             subtract_build_time(raw_loop, &ev.entity_type, base_build)
         };
-
-        // Encadeia o próximo cmd do mesmo produtor no `projected_finish`
-        // observado — assim a próxima unidade da fila não pode começar
-        // antes do término da atual, mesmo que o jogador tenha clicado
-        // o train cedo (queue de cmds enquanto a anterior produz).
-        if let Some((producer_tag, _)) = cmd_match {
-            prev_finish_by_producer.insert(producer_tag, projected_finish);
-            prev_start_by_producer.insert(producer_tag, start_loop);
-        } else if is_parallel_pair {
-            // Em par paralelo, a segunda da dupla tem `projected_finish`
-            // alguns loops após a primeira (engine emite com pequeno
-            // offset). Avança o chain para o finish da SEGUNDA — caso
-            // contrário a próxima unidade sequencial encadearia do
-            // finish da primeira, ficando 2-15 loops antes do real.
-            if let Some(t) = ev.creator_tag {
-                prev_finish_by_producer.insert(t, projected_finish);
-            }
-        }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou
         // ao fim — o `finish_loop` real é o instante do cancel, e o

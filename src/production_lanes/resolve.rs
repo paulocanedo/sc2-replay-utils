@@ -35,7 +35,9 @@ pub(super) fn consume_producer_cmd(
     // Queue está em ordem cronológica (insertion order via iteração
     // sequencial sobre `production_cmds`, que já vem ordenado por
     // game_loop). Iteramos até bater no primeiro cmd > max_cmd_loop
-    // e retornamos o ÚLTIMO válido visto até lá.
+    // e retornamos o ÚLTIMO válido visto até lá — filtra phantoms
+    // (cliques antigos cancelados ou dobrados que ficariam à frente
+    // da fila e roubariam o cmd da unidade real).
     let mut last_valid: Option<usize> = None;
     for &i in queue {
         if consumed[i] {

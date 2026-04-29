@@ -64,37 +64,19 @@ pub(super) fn extract_player(
     // pipelines de pareamento.
     let mut addon_cmd_consumed = vec![false; player.production_cmds.len()];
 
-    // Last finish loop por creator_tag. Cada unidade pareada começa em
-    // `max(cmd_loop, last_finish)` para herdar a semântica de fila do
-    // `build_order` (sem paralelismo: produções concorrentes da mesma
-    // estrutura ficam encostadas em vez de sobrepostas, e o
-    // `merge_continuous` posteriormente as funde no mesmo bloco).
-    let mut last_finish_by_creator: HashMap<i64, u32> = HashMap::new();
-    // Last start loop por creator_tag — usado para detectar pares
-    // paralelos do Reactor: quando duas unidades têm finish_loops
-    // **próximos** no mesmo producer (gap ≤ PARALLEL_PAIR_TOLERANCE),
-    // são "siblings" do mesmo cmd (ex.: 2 Marines treinando em
-    // paralelo numa Barracks com Reactor — o engine emite os Born
-    // events com 0-15 loops de diferença, não exatamente o mesmo
-    // loop). A segunda do par herda o start da primeira em vez de
-    // consumir um cmd separado.
-    let mut last_start_by_creator: HashMap<i64, u32> = HashMap::new();
-    // Tolerância em game loops para detectar par paralelo do Reactor
-    // (mecânica exclusiva Terran — Reactor é o único caso onde uma
-    // estrutura emite 2 unidades por 1 cmd no SC2). Pares paralelos
-    // observados no replay Winter Madness LE têm gap de 0-37 loops
-    // entre os dois Born events (engine emite com pequeno offset por
-    // razões internas de tick/serialização).
+    // Slot-tracking per-lane: end_loop da última unidade `Producing`
+    // em cada slot. Slot 0 = trilha única (sem Reactor) ou trilha
+    // superior (com Reactor). Slot 1 = trilha inferior, ativa apenas
+    // quando a lane tem Reactor (`reactor_since_loop` setado e o
+    // `raw_start` da unidade já é depois disso).
     //
-    // Sequencial mínimo para qualquer unidade SC2:
-    //   - Marine (Terran, build fixo, sem chrono): 380 loops.
-    //   - Probe (Protoss) com chronoboost máximo (1.5×): ~179 loops.
-    //   - Drone (Zerg, larva-born): ~269 loops.
-    //
-    // 50 cobre o pior par paralelo observado com folga de ~3.5× para
-    // o sequencial mais curto teórico (Probe+chrono). Sem risco de
-    // falso positivo.
-    const PARALLEL_PAIR_TOLERANCE: u32 = 50;
+    // O Reactor não duplica unidades: cada Marine/unidade-target tem
+    // seu próprio cmd Train. O Reactor apenas habilita capacidade-2,
+    // permitindo dois cmds em produção simultânea. Dois cmds com gap
+    // arbitrário entre cliques são ambos paralelos enquanto cada um
+    // entra em produção dentro da janela em que o outro ainda está
+    // em curso.
+    let mut slot_end: HashMap<i64, [u32; 2]> = HashMap::new();
 
     for i in 0..events.len() {
         let ev = &events[i];
@@ -320,60 +302,62 @@ pub(super) fn extract_player(
                         // cmds reais.
                         let max_cmd_loop = finish_loop.saturating_sub(bt_fallback / 2);
 
-                        // Detecção de par paralelo (Reactor): se já há
-                        // uma unidade emitida pelo mesmo `creator_tag`
-                        // com `finish_loop` PRÓXIMO (dentro de
-                        // PARALLEL_PAIR_TOLERANCE), esta é a "irmã" —
-                        // o player clicou Train uma vez e o Reactor
-                        // produziu 2 unidades simultâneas (que o
-                        // engine emite com 0-15 loops de offset). Não
-                        // consumimos um cmd novo (compartilham o cmd
-                        // da primeira) e herdamos o `start_loop`. Sem
-                        // esta detecção, a segunda Marine cairia no
-                        // `cmd_loop.max(prev=finish)` e renderizaria
-                        // como bloco instantâneo (start = finish),
-                        // sobreposto à primeira.
-                        let (raw_start, is_parallel_pair) = if let Some(ct) = creator_tag {
-                            let prev_finish =
-                                last_finish_by_creator.get(&ct).copied().unwrap_or(0);
-                            let is_pair = prev_finish > 0
-                                && finish_loop.saturating_sub(prev_finish)
-                                    <= PARALLEL_PAIR_TOLERANCE;
+                        // Cada unidade-target consome seu próprio cmd
+                        // (1 click = 1 unidade). O Reactor não emite
+                        // par 1→2 — apenas dobra a capacidade de
+                        // produção concorrente da estrutura. Mantemos
+                        // last-valid no matching: filtra phantom cmds
+                        // antigos (cancels, double-clicks) que existem
+                        // em replays reais. O custo é que pares de
+                        // cmds próximos podem ter atribuição cruzada
+                        // — visualmente, ambos os bars aparecem mas
+                        // com durações trocadas.
+                        let cmd_loop = creator_tag.and_then(|ct| {
+                            consume_producer_cmd(
+                                &cmds_by_producer,
+                                &mut consumed,
+                                &player.production_cmds,
+                                ct,
+                                new_type,
+                                max_cmd_loop,
+                            )
+                        });
+                        let raw_start = cmd_loop
+                            .unwrap_or_else(|| finish_loop.saturating_sub(bt_fallback));
 
-                            if is_pair {
-                                // Avança chain para o finish da SEGUNDA
-                                // do par (que é tipicamente alguns loops
-                                // depois da primeira). A próxima unidade
-                                // sequencial chega só depois do par
-                                // inteiro liberar a estrutura.
-                                last_finish_by_creator.insert(ct, finish_loop);
-                                let inherited = last_start_by_creator
-                                    .get(&ct)
-                                    .copied()
-                                    .unwrap_or_else(|| {
-                                        finish_loop.saturating_sub(bt_fallback)
-                                    });
-                                (inherited, true)
-                            } else {
-                                let cmd_loop = consume_producer_cmd(
-                                    &cmds_by_producer,
-                                    &mut consumed,
-                                    &player.production_cmds,
-                                    ct,
-                                    new_type,
-                                    max_cmd_loop,
-                                );
-                                let start = match cmd_loop {
-                                    Some(c) => c.max(prev_finish),
-                                    None => finish_loop.saturating_sub(bt_fallback),
-                                };
-                                last_finish_by_creator.insert(ct, finish_loop);
-                                last_start_by_creator.insert(ct, start);
-                                (start, false)
+                        // Slot-tracking: determina trilha (sub_track 0
+                        // ou 1) e ajusta `start_loop` por enfileiramento.
+                        // Sem Reactor ativo: slot único, comportamento
+                        // sequencial (start = max(raw, prev_end_slot0)).
+                        // Com Reactor ativo: 2 slots, escolhe o livre;
+                        // se ambos ocupados em raw_start, enfileira no
+                        // que liberar primeiro.
+                        let reactor_active = lanes_by_tag
+                            .get(&lane_tag)
+                            .and_then(|l| l.reactor_since_loop)
+                            .map(|r| r <= raw_start)
+                            .unwrap_or(false);
+
+                        let slots = slot_end.entry(lane_tag).or_insert([0, 0]);
+                        let (raw_start, sub_track) = if reactor_active {
+                            let s0_free = slots[0] <= raw_start;
+                            let s1_free = slots[1] <= raw_start;
+                            match (s0_free, s1_free) {
+                                (true, _) => (raw_start, 0u8),
+                                (false, true) => (raw_start, 1u8),
+                                (false, false) => {
+                                    if slots[0] <= slots[1] {
+                                        (slots[0], 0u8)
+                                    } else {
+                                        (slots[1], 1u8)
+                                    }
+                                }
                             }
                         } else {
-                            (finish_loop.saturating_sub(bt_fallback), false)
+                            let start = raw_start.max(slots[0]);
+                            (start, 0u8)
                         };
+                        slots[sub_track as usize] = finish_loop;
 
                         // Empurra `start_loop` para depois de qualquer
                         // bloco `Morphing`/`Impeded` da mesma lane que
@@ -408,14 +392,11 @@ pub(super) fn extract_player(
 
                         if start_loop < finish_loop {
                             if let Some(lane) = lanes_by_tag.get_mut(&lane_tag) {
-                                // sub_track=1 marca a SEGUNDA unidade do
-                                // par paralelo de Reactor, que o renderer
-                                // pinta na metade inferior da faixa
-                                // (top/bottom split). Para todas as outras
-                                // unidades (incluindo a primeira do par e
-                                // produção sequencial) sub_track=0.
-                                let sub_track =
-                                    if is_parallel_pair { 1u8 } else { 0u8 };
+                                // sub_track foi atribuído pelo slot-tracking:
+                                // 0 = trilha única ou superior, 1 = inferior
+                                // (apenas com Reactor ativo). O renderer
+                                // pinta em half-height top/bottom quando a
+                                // lane tem `reactor_since_loop` setado.
                                 lane.blocks.push(ProductionBlock {
                                     start_loop,
                                     end_loop: finish_loop,

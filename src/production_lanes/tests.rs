@@ -1068,25 +1068,27 @@ fn army_terran_marine_paired_with_latest_cmd_not_phantom_old_cmd() {
 
 // ─── Par paralelo do Reactor (1 cmd → 2 unidades simultâneas) ───────
 
-/// Em SC2, uma Barracks com Reactor produz 2 unidades por click — o
-/// player emite 1 cmd, o tracker emite 2 `UnitBornEvent`s no MESMO
-/// `game_loop` com o mesmo `creator_tag`. Sem detectar isso, a segunda
-/// Marine cai em `cmd_loop.max(prev_finish=projected_finish)` e
-/// renderiza como bloco instantâneo (start = finish), sobreposto à
-/// primeira. Com a detecção, o segundo herda o `start_loop` do
-/// primeiro (compartilham a mesma janela física).
+/// Numa Barracks com Reactor, dois Marines com cmds simultâneos
+/// (1 click cada, ambos no mesmo loop) entram em produção em paralelo
+/// — slot 0 e slot 1. Cada Marine consome seu próprio cmd (1 click =
+/// 1 unidade) e ambos compartilham o `start_loop` natural (=cmd).
+/// O renderer pinta sub_track=0 (top) e sub_track=1 (bottom).
 #[test]
-fn army_terran_reactor_parallel_pair_shares_start_loop() {
+fn army_terran_reactor_parallel_pair_simultaneous_cmds() {
     let events = vec![
         ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
-        // Par de Marines do mesmo cmd: mesmo creator_tag, mesmo finish_loop.
-        ev_at(2000, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
-        ev_at(2000, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
-        ev_at(2000, 3, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
-        ev_at(2000, 4, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
+        // Reactor instalado: ProductionStarted (com creator_tag=Barracks)
+        // + ProductionFinished. Após o finish, lane.reactor_since_loop=600.
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 2, Some(1), 53, 50),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 2, None, 53, 50),
+        // Dois Marines do mesmo loop — cliques simultâneos do jogador.
+        ev_at(2000, 3, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(2000, 4, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+        ev_at(2000, 5, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
+        ev_at(2000, 6, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
     ];
-    // Único cmd Train_Marine — Reactor emite 2 unidades dele.
-    let cmds = vec![cmd(1500, "Marine", 1)];
+    // Dois cmds Train_Marine no mesmo loop — cliques simultâneos.
+    let cmds = vec![cmd(1500, "Marine", 1), cmd(1500, "Marine", 1)];
     let p = player_with_events_and_cmds(events, cmds, "Terran");
     let out = extract_player(&p, 0, LaneMode::Army);
 
@@ -1096,10 +1098,6 @@ fn army_terran_reactor_parallel_pair_shares_start_loop() {
         .iter()
         .filter(|b| b.kind == BlockKind::Producing)
         .collect();
-    // Após restauração da render dual-track: os 2 blocks do par têm
-    // sub_tracks distintos (0 e 1) e o `merge_continuous` preserva
-    // ambos pra que o renderer pinte top/bottom. Ambos compartilham o
-    // mesmo start_loop (=cmd) e end_loop (=finish da segunda).
     assert_eq!(prod.len(), 2, "par paralelo mantém 2 blocks distintos (sub_track 0 e 1)");
     assert_eq!(prod[0].start_loop, 1500);
     assert_eq!(prod[0].end_loop, 2000);
@@ -1107,7 +1105,51 @@ fn army_terran_reactor_parallel_pair_shares_start_loop() {
     assert_eq!(prod[1].end_loop, 2000);
     let mut tracks: Vec<u8> = prod.iter().map(|b| b.sub_track).collect();
     tracks.sort();
-    assert_eq!(tracks, vec![0, 1], "primeira sibling sub_track=0, segunda sub_track=1");
+    assert_eq!(tracks, vec![0, 1], "primeiro slot=0 (top), segundo slot=1 (bottom)");
+}
+
+/// Regressão do bug onde o segundo Marine sumia quando o jogador
+/// produzia dois Marines com **cliques espaçados** (gap entre cmds
+/// muito maior que a antiga PARALLEL_PAIR_TOLERANCE=50 loops). A
+/// heurística antiga tratava isso como sequencial e fundia ambos num
+/// único bar via `merge_continuous`. Com slot-tracking, o segundo
+/// Marine ocupa o slot livre (sub_track=1) com seu próprio cmd_loop.
+///
+/// Cmds são posicionados em janelas de causalidade distintas
+/// (`max_cmd_loop = finish - bt_fallback/2 = finish - 136`):
+///  - cmd1=1100 só é válido para M1 (max=1364 em finish=1500).
+///  - cmd2=1380 só é válido para M2 (max=1564 em finish=1700; 1380 >
+///    1364, então é filtrado da janela do M1). Garante atribuição
+///    correta sob LAST-valid sem cruzamento.
+#[test]
+fn army_terran_reactor_parallel_pair_with_large_cmd_gap() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        ev_at(200, 1, EntityEventKind::ProductionStarted, "BarracksReactor", 2, Some(1), 53, 50),
+        ev_at(600, 2, EntityEventKind::ProductionFinished, "BarracksReactor", 2, None, 53, 50),
+        ev_at(1500, 3, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(1500, 4, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+        ev_at(1700, 5, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
+        ev_at(1700, 6, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
+    ];
+    let cmds = vec![cmd(1100, "Marine", 1), cmd(1380, "Marine", 1)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    assert_eq!(prod.len(), 2, "dois Marines distintos, NÃO mesclados em uma bar");
+    // Ordenados por (start_loop, sub_track) em finalize.
+    assert_eq!(prod[0].start_loop, 1100, "M1 começa no seu cmd_loop");
+    assert_eq!(prod[0].end_loop, 1500);
+    assert_eq!(prod[0].sub_track, 0);
+    assert_eq!(prod[1].start_loop, 1380, "M2 começa no SEU cmd_loop, não herdado");
+    assert_eq!(prod[1].end_loop, 1700);
+    assert_eq!(prod[1].sub_track, 1);
 }
 
 /// Sanity: produção sequencial NÃO é par paralelo, mesmo com 2
@@ -1143,47 +1185,6 @@ fn army_terran_sequential_marines_chain_normally() {
     assert!(!prod.is_empty());
     assert_eq!(prod[0].start_loop, 1100);
     assert_eq!(prod.last().unwrap().end_loop, 1800);
-}
-
-/// Variação do par paralelo onde o engine emite os 2 Born events com
-/// um pequeno offset (2-15 game loops) em vez de exatamente o mesmo
-/// loop. Verificado empiricamente no replay Winter Madness LE — sem
-/// tolerância, a detecção de igualdade exata falha e a 2ª Marine
-/// vira entrada instantânea.
-#[test]
-fn army_terran_reactor_parallel_pair_with_small_offset_still_detected() {
-    let events = vec![
-        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
-        // Marine 1 finisha em 2000.
-        ev_at(2000, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
-        ev_at(2000, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
-        // Marine 2 (sibling do mesmo cmd) finisha em 2013 — 13 loops
-        // depois, dentro da tolerância de 20.
-        ev_at(2013, 3, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
-        ev_at(2013, 4, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
-    ];
-    let cmds = vec![cmd(1500, "Marine", 1)];
-    let p = player_with_events_and_cmds(events, cmds, "Terran");
-    let out = extract_player(&p, 0, LaneMode::Army);
-
-    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
-    let prod: Vec<_> = lane
-        .blocks
-        .iter()
-        .filter(|b| b.kind == BlockKind::Producing)
-        .collect();
-    // Sem tolerância: 2 blocos — primeiro 1500..2000 (correto), segundo
-    // 2000..2013 (instant-like, herda prev=2000). Com tolerância: 2
-    // blocos com mesmo start=1500 (segundo herda do primeiro), em
-    // sub_tracks distintos pra render dual-track. Não mesclam.
-    assert_eq!(prod.len(), 2, "par paralelo (gap=13) mantém 2 blocks distintos");
-    assert_eq!(prod[0].start_loop, 1500, "primeiro do par");
-    assert_eq!(prod[0].end_loop, 2000);
-    assert_eq!(prod[1].start_loop, 1500, "segundo herda start do primeiro, não cai no instant");
-    assert_eq!(prod[1].end_loop, 2013);
-    let mut tracks: Vec<u8> = prod.iter().map(|b| b.sub_track).collect();
-    tracks.sort();
-    assert_eq!(tracks, vec![0, 1]);
 }
 
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
