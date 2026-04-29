@@ -382,7 +382,8 @@ timeline.tt.idle_worker = Tempo em que slots de produção de workers ficaram oc
 timeline.tt.idle_army = Tempo em que produtores army ficaram ociosos com capacidade livre. Zerg: cada Hatch/Lair/Hive conta como 1 slot de larva. Conta até a posição atual do slider.
 timeline.tt.blocks = Períodos supply-blocked até o instante atual — quantidade total e duração acumulada.
 timeline.tt.unit_chip = {name} × {count}
-timeline.tt.research_chip = {name} · concluído em {mm}:{ss}
+timeline.tt.research_chip = {name} · iniciou em {start_mm}:{start_ss} · concluiu em {end_mm}:{end_ss}
+timeline.tt.research_chip_in_progress = {name} · iniciou em {start_mm}:{start_ss} · conclui em ~{end_mm}:{end_ss}
 
 # ── Template do "Salvar como…" da biblioteca (popup de ajuda) ───────────────
 library.template.vars_header = Variáveis disponíveis

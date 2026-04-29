@@ -14,14 +14,15 @@
 
 use egui::{
     epaint::Shape, pos2, vec2, Align, Color32, Layout, ProgressBar, Rect, RichText, Sense, Stroke,
-    Ui,
+    StrokeKind, Ui,
 };
 
+use crate::build_order::{format_time, BuildOrderEntry};
 use crate::colors::{player_slot_color_bright, ACCENT_WARNING, LABEL_DIM, LABEL_SOFT};
 use crate::config::AppConfig;
 use crate::locale::{localize, tf, Language};
 use crate::production_gap::{compute_idle_periods, compute_idle_periods_ranges, is_zerg_race};
-use crate::replay::{PlayerTimeline, StatsSnapshot, UpgradeEntry};
+use crate::replay::{PlayerTimeline, StatsSnapshot};
 use crate::replay_state::LoadedReplay;
 use crate::supply_block::SupplyBlockEntry;
 use crate::tokens::{size_body, size_caption, size_subtitle, SPACE_S, SPACE_XS};
@@ -87,7 +88,13 @@ pub(super) fn player_side_panel(
     ui.add_space(SPACE_XS);
     ui.separator();
     ui.add_space(SPACE_XS);
-    researches_block(ui, p, game_loop, loops_per_second, lang);
+    let research_entries: &[BuildOrderEntry] = loaded
+        .build_order
+        .as_ref()
+        .and_then(|bo| bo.players.get(idx))
+        .map(|pbo| pbo.entries.as_slice())
+        .unwrap_or(&[]);
+    researches_block(ui, research_entries, game_loop, loops_per_second, lang);
 
     ui.add_space(SPACE_XS);
     ui.separator();
@@ -274,39 +281,52 @@ fn army_block(
 
 // ── Researches block ───────────────────────────────────────────────────
 //
-// Lista os upgrades pontuais concluídos até o instante corrente — Stim,
-// WarpGate, Blink, etc. Os upgrades com níveis (`*Level1/2/3`) não
-// aparecem aqui porque já estão representados como pips `⚔+N` / `🛡+N`
-// no army block; duplicar seria ruído. A ordenação é cronológica —
-// primeiro pesquisado à esquerda, último à direita, o que ajuda a ler
-// a progressão de tech sem precisar decorar nomes.
+// Lista os upgrades pontuais até o instante corrente — Stim, WarpGate,
+// Blink, etc. Fonte é o `BuildOrderResult` (não a stream crua de
+// `UpgradeEntry`), porque ali já temos start_loop reconciliado via cmd
+// matching além do finish_loop. Inclui também pesquisas em andamento
+// (start ≤ now < finish) — o fim é o `finish_loop` projetado e a linha
+// é renderizada com cor mais apagada + sufixo `…` pra sinalizar que é
+// estimativa.
+//
+// Os upgrades com níveis (`*Level1/2/3`) não aparecem aqui porque já
+// estão representados como pips `⚔+N` / `🛡+N` no army block; duplicar
+// seria ruído. A ordenação é cronológica — mais antigo no topo. Layout
+// é uma pesquisa por linha com slot de ícone reservado à esquerda
+// (placeholder por enquanto; assets entram depois).
+
+/// Gap horizontal entre o slot do ícone e o nome da pesquisa.
+const RESEARCH_ICON_GAP: f32 = 6.0;
+
+/// Lado do slot de ícone (futuro). Pareia com a altura de Body × 1.4
+/// pra ficar próximo do tamanho dos cards de unidade/estrutura sem
+/// depender de `card_size` cross-module.
+fn research_icon_side(ui: &Ui) -> f32 {
+    (ui.text_style_height(&egui::TextStyle::Body) * 1.4).round()
+}
 
 fn researches_block(
     ui: &mut Ui,
-    p: &PlayerTimeline,
+    entries: &[BuildOrderEntry],
     game_loop: u32,
     loops_per_second: f64,
     lang: Language,
 ) {
-    let done: Vec<&UpgradeEntry> = p
-        .upgrades
+    // `Reward*` são achievements cosméticos (portrait, spray, voice set)
+    // que entram na stream de upgrades mas não têm efeito de jogo.
+    // `game_loop == 0` pega buffs de bootstrap aplicados antes do jogo
+    // começar — não representam decisões de tech.
+    let visible: Vec<&BuildOrderEntry> = entries
         .iter()
-        .filter(|u| {
-            // `Reward*` são achievements cosméticos (portrait, spray, voice
-            // set) que entram na stream de upgrades mas não têm efeito de
-            // jogo — poluiriam a lista sem valor tático.
-            //
-            // `game_loop == 0` pega upgrades "de bootstrap": buffs de raça
-            // aplicados antes do jogo começar (spray pack, variações de
-            // mapa, flags internas). Não representam decisões de tech, só
-            // ruído no painel.
-            u.game_loop > 0
-                && u.game_loop <= game_loop
-                && !is_level_upgrade_name(&u.name)
-                && !u.name.starts_with("Reward")
+        .filter(|e| {
+            e.is_upgrade
+                && e.game_loop > 0
+                && e.game_loop <= game_loop
+                && !is_level_upgrade_name(&e.action)
+                && !e.action.starts_with("Reward")
         })
         .collect();
-    if done.is_empty() {
+    if visible.is_empty() {
         ui.label(
             RichText::new(tf("timeline.stats.researches_none", lang, &[]))
                 .small()
@@ -314,23 +334,60 @@ fn researches_block(
         );
         return;
     }
-    ui.horizontal_wrapped(|ui| {
-        for u in done {
-            let full = localize(&u.name, lang);
-            let label = short_research_label(full);
-            let secs = (u.game_loop as f64 / loops_per_second).round() as u32;
-            let tooltip = tf(
-                "timeline.tt.research_chip",
-                lang,
-                &[
-                    ("name", full),
-                    ("mm", &format!("{:02}", secs / 60)),
-                    ("ss", &format!("{:02}", secs % 60)),
-                ],
-            );
-            chip(ui, label, false, None).on_hover_text(tooltip);
-        }
-    });
+    ui.spacing_mut().item_spacing.y = SPACE_XS;
+    for e in visible {
+        let full = localize(&e.action, lang);
+        let start = format_time(e.game_loop, loops_per_second);
+        let end = format_time(e.finish_loop, loops_per_second);
+        let in_progress = e.finish_loop > game_loop;
+        let times = if in_progress {
+            format!("{start} → {end}…")
+        } else {
+            format!("{start} → {end}")
+        };
+        let times_color = if in_progress { LABEL_DIM } else { LABEL_SOFT };
+
+        let start_secs = (e.game_loop as f64 / loops_per_second).round() as u32;
+        let end_secs = (e.finish_loop as f64 / loops_per_second).round() as u32;
+        let tooltip = tf(
+            if in_progress {
+                "timeline.tt.research_chip_in_progress"
+            } else {
+                "timeline.tt.research_chip"
+            },
+            lang,
+            &[
+                ("name", full),
+                ("start_mm", &format!("{:02}", start_secs / 60)),
+                ("start_ss", &format!("{:02}", start_secs % 60)),
+                ("end_mm", &format!("{:02}", end_secs / 60)),
+                ("end_ss", &format!("{:02}", end_secs % 60)),
+            ],
+        );
+
+        let response = ui
+            .horizontal(|ui| {
+                let side = research_icon_side(ui);
+                let (icon_rect, _) =
+                    ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                // Placeholder do ícone: borda fina sem fill. Quando os
+                // assets entrarem, troca por `egui::Image::new(icon)
+                // .fit_to_exact_size(...).paint_at(ui, icon_rect)`.
+                ui.painter().rect_stroke(
+                    icon_rect,
+                    2.0,
+                    Stroke::new(1.0, LABEL_DIM),
+                    StrokeKind::Inside,
+                );
+                ui.add_space(RESEARCH_ICON_GAP);
+                ui.label(RichText::new(full).small().color(LABEL_SOFT));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(times).small().color(times_color));
+                });
+            })
+            .response;
+        response.on_hover_text(tooltip);
+    }
 }
 
 /// Espelha `build_order::classify::is_leveled_upgrade` — precisamos do
@@ -339,25 +396,6 @@ fn researches_block(
 /// API cross-module só pra três linhas.
 fn is_level_upgrade_name(name: &str) -> bool {
     name.ends_with("Level1") || name.ends_with("Level2") || name.ends_with("Level3")
-}
-
-/// Encurta nomes de pesquisa pra caber no chip sem quebrar linha a
-/// cada entrada. Pega a primeira palavra (até 12 chars), preservando
-/// o nome completo no tooltip. Cobre o caso típico onde a tradução é
-/// "Extended Thermal Lance" ou "Concussive Shells" — a primeira palavra
-/// dá contexto suficiente pro jogador reconhecer. Walk por `char_indices`
-/// pra não partir caracteres multibyte em traduções pt-BR com acentos.
-fn short_research_label(full: &str) -> &str {
-    let mut end = full.len();
-    let mut chars_taken = 0;
-    for (i, c) in full.char_indices() {
-        if c == ' ' || chars_taken >= 12 {
-            end = i;
-            break;
-        }
-        chars_taken += 1;
-    }
-    &full[..end]
 }
 
 // ── Efficiency block ───────────────────────────────────────────────────

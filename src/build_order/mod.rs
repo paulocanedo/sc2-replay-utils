@@ -48,9 +48,5 @@ pub use opening::classify_opening;
 // silenciar o warning de unused.
 #[allow(unused_imports)]
 pub use opening::{Confidence, OpeningLabel};
-// `BuildOrderEntry` é consumido apenas por `#[cfg(test)]` em `gui/salt.rs`,
-// então em builds non-test o import parece não-usado. Silenciamos pra
-// manter a API pública estável.
-#[allow(unused_imports)]
 pub use types::BuildOrderEntry;
-pub use types::{BuildOrderResult, EntryOutcome, PlayerBuildOrder};
+pub use types::{format_time, BuildOrderResult, EntryOutcome, PlayerBuildOrder};

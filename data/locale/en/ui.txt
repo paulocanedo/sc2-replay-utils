@@ -385,7 +385,8 @@ timeline.tt.idle_worker = Time worker production slots sat idle while capacity w
 timeline.tt.idle_army = Time army producers sat idle while capacity was free. Zerg: each Hatch/Lair/Hive counts as 1 larva-bandwidth slot. Counts up to current slider position.
 timeline.tt.blocks = Supply-blocked periods up to current time — total count and accumulated duration.
 timeline.tt.unit_chip = {name} × {count}
-timeline.tt.research_chip = {name} · finished at {mm}:{ss}
+timeline.tt.research_chip = {name} · started {start_mm}:{start_ss} · finished {end_mm}:{end_ss}
+timeline.tt.research_chip_in_progress = {name} · started {start_mm}:{start_ss} · finishes ~{end_mm}:{end_ss}
 
 # ── Library "Save as…" template (help popup) ────────────────────────────────
 library.template.vars_header = Available variables
