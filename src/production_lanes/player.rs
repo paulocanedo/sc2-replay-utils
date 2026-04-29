@@ -68,6 +68,13 @@ pub(super) fn extract_player(
     // estrutura ficam encostadas em vez de sobrepostas, e o
     // `merge_continuous` posteriormente as funde no mesmo bloco).
     let mut last_finish_by_creator: HashMap<i64, u32> = HashMap::new();
+    // Last start loop por creator_tag — usado para detectar pares
+    // paralelos do Reactor: quando duas unidades têm o mesmo
+    // finish_loop no mesmo producer, são "siblings" do mesmo cmd
+    // (ex.: 2 Marines treinando em paralelo numa Barracks com
+    // Reactor). A segunda do par herda o start da primeira em vez de
+    // consumir um cmd separado.
+    let mut last_start_by_creator: HashMap<i64, u32> = HashMap::new();
 
     for i in 0..events.len() {
         let ev = &events[i];
@@ -291,25 +298,47 @@ pub(super) fn extract_player(
                         // cmds reais.
                         let max_cmd_loop = finish_loop.saturating_sub(bt_fallback / 2);
 
-                        let cmd_loop = creator_tag.and_then(|ct| {
-                            consume_producer_cmd(
-                                &cmds_by_producer,
-                                &mut consumed,
-                                &player.production_cmds,
-                                ct,
-                                new_type,
-                                max_cmd_loop,
-                            )
-                        });
-
+                        // Detecção de par paralelo (Reactor): se já há
+                        // uma unidade emitida pelo mesmo `creator_tag`
+                        // com EXATAMENTE o mesmo `finish_loop`, esta é
+                        // a "irmã" — o player clicou Train uma vez e o
+                        // Reactor produziu 2 unidades simultâneas. Não
+                        // consumimos um cmd novo (compartilham o cmd
+                        // da primeira) e herdamos o `start_loop`. Sem
+                        // esta detecção, a segunda Marine cairia no
+                        // `cmd_loop.max(prev=finish)` e renderizaria
+                        // como bloco instantâneo (start = finish),
+                        // sobreposto à primeira.
                         let raw_start = if let Some(ct) = creator_tag {
-                            let prev = last_finish_by_creator.get(&ct).copied().unwrap_or(0);
-                            let start = match cmd_loop {
-                                Some(c) => c.max(prev),
-                                None => finish_loop.saturating_sub(bt_fallback),
-                            };
-                            last_finish_by_creator.insert(ct, finish_loop);
-                            start
+                            let prev_finish =
+                                last_finish_by_creator.get(&ct).copied().unwrap_or(0);
+                            let is_parallel_pair =
+                                prev_finish > 0 && prev_finish == finish_loop;
+
+                            if is_parallel_pair {
+                                last_start_by_creator
+                                    .get(&ct)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        finish_loop.saturating_sub(bt_fallback)
+                                    })
+                            } else {
+                                let cmd_loop = consume_producer_cmd(
+                                    &cmds_by_producer,
+                                    &mut consumed,
+                                    &player.production_cmds,
+                                    ct,
+                                    new_type,
+                                    max_cmd_loop,
+                                );
+                                let start = match cmd_loop {
+                                    Some(c) => c.max(prev_finish),
+                                    None => finish_loop.saturating_sub(bt_fallback),
+                                };
+                                last_finish_by_creator.insert(ct, finish_loop);
+                                last_start_by_creator.insert(ct, start);
+                                start
+                            }
                         } else {
                             finish_loop.saturating_sub(bt_fallback)
                         };

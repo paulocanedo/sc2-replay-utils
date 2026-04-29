@@ -74,6 +74,15 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     }
     let mut consumed = vec![false; player.production_cmds.len()];
     let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
+    // Último `start_loop` computado por produtor — usado para detectar
+    // pares paralelos (Reactor): quando duas unidades têm o mesmo
+    // `finish_loop` no mesmo producer, são "siblings" do mesmo cmd
+    // (1 click, Reactor emite 2 unidades simultâneas). A segunda do
+    // par herda o `start` da primeira em vez de tentar consumir um cmd
+    // separado e cair no override `cmd.max(prev_finish=projected_finish)`
+    // — esse override transformava a segunda Marine em entrada
+    // instantânea (start = finish, ex.: "Marine às 8:48 → 8:48").
+    let mut prev_start_by_producer: HashMap<i64, u32> = HashMap::new();
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
@@ -128,7 +137,26 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // metade é uma margem segura.
         let max_cmd_loop = projected_finish
             .saturating_sub(build_time_loops(&ev.entity_type, base_build) / 2);
-        let cmd_match: Option<(i64, u32)> = if from_unit_init {
+
+        // Detecção de par paralelo (Reactor) ANTES de tentar cmd
+        // matching: se já houve uma unidade emitida pelo mesmo
+        // `creator_tag` com EXATAMENTE o mesmo `projected_finish`,
+        // esta é a "irmã" do mesmo cmd — não consumimos cmd novo e
+        // herdamos o `start_loop`. Sem isso, a segunda Marine cairia
+        // no `cmd_loop.max(prev_finish=projected_finish)` e renderiza
+        // como entrada instantânea (start = finish).
+        let is_parallel_pair = !from_unit_init
+            && ev.creator_tag
+                .map(|t| {
+                    prev_finish_by_producer
+                        .get(&t)
+                        .copied()
+                        .map(|f| f == projected_finish)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+
+        let cmd_match: Option<(i64, u32)> = if from_unit_init || is_parallel_pair {
             None
         } else {
             ev.creator_tag.and_then(|t| {
@@ -146,6 +174,14 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
 
         let start_loop = if from_unit_init {
             raw_loop
+        } else if is_parallel_pair {
+            // Par paralelo: herda o `start_loop` da primeira do par.
+            // `creator_tag` está garantidamente Some pelo `is_parallel_pair`.
+            ev.creator_tag
+                .and_then(|t| prev_start_by_producer.get(&t).copied())
+                .unwrap_or_else(|| {
+                    subtract_build_time(raw_loop, &ev.entity_type, base_build)
+                })
         } else if let Some((producer_tag, cmd_loop)) = cmd_match {
             let prev = prev_finish_by_producer
                 .get(&producer_tag)
@@ -163,9 +199,12 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // Encadeia o próximo cmd do mesmo produtor no `projected_finish`
         // observado — assim a próxima unidade da fila não pode começar
         // antes do término da atual, mesmo que o jogador tenha clicado
-        // o train cedo (queue de cmds enquanto a anterior produz).
+        // o train cedo (queue de cmds enquanto a anterior produz). Em
+        // par paralelo NÃO atualizamos: a primeira do par já avançou o
+        // chain, e a segunda compartilha a mesma janela.
         if let Some((producer_tag, _)) = cmd_match {
             prev_finish_by_producer.insert(producer_tag, projected_finish);
+            prev_start_by_producer.insert(producer_tag, start_loop);
         }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou
