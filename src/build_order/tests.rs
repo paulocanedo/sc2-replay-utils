@@ -91,6 +91,43 @@ fn upgrade_start_time_subtracts_build_time() {
     assert_eq!(stimpack_entry.finish_loop, stimpack_finish);
 }
 
+/// Invariante: nenhuma entrada de unidade ou pesquisa pode ter
+/// `game_loop == finish_loop` (duração zero, "instantânea") — não
+/// existe unidade ou upgrade que treine em zero loops no jogo.
+///
+/// O sintoma mais comum dessa quebra era o "Marine instantâneo às
+/// 8:48" reportado no replay Winter Madness LE: numa Barracks com
+/// Reactor o player clica Train_Marine uma vez e o tracker emite 2
+/// `UnitBornEvent`s no mesmo `game_loop`. Sem detecção de par
+/// paralelo, a segunda Marine caía em
+/// `cmd_loop.max(prev_finish=projected_finish)` e o `start_loop`
+/// virava o próprio `finish_loop`, gerando uma entrada com duração
+/// zero.
+///
+/// `InjectLarva` é instantâneo por natureza (cmd, não unidade
+/// produzida) e fica fora do invariante.
+#[test]
+fn no_entries_have_zero_duration() {
+    let t = parse_replay(&example(), 0).expect("parse");
+    let bo = extract_build_order(&t).expect("bo");
+    for player in &bo.players {
+        for entry in &player.entries {
+            if entry.action.starts_with("InjectLarva") {
+                continue;
+            }
+            assert!(
+                entry.game_loop < entry.finish_loop,
+                "entry de duração zero em {}: action={}, start={} finish={} \
+                 (provável regressão da detecção de par paralelo do Reactor)",
+                player.name,
+                entry.action,
+                entry.game_loop,
+                entry.finish_loop,
+            );
+        }
+    }
+}
+
 #[test]
 fn supply_made_is_populated_and_geq_supply_used() {
     // O `supply_made` (capacidade) tem que ser >= `supply` (usado)

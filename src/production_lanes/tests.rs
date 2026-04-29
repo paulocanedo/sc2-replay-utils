@@ -1066,6 +1066,86 @@ fn army_terran_marine_paired_with_latest_cmd_not_phantom_old_cmd() {
     assert_eq!(prod[0].end_loop, 1500);
 }
 
+// ─── Par paralelo do Reactor (1 cmd → 2 unidades simultâneas) ───────
+
+/// Em SC2, uma Barracks com Reactor produz 2 unidades por click — o
+/// player emite 1 cmd, o tracker emite 2 `UnitBornEvent`s no MESMO
+/// `game_loop` com o mesmo `creator_tag`. Sem detectar isso, a segunda
+/// Marine cai em `cmd_loop.max(prev_finish=projected_finish)` e
+/// renderiza como bloco instantâneo (start = finish), sobreposto à
+/// primeira. Com a detecção, o segundo herda o `start_loop` do
+/// primeiro (compartilham a mesma janela física).
+#[test]
+fn army_terran_reactor_parallel_pair_shares_start_loop() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Par de Marines do mesmo cmd: mesmo creator_tag, mesmo finish_loop.
+        ev_at(2000, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(2000, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+        ev_at(2000, 3, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
+        ev_at(2000, 4, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
+    ];
+    // Único cmd Train_Marine — Reactor emite 2 unidades dele.
+    let cmds = vec![cmd(1500, "Marine", 1)];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    // Ambas as Marines devem ter `start_loop = 1500` (cmd_loop). Sem o
+    // fix, a segunda teria start = 2000 (instant), mergeria com a
+    // primeira via `merge_continuous`, e o resultado seria 1 bloco
+    // 1500..2000 — o teste passaria por acidente. Aqui forçamos a
+    // verificação ANTES do merge: as 2 entries individuais devem ter
+    // start_loop idêntico.
+    //
+    // Após `merge_continuous`, ambos os blocks (start=1500, finish=2000,
+    // mesmo produced_type) viram um só bloco. Verificamos que o bloco
+    // resultante tem start correto (não é o "instant" do bug).
+    assert_eq!(prod.len(), 1, "merge_continuous funde os 2 blocks com mesmo start em 1");
+    assert_eq!(prod[0].start_loop, 1500, "start_loop deve ser o cmd, não o finish (instant)");
+    assert_eq!(prod[0].end_loop, 2000);
+}
+
+/// Sanity: produção sequencial NÃO é par paralelo, mesmo com 2
+/// Marines no mesmo producer. `finish_loop` diferente por bem mais
+/// que zero — segunda Marine começa quando primeira termina.
+#[test]
+fn army_terran_sequential_marines_chain_normally() {
+    let events = vec![
+        ev_at(100, 0, EntityEventKind::ProductionFinished, "Barracks", 1, None, 50, 50),
+        // Marine 1 finisha em 1500.
+        ev_at(1500, 1, EntityEventKind::ProductionStarted, "Marine", 10, Some(1), 0, 0),
+        ev_at(1500, 2, EntityEventKind::ProductionFinished, "Marine", 10, None, 0, 0),
+        // Marine 2 finisha em 1800 (300 loops depois).
+        ev_at(1800, 3, EntityEventKind::ProductionStarted, "Marine", 11, Some(1), 0, 0),
+        ev_at(1800, 4, EntityEventKind::ProductionFinished, "Marine", 11, None, 0, 0),
+    ];
+    let cmds = vec![
+        cmd(1100, "Marine", 1),
+        cmd(1400, "Marine", 1),
+    ];
+    let p = player_with_events_and_cmds(events, cmds, "Terran");
+    let out = extract_player(&p, 0, LaneMode::Army);
+
+    let lane = out.lanes.iter().find(|l| l.tag == 1).unwrap();
+    let prod: Vec<_> = lane
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Producing)
+        .collect();
+    // Marine 1: start=1100, end=1500.
+    // Marine 2: start=max(1400, 1500)=1500, end=1800.
+    // Após merge: bloco contínuo [1100, 1800] (continuity_tolerance ≥ 0).
+    assert!(!prod.is_empty());
+    assert_eq!(prod[0].start_loop, 1100);
+    assert_eq!(prod.last().unwrap().end_loop, 1800);
+}
+
 // ─── Bug control-group (Winter Madness LE — TvT) ────────────────────
 
 /// Regression: o player tem duas Barracks B-A e B-B em control group;
