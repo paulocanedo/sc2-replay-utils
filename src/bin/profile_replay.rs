@@ -3,6 +3,9 @@
 //! Uso:
 //!   cargo run --release --bin profile_replay -- replay.SC2Replay [more...]
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::path::PathBuf;
 
 fn main() {
