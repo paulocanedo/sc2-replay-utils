@@ -111,7 +111,7 @@ impl eframe::App for AppState {
             // Drena progresso da carga em andamento (replay em background).
             self.poll_load(&ctx);
             // Drena resultados do worker da biblioteca.
-            if self.library.poll() {
+            if self.library.poll(self.config.auto_classify_on_scan) {
                 ctx.request_repaint();
             }
             // Recompute derived library stats if entries, nicknames, or
@@ -286,6 +286,16 @@ impl eframe::App for AppState {
                 if self.config.effective_working_dir() != prev_effective_dir {
                     self.refresh_library();
                 }
+            }
+            if outcome.classify_now {
+                self.library.start_classification();
+                self.set_toast(t("toast.classification_started", lang).to_string());
+                ctx.request_repaint();
+            }
+            if outcome.stop_classification {
+                self.library.stop_classification();
+                self.set_toast(t("toast.classification_stopped", lang).to_string());
+                ctx.request_repaint();
             }
         }
 

@@ -27,6 +27,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -129,14 +130,17 @@ enum ScanMessage {
     Done { latest: Option<(PathBuf, SystemTime)> },
 }
 
-/// Resultado do pool de enriquecimento — uma classificação de abertura
-/// por jogador, do mesmo `path`. O vetor preserva a ordem de
-/// `ParsedMeta.players` e, garantidamente, tem
-/// `players.len()` entradas (o worker substitui falhas por
-/// `OpeningLabel::Unclassifiable`).
-struct EnrichmentResult {
-    path: PathBuf,
-    openings: Vec<OpeningLabel>,
+/// Resultado do pool de enriquecimento. `Classified` carrega uma
+/// classificação por jogador, na mesma ordem de `ParsedMeta.players`
+/// (o worker substitui falhas individuais por `OpeningLabel::Unclassifiable`).
+/// `Skipped` sinaliza que o item foi descartado pelo `stop_enrichment` —
+/// `poll()` apenas remove de `enrichment_in_flight` sem mudar entries/cache.
+enum EnrichmentResult {
+    Classified {
+        path: PathBuf,
+        openings: Vec<OpeningLabel>,
+    },
+    Skipped(PathBuf),
 }
 
 pub struct ReplayLibrary {
@@ -172,6 +176,12 @@ pub struct ReplayLibrary {
     /// Impede re-envios redundantes quando a mesma entrada é polada em
     /// sucessivos `poll()`s antes do worker começar a processá-la.
     enrichment_in_flight: HashSet<PathBuf>,
+    /// Flag compartilhada com os workers de enriquecimento. Quando `true`,
+    /// o worker descarta o item recém-recebido sem chamar `compute_openings`,
+    /// retornando `EnrichmentResult::Skipped` para o `poll()` limpar o
+    /// `enrichment_in_flight`. Setada por `stop_classification()` e
+    /// limpa por `start_classification()`.
+    stop_enrichment: Arc<AtomicBool>,
     /// Updates ao `cache` desde o último flush em disco. Quando atinge
     /// `ENRICHMENT_FLUSH_BATCH`, força `save_cache()` mesmo com o pool
     /// de enriquecimento ainda trabalhando — garante que o trabalho
@@ -203,6 +213,7 @@ impl ReplayLibrary {
         let (tx_enrich_work, rx_enrich_work) = mpsc::channel::<PathBuf>();
         let (tx_enrich_result, rx_enrich_result) = mpsc::channel::<EnrichmentResult>();
         let cache = crate::cache::load();
+        let stop_enrichment = Arc::new(AtomicBool::new(false));
 
         // Pool persistente de enriquecimento. Os workers bloqueiam em
         // `recv()` esperando trabalho; sleep + yield antes de cada item
@@ -212,6 +223,7 @@ impl ReplayLibrary {
         for i in 0..ENRICHMENT_WORKERS {
             let rx = Arc::clone(&rx_enrich_work);
             let tx = tx_enrich_result.clone();
+            let stop_flag = Arc::clone(&stop_enrichment);
             let _ = thread::Builder::new()
                 .name(format!("replay-library-enricher-{i}"))
                 .spawn(move || loop {
@@ -228,12 +240,15 @@ impl ReplayLibrary {
                     };
                     match next {
                         Ok(path) => {
+                            if stop_flag.load(Ordering::Acquire) {
+                                if tx.send(EnrichmentResult::Skipped(path)).is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
                             let openings = compute_openings(&path);
                             if tx
-                                .send(EnrichmentResult {
-                                    path,
-                                    openings,
-                                })
+                                .send(EnrichmentResult::Classified { path, openings })
                                 .is_err()
                             {
                                 break;
@@ -258,6 +273,7 @@ impl ReplayLibrary {
             tx_enrich_work,
             rx_enrich_result,
             enrichment_in_flight: HashSet::new(),
+            stop_enrichment,
             cache_updates_since_flush: 0,
             last_cache_flush: Instant::now(),
             cached_stats: None,
@@ -522,7 +538,7 @@ impl ReplayLibrary {
 
     /// Drena resultados prontos dos workers e do scanner. Retorna `true`
     /// se alguma entrada foi atualizada (para a UI pedir repaint).
-    pub fn poll(&mut self) -> bool {
+    pub fn poll(&mut self, auto_classify_on_scan: bool) -> bool {
         let mut updated = false;
 
         // Fase 1: Drena arquivos descobertos pelo scanner background.
@@ -583,11 +599,14 @@ impl ReplayLibrary {
                             }
                         };
                         // Cache hit (legítimo ou via cura): se algum
-                        // jogador ainda está com `OpeningLabel::Pending`,
+                        // jogador ainda está com `OpeningLabel::Pending`
+                        // E o usuário ativou classificação em lote,
                         // enfileira para enriquecimento. Idempotente —
                         // dedup via `enrichment_in_flight`.
-                        if let MetaState::Parsed(parsed) = &meta {
-                            self.enqueue_enrichment_if_needed(&result.path, parsed);
+                        if auto_classify_on_scan {
+                            if let MetaState::Parsed(parsed) = &meta {
+                                self.enqueue_enrichment_if_needed(&result.path, parsed);
+                            }
                         }
                         self.entries.push(LibraryEntry {
                             path: result.path,
@@ -635,9 +654,12 @@ impl ReplayLibrary {
             let state = match outcome {
                 ParseOutcome::Parsed(meta) => {
                     // Fresh parse: todos os jogadores chegam com
-                    // `OpeningLabel::Pending` — enfileira para
-                    // enriquecimento. Idempotente.
-                    self.enqueue_enrichment_if_needed(&path, &meta);
+                    // `OpeningLabel::Pending`. Só enfileira para
+                    // enriquecimento se o usuário ativou classificação em
+                    // lote — caso contrário, fica suspenso até pedido manual.
+                    if auto_classify_on_scan {
+                        self.enqueue_enrichment_if_needed(&path, &meta);
+                    }
                     let st = MetaState::Parsed(meta);
                     self.cache_insert_if_complete(&path, mtime, size, content_id, &st);
                     st
@@ -657,37 +679,44 @@ impl ReplayLibrary {
 
         // Fase 3: Drena resultados do pool de enriquecimento. O worker
         // sempre devolve um vetor de tamanho `players.len()` (preenchido
-        // com `Unclassifiable` em qualquer falha), então não precisamos
-        // mais tratar vetor vazio como "skip" — qualquer resultado
-        // marca o estado terminal e impede re-tentativa em launches
-        // futuros.
+        // com `Unclassifiable` em qualquer falha), então qualquer
+        // `Classified` marca estado terminal e impede re-tentativa em
+        // launches futuros. `Skipped` apenas libera o slot em
+        // `enrichment_in_flight` — não toca em entries nem cache.
         while let Ok(res) = self.rx_enrich_result.try_recv() {
-            self.enrichment_in_flight.remove(&res.path);
-            // Atualiza entrada.
-            if let Some(entry) = self.entries.iter_mut().find(|e| e.path == res.path) {
-                if let MetaState::Parsed(meta) = &mut entry.meta {
-                    for (i, op) in res.openings.iter().enumerate() {
-                        if let Some(player) = meta.players.get_mut(i) {
-                            player.opening = op.clone();
+            match res {
+                EnrichmentResult::Skipped(path) => {
+                    self.enrichment_in_flight.remove(&path);
+                }
+                EnrichmentResult::Classified { path, openings } => {
+                    self.enrichment_in_flight.remove(&path);
+                    // Atualiza entrada.
+                    if let Some(entry) = self.entries.iter_mut().find(|e| e.path == path) {
+                        if let MetaState::Parsed(meta) = &mut entry.meta {
+                            for (i, op) in openings.iter().enumerate() {
+                                if let Some(player) = meta.players.get_mut(i) {
+                                    player.opening = op.clone();
+                                }
+                            }
+                            updated = true;
                         }
                     }
-                    updated = true;
-                }
-            }
-            // Atualiza cache via path → content_id → MetaState. Pode
-            // não estar sincronizado com `entries` se o usuário mudou
-            // de diretório entre enqueue e resultado — mesmo assim
-            // gravamos o rótulo calculado, é válido.
-            if let Some(MetaState::Parsed(cached_meta)) =
-                self.cache.state_mut_for_path(&res.path)
-            {
-                for (i, op) in res.openings.iter().enumerate() {
-                    if let Some(player) = cached_meta.players.get_mut(i) {
-                        player.opening = op.clone();
+                    // Atualiza cache via path → content_id → MetaState. Pode
+                    // não estar sincronizado com `entries` se o usuário mudou
+                    // de diretório entre enqueue e resultado — mesmo assim
+                    // gravamos o rótulo calculado, é válido.
+                    if let Some(MetaState::Parsed(cached_meta)) =
+                        self.cache.state_mut_for_path(&path)
+                    {
+                        for (i, op) in openings.iter().enumerate() {
+                            if let Some(player) = cached_meta.players.get_mut(i) {
+                                player.opening = op.clone();
+                            }
+                        }
+                        self.cache_dirty = true;
+                        self.cache_updates_since_flush += 1;
                     }
                 }
-                self.cache_dirty = true;
-                self.cache_updates_since_flush += 1;
             }
         }
 
@@ -764,6 +793,33 @@ impl ReplayLibrary {
     /// trabalho acontece em background.
     pub fn enrichment_in_flight_count(&self) -> usize {
         self.enrichment_in_flight.len()
+    }
+
+    /// Reabre o portão (limpa a flag de stop) e enfileira todos os
+    /// replays cujos `opening` ainda estão `Pending`. Usado pelo botão
+    /// "Classificar pendentes agora" das Configurações. Idempotente —
+    /// `enrichment_in_flight` já protege de duplicatas.
+    pub fn start_classification(&mut self) {
+        self.stop_enrichment.store(false, Ordering::Release);
+        let pending: Vec<(PathBuf, ParsedMeta)> = self
+            .entries
+            .iter()
+            .filter_map(|e| match &e.meta {
+                MetaState::Parsed(meta) => Some((e.path.clone(), meta.clone())),
+                _ => None,
+            })
+            .collect();
+        for (path, meta) in pending {
+            self.enqueue_enrichment_if_needed(&path, &meta);
+        }
+    }
+
+    /// Sinaliza para os workers descartar o trabalho ainda enfileirado.
+    /// O item correntemente em `compute_openings` completa (não há
+    /// cancelamento mid-parse) — no pior caso, o usuário espera ~1
+    /// análise por worker (ENRICHMENT_WORKERS = 2 hoje).
+    pub fn stop_classification(&mut self) {
+        self.stop_enrichment.store(true, Ordering::Release);
     }
 
     /// Persiste o cache em disco (se houver mudanças pendentes).

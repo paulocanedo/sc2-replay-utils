@@ -32,6 +32,13 @@ pub struct AppConfig {
     pub watch_replays: bool,
     /// Ao detectar novo replay via watcher, carregar automaticamente.
     pub auto_load_on_new_replay: bool,
+    /// Quando ligado, dispara classificação de aberturas em lote durante o
+    /// scan inicial da biblioteca (cache hits ainda pendentes + replays
+    /// recém-parseados). Quando desligado (default), o lote fica suspenso
+    /// até o usuário clicar em "Classificar pendentes" nas Configurações.
+    /// Não afeta o caminho de carregamento individual / watcher de replay
+    /// novo — esses sempre classificam imediatamente.
+    pub auto_classify_on_scan: bool,
     /// Tamanho base da fonte em pontos lógicos (HiDPI é tratado pelo egui).
     pub font_size: f32,
     /// UI language. Applies to menus, labels, tooltips, toasts and
@@ -88,6 +95,7 @@ impl Default for AppConfig {
             auto_load_latest: false,
             watch_replays: true,
             auto_load_on_new_replay: true,
+            auto_classify_on_scan: false,
             font_size: 14.0,
             language: Language::default(),
             language_selected: false,
