@@ -13,7 +13,7 @@ use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
 use crate::load_progress::LoadStage;
-use crate::map_image::MapImage;
+use crate::map_image::{MapImage, MapInfo, StartLocation};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::map_image;
 use crate::production_gap::{self, ProductionGapResult};
@@ -51,6 +51,15 @@ pub struct LoadedReplay {
     /// encontrado em nenhum dos diretórios padrão ou quando a extração
     /// falhou — não é fatal, a aba Timeline cai pro fundo cinza.
     pub map_image: Option<MapImage>,
+    /// Metadados do `MapInfo` quando disponíveis (área jogável real,
+    /// dimensões totais). Preferidos sobre o cálculo heurístico em
+    /// `compute_playable_bounds`. `None` para mapas custom não cacheados
+    /// ou parse-fail.
+    pub map_info: Option<MapInfo>,
+    /// Spawn points definidos pelo mapper. Coordenadas em tiles
+    /// (com fração). Vazio quando não conseguimos abrir/parsear o
+    /// arquivo `Objects` do mapa.
+    pub start_locations: Vec<StartLocation>,
     /// Bounds da playable area derivados dos eventos do replay. `None`
     /// se nenhum evento posicionou alguma entidade (replay vazio).
     pub playable_bounds: Option<PlayableBounds>,
@@ -88,14 +97,18 @@ impl LoadedReplay {
         let mut me = Self::from_bytes_with_progress(file_name, &bytes, max_time, on_stage)?;
         me.path = path.to_path_buf();
         on_stage(LoadStage::LoadingMinimap);
-        me.map_image = match map_image::load_for_replay(&me.timeline.map, &me.timeline.cache_handles)
-        {
-            Ok(img) => Some(img),
+        match map_image::load_for_replay(&me.timeline.map, &me.timeline.cache_handles) {
+            Ok(assets) => {
+                me.map_image = Some(assets.image);
+                me.map_info = assets.info;
+                me.start_locations = assets.start_locations;
+            }
             Err(e) => {
                 eprintln!("map_image: {e}");
-                None
             }
-        };
+        }
+        // Recalcula bounds agora que sabemos se temos `MapInfo` real.
+        me.playable_bounds = compute_playable_bounds(&me.timeline, me.map_info.as_ref());
         Ok(me)
     }
 
@@ -163,7 +176,7 @@ impl LoadedReplay {
             .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops, timeline.base_build))
             .collect();
 
-        let playable_bounds = compute_playable_bounds(&timeline);
+        let playable_bounds = compute_playable_bounds(&timeline, None);
 
         Ok(Self {
             path: PathBuf::from(&file_name),
@@ -174,6 +187,8 @@ impl LoadedReplay {
             production,
             supply_blocks_per_player,
             map_image: None,
+            map_info: None,
+            start_locations: Vec::new(),
             playable_bounds,
         })
     }
@@ -195,14 +210,46 @@ impl LoadedReplay {
     }
 }
 
-/// Calcula os bounds da playable area a partir das posições observadas
-/// nos `entity_events` de todos os jogadores. Adiciona uma pequena
-/// margem (`MARGIN`) em cada lado pra deixar respiro visual quando as
-/// unidades estão exatamente no canto da área jogável.
+/// Calcula os bounds da playable area, preferindo o `MapInfo` real do
+/// `.SC2Map` quando disponível e caindo para a heurística baseada em
+/// posições observadas como fallback.
 ///
-/// `None` quando o replay não tem nenhum evento posicionado (replay
-/// vazio ou parser sem rastreamento).
-fn compute_playable_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> {
+/// **Preferência por `MapInfo`:** quando temos os bounds canônicos do
+/// arquivo do mapa, eles batem exatamente com o que a Blizzard expõe
+/// como playable area. Isso elimina o jitter de canto provocado pela
+/// margem fixa de 4 tiles e alinha a minimap.tga com as coordenadas de
+/// unidade sem precisar de calibração empírica.
+///
+/// **Fallback heurístico:** sem `MapInfo` (mapa custom não cacheado,
+/// parser falhou, build wasm), derivamos os extremos a partir de
+/// `entity_events`, `unit_positions` e `resources` com margem
+/// `MARGIN` para respiro visual quando unidades estão no canto.
+///
+/// `None` quando ambos os caminhos falham (replay vazio sem `MapInfo`).
+fn compute_playable_bounds(
+    timeline: &ReplayTimeline,
+    map_info: Option<&MapInfo>,
+) -> Option<PlayableBounds> {
+    if let Some(info) = map_info {
+        // `MapInfo` é canônico quando dimensões cabem em u8 (mapas
+        // de ladder vão até 256x256 — `max_x/y` exclusivos podem
+        // chegar a 256, que estoura u8). Se algum bound não couber,
+        // caímos no fallback heurístico em vez de truncar errado.
+        if info.playable_max_x <= u8::MAX as u32 + 1
+            && info.playable_max_y <= u8::MAX as u32 + 1
+        {
+            return Some(PlayableBounds {
+                min_x: info.playable_min_x as u8,
+                max_x: info.playable_max_x.min(u8::MAX as u32) as u8,
+                min_y: info.playable_min_y as u8,
+                max_y: info.playable_max_y.min(u8::MAX as u32) as u8,
+            });
+        }
+    }
+    compute_heuristic_bounds(timeline)
+}
+
+fn compute_heuristic_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> {
     const MARGIN: u8 = 4;
     let mut min_x = u8::MAX;
     let mut max_x = 0u8;

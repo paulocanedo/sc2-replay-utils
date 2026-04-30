@@ -19,6 +19,11 @@ const UNIT_BASE_SIZE: f32 = 4.0;
 /// Bases (townhalls) usam `STRUCTURE_BASE_SIZE * 2` — âncoras visuais.
 /// Ambos já incluem o "inflar 50%" em relação ao tamanho histórico
 /// (6/12 px), para que estruturas fiquem mais legíveis.
+///
+/// Hoje só usados como fallback para estruturas sem entrada na tabela
+/// `balance_data::footprint` (ex.: variantes de morph não cobertas pela
+/// balance data daquela versão de protocolo). Estruturas com footprint
+/// conhecido escalam pelo tamanho real em tiles via `pixels_per_tile`.
 const STRUCTURE_BASE_SIZE: f32 = 9.0;
 const TOWNHALL_BASE_SIZE: f32 = 18.0;
 
@@ -61,7 +66,17 @@ pub(super) struct LiveEntity {
     /// aplicada (ver `unit_scale_for_supply`). Pré-computado em
     /// `alive_entities_at` pra evitar lookup na tabela de balance data
     /// a cada frame.
+    ///
+    /// Para estruturas com `footprint_tiles = Some(...)`, este campo é
+    /// só fallback — o renderer prefere o tamanho real escalado pelo
+    /// `pixels_per_tile` do retângulo do minimap.
     pub side: f32,
+    /// Footprint real da estrutura `(width, height)` em tiles, vindo da
+    /// balance data. `None` para unidades mobile e estruturas sem
+    /// entrada na tabela (variantes raras de morph). Quando presente,
+    /// o minimap renderiza um retângulo com tamanho exato em tiles
+    /// (em vez do quadrado fixo de 9/18 px).
+    pub footprint_tiles: Option<(u8, u8)>,
     /// Forma canônica do tipo (mesma chave usada pelos chips do
     /// `unit_column`), pra que o minimap consiga filtrar por tipo no
     /// pass de highlight do hover. Estruturas usam `structure_canonical`,
@@ -113,6 +128,11 @@ pub(super) fn alive_entities_at(
                     continue;
                 }
                 let is_base = is_base_type(&ev.entity_type);
+                let footprint_tiles = if matches!(ev.category, EntityCategory::Structure) {
+                    balance_data::footprint(&ev.entity_type, base_build)
+                } else {
+                    None
+                };
                 let side = match ev.category {
                     EntityCategory::Structure => {
                         if is_base { TOWNHALL_BASE_SIZE } else { STRUCTURE_BASE_SIZE }
@@ -142,6 +162,7 @@ pub(super) fn alive_entities_at(
                         category: ev.category,
                         is_base,
                         side,
+                        footprint_tiles,
                         entity_type,
                     },
                 );

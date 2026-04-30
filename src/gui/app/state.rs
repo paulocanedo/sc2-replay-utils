@@ -550,8 +550,8 @@ impl AppState {
             return;
         };
         match map_image::load_for_replay(&meta.map, &meta.cache_handles) {
-            Ok(img) => {
-                self.library_selection_minimap = Some(img);
+            Ok(assets) => {
+                self.library_selection_minimap = Some(assets.image);
                 self.library_selection_minimap_path = Some(path);
             }
             Err(e) => {

@@ -18,8 +18,12 @@
 
 mod decode;
 mod locator;
+mod map_info;
+mod objects;
 
 pub use locator::{resolve_from_cache_handles, resolve_map_file_default};
+pub use map_info::MapInfo;
+pub use objects::StartLocation;
 
 use std::path::Path;
 
@@ -33,6 +37,16 @@ pub struct MapImage {
     pub rgba: Vec<u8>,
 }
 
+/// Conjunto de dados extraídos do `.SC2Map`/`.s2ma`. `image` é o
+/// produto principal (sempre presente em sucesso); `info` e
+/// `start_locations` são "best effort": ausentes ou parse-fail
+/// derrubam só esses campos, sem afetar a renderização do fundo.
+pub struct MapAssets {
+    pub image: MapImage,
+    pub info: Option<MapInfo>,
+    pub start_locations: Vec<StartLocation>,
+}
+
 /// Pipeline completo: localiza o arquivo do mapa do replay e extrai sua
 /// imagem rasterizada. Conveniência usada por `LoadedReplay::load`.
 ///
@@ -44,26 +58,33 @@ pub struct MapImage {
 ///    "Standard Data: ..." e não são MPQs) falham silenciosamente
 ///    e seguimos pro próximo handle.
 /// 2. Fallback: lookup por título nas pastas de Maps instaladas.
-pub fn load_for_replay(map_title: &str, cache_handles: &[String]) -> Result<MapImage, String> {
+pub fn load_for_replay(map_title: &str, cache_handles: &[String]) -> Result<MapAssets, String> {
     let mut last_err: Option<String> = None;
     for path in resolve_from_cache_handles(cache_handles) {
-        match extract_minimap(&path) {
-            Ok(img) => return Ok(img),
+        match extract_assets(&path) {
+            Ok(assets) => return Ok(assets),
             Err(e) => last_err = Some(e),
         }
     }
     if let Some(path) = resolve_map_file_default(map_title) {
-        return extract_minimap(&path);
+        return extract_assets(&path);
     }
     Err(last_err.unwrap_or_else(|| format!("mapa não encontrado: {map_title:?}")))
 }
 
-/// Extrai a imagem `Minimap.tga` de um arquivo MPQ de mapa SC2 e a
-/// devolve decodificada em RGBA8.
+/// Abre o MPQ do mapa **uma única vez** e extrai todos os assets que
+/// alimentam a UI: imagem (`Minimap.tga`), `MapInfo` (área jogável) e
+/// `Objects` (start locations).
+///
+/// O `Minimap.tga` é obrigatório — se falhar, devolve `Err` e o caller
+/// cai no fundo cinza. `MapInfo` e `Objects` são best-effort: se a
+/// extração ou o parse falhar, deixamos `info=None` / start_locations
+/// vazio sem propagar erro (a timeline continua funcionando, só sem o
+/// enriquecimento espacial).
 ///
 /// `mpq_path` pode apontar para um `.SC2Map` ou `.s2ma` — ambos são
 /// MPQs com a mesma estrutura interna.
-pub fn extract_minimap(mpq_path: &Path) -> Result<MapImage, String> {
+pub fn extract_assets(mpq_path: &Path) -> Result<MapAssets, String> {
     let path_str = mpq_path
         .to_str()
         .ok_or_else(|| format!("caminho não é UTF-8: {}", mpq_path.display()))?;
@@ -83,7 +104,30 @@ pub fn extract_minimap(mpq_path: &Path) -> Result<MapImage, String> {
     }
 
     let img = decode::decode_tga(&tga_bytes)?;
-    Ok(crop_to_content(img))
+    let image = crop_to_content(img);
+
+    let info = mpq
+        .read_mpq_file_sector("MapInfo", true, &file_contents)
+        .ok()
+        .and_then(|(_, b)| match map_info::parse(&b) {
+            Ok(info) => Some(info),
+            Err(e) => {
+                eprintln!("MapInfo parse: {e}");
+                None
+            }
+        });
+
+    let start_locations = mpq
+        .read_mpq_file_sector("Objects", true, &file_contents)
+        .ok()
+        .map(|(_, b)| objects::parse(&b))
+        .unwrap_or_default();
+
+    Ok(MapAssets {
+        image,
+        info,
+        start_locations,
+    })
 }
 
 /// Recorta a imagem para o bounding box dos pixels não-pretos.

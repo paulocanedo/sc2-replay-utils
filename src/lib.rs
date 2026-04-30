@@ -44,6 +44,20 @@ mod map_image {
         pub height: u32,
         pub rgba: Vec<u8>,
     }
+    #[derive(Clone, Debug)]
+    pub struct MapInfo {
+        pub width: u32,
+        pub height: u32,
+        pub playable_min_x: u32,
+        pub playable_min_y: u32,
+        pub playable_max_x: u32,
+        pub playable_max_y: u32,
+    }
+    #[derive(Clone, Copy, Debug)]
+    pub struct StartLocation {
+        pub x: f32,
+        pub y: f32,
+    }
 }
 
 // ── Native-only modules ──
