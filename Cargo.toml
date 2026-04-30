@@ -1,6 +1,6 @@
 [package]
 name = "sc2-replay-utils"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2024"
 # Há dois binários no crate: o app GUI (`sc2-replay-utils`, em src/main.rs)
 # e o diagnóstico CLI (`debug_addons`, em src/bin/). Sem este campo,
