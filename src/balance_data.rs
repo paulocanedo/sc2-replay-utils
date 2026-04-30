@@ -58,6 +58,9 @@ type CostTable = HashMap<&'static str, (u32, u32)>;
 /// Tabela `nome_unidade → sight_radius × 100` para uma única versão.
 type SightTable = HashMap<&'static str, u32>;
 
+/// Tabela `nome_estrutura → (width_tiles, height_tiles)` para uma única versão.
+type FootprintTable = HashMap<&'static str, (u8, u8)>;
+
 struct Balance {
     /// `BTreeMap` para permitir busca pelo maior `version ≤ alvo` em
     /// O(log n).
@@ -66,6 +69,7 @@ struct Balance {
     supply: BTreeMap<u32, SupplyTable>,
     cost: BTreeMap<u32, CostTable>,
     sight: BTreeMap<u32, SightTable>,
+    footprint: BTreeMap<u32, FootprintTable>,
 }
 
 static GLOBAL: OnceLock<Balance> = OnceLock::new();
@@ -99,12 +103,17 @@ fn load() -> &'static Balance {
         for &(version, name, sight_x100) in SIGHT_RADIUS_ENTRIES {
             sight.entry(version).or_default().insert(name, sight_x100);
         }
+        let mut footprint: BTreeMap<u32, FootprintTable> = BTreeMap::new();
+        for &(version, name, w, h) in FOOTPRINT_ENTRIES {
+            footprint.entry(version).or_default().insert(name, (w, h));
+        }
         Balance {
             versions,
             abilities,
             supply,
             cost,
             sight,
+            footprint,
         }
     })
 }
@@ -153,6 +162,14 @@ fn pick_sight_table(b: &Balance, base_build: u32) -> Option<&SightTable> {
         .map(|(_, t)| t)
 }
 
+fn pick_footprint_table(b: &Balance, base_build: u32) -> Option<&FootprintTable> {
+    b.footprint
+        .range(..=base_build)
+        .next_back()
+        .or_else(|| b.footprint.iter().next())
+        .map(|(_, t)| t)
+}
+
 /// Custo de supply de `name` em décimos (ex.: Marine = 10, Zergling = 5).
 /// Retorna `0` quando desconhecido.
 pub fn supply_cost_x10(name: &str, base_build: u32) -> u32 {
@@ -177,6 +194,17 @@ pub fn sight_radius(name: &str, base_build: u32) -> Option<f32> {
     let b = load();
     let table = pick_sight_table(b, base_build)?;
     table.get(name).copied().map(|x100| x100 as f32 / 100.0)
+}
+
+/// Footprint de `name` em tiles `(width, height)`. Só estruturas têm
+/// entrada — unidades mobile retornam `None`. O minimap usa isso para
+/// desenhar prédios no tamanho real (5x5 para townhalls, 2x2 para
+/// Pylon/SupplyDepot, 3x3 para Gateway/Barracks/Forge, 6x5 para
+/// Hatchery, etc.) em vez do quadrado fixo de 9/18 px.
+pub fn footprint(name: &str, base_build: u32) -> Option<(u8, u8)> {
+    let b = load();
+    let table = pick_footprint_table(b, base_build)?;
+    table.get(name).copied()
 }
 
 /// Tempo de build/research/upgrade para `name` em **game loops**,
@@ -246,6 +274,26 @@ mod tests {
     fn future_base_build_falls_back_to_highest() {
         let scv = build_time_loops("SCV", u32::MAX);
         assert!(scv > 0, "SCV deveria resolver mesmo em base_build futurista");
+    }
+
+    /// Sanity check: footprints conhecidos devem casar com o que aparece
+    /// in-game. 5x5 para townhalls (Nexus/CC/Hatchery), 3x3 para produção
+    /// padrão (Gateway/Barracks), 2x2 para Pylon/SupplyDepot. Se o
+    /// `parse_footprint_dims` do build.rs quebrar, esse teste alerta
+    /// antes do minimap silenciosamente cair no tamanho fallback.
+    #[test]
+    fn known_footprints_are_present() {
+        let b = load();
+        let max_build = *b.footprint.keys().next_back().expect("at least one footprint version");
+        assert_eq!(footprint("Nexus", max_build), Some((5, 5)));
+        assert_eq!(footprint("CommandCenter", max_build), Some((5, 5)));
+        assert_eq!(footprint("Pylon", max_build), Some((2, 2)));
+        assert_eq!(footprint("SupplyDepot", max_build), Some((2, 2)));
+        assert_eq!(footprint("Gateway", max_build), Some((3, 3)));
+        assert_eq!(footprint("Barracks", max_build), Some((3, 3)));
+        // Unidades mobile não têm footprint.
+        assert_eq!(footprint("Marine", max_build), None);
+        assert_eq!(footprint("Probe", max_build), None);
     }
 
     /// Sanity check: sightRadius do Marine deve estar em torno de 9 tiles

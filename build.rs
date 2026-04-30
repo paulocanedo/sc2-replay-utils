@@ -80,6 +80,12 @@ fn main() {
     // ter que serializar f32 no array gerado). Usado pelo overlay de FOG
     // do tab Timeline para desenhar o círculo de visão por entidade.
     let mut sight: BTreeMap<(u32, String), u32> = BTreeMap::new();
+    // (versão, nome) → (width_tiles, height_tiles). Extraído do
+    // `@footprint` (ex.: "Footprint5x5Contour" → (5, 5)). Usado pelo
+    // minimap para desenhar estruturas no tamanho real em vez do
+    // quadrado fixo de 9/18 px. Só estruturas têm footprint; unidades
+    // mobile vêm com `null` no JSON e ficam fora da tabela.
+    let mut footprint: BTreeMap<(u32, String), (u8, u8)> = BTreeMap::new();
 
     for version_entry in fs::read_dir(&balance_dir).expect("read_dir BalanceData") {
         let version_entry = version_entry.expect("entry");
@@ -105,7 +111,15 @@ fn main() {
                 Ok(v) => v,
                 Err(e) => panic!("falha ao parsear {}: {e}", unit_path.display()),
             };
-            collect_unit(&json, version, &mut entries, &mut supply, &mut cost, &mut sight);
+            collect_unit(
+                &json,
+                version,
+                &mut entries,
+                &mut supply,
+                &mut cost,
+                &mut sight,
+                &mut footprint,
+            );
             collect_abilities(&json, version, &mut abilities);
         }
     }
@@ -119,7 +133,7 @@ fn main() {
         "nenhuma entrada de abilities extraída — algo está errado"
     );
 
-    write_generated(&entries, &abilities, &supply, &cost, &sight);
+    write_generated(&entries, &abilities, &supply, &cost, &sight, &footprint);
 
     // Re-roda o build script se a árvore de balance data mudar (cargo
     // update do s2protocol troca o source dir, e o cargo já invalida
@@ -143,6 +157,7 @@ fn collect_unit(
     supply_out: &mut BTreeMap<(u32, String), u32>,
     cost_out: &mut BTreeMap<(u32, String), (u32, u32)>,
     sight_out: &mut BTreeMap<(u32, String), u32>,
+    footprint_out: &mut BTreeMap<(u32, String), (u8, u8)>,
 ) {
     let Some(id) = json.get("@id").and_then(Value::as_str) else {
         return;
@@ -202,6 +217,25 @@ fn collect_unit(
             sight_out
                 .entry((version, id.to_string()))
                 .or_insert(sight_x100);
+        }
+    }
+
+    // Footprint (em tiles). Vem como string no formato
+    // `Footprint{W}x{H}{Variant}` — ex.: "Footprint5x5Contour",
+    // "Footprint3x3CreepContour", "Footprint6x5DropOffCreepSourceContour".
+    // Vive em `misc.@footprint` (mesmo container do `@sightRadius`).
+    // Unidades mobile vêm com `null` (ignoradas). Outros formatos não
+    // dimensionados (e.g. "FootprintGeyserRoundedBuilt", "CreepTumor")
+    // são pulados — o renderer cai no tamanho fallback.
+    if let Some(fp_name) = json
+        .get("misc")
+        .and_then(|m| m.get("@footprint"))
+        .and_then(Value::as_str)
+    {
+        if let Some((w, h)) = parse_footprint_dims(fp_name) {
+            footprint_out
+                .entry((version, id.to_string()))
+                .or_insert((w, h));
         }
     }
 
@@ -375,12 +409,47 @@ fn seconds_to_loops(seconds_normal_speed: f32) -> u32 {
     (seconds_normal_speed * LOOPS_PER_GAME_SECOND).round() as u32
 }
 
+/// Extrai `(width, height)` de um identificador de footprint do estilo
+/// `Footprint{W}x{H}{Variant}`. Retorna `None` para variantes não
+/// dimensionadas (`FootprintGeyserRoundedBuilt`, `CreepTumor`,
+/// `AiurLightBridgeNE`, etc.) ou strings que não começam com `Footprint`.
+///
+/// Estratégia: se a string começa com `Footprint`, tenta achar o padrão
+/// `{dígitos}x{dígitos}` logo após. Implementação manual (sem regex
+/// crate) — o build script já é mantido enxuto sem deps extras.
+fn parse_footprint_dims(name: &str) -> Option<(u8, u8)> {
+    let rest = name.strip_prefix("Footprint")?;
+    let bytes = rest.as_bytes();
+    let w_end = bytes.iter().position(|&b| !b.is_ascii_digit())?;
+    if w_end == 0 || bytes.get(w_end) != Some(&b'x') {
+        return None;
+    }
+    let after_x = &bytes[w_end + 1..];
+    let h_end = after_x
+        .iter()
+        .position(|&b| !b.is_ascii_digit())
+        .unwrap_or(after_x.len());
+    if h_end == 0 {
+        return None;
+    }
+    let w: u8 = std::str::from_utf8(&bytes[..w_end])
+        .ok()?
+        .parse()
+        .ok()?;
+    let h: u8 = std::str::from_utf8(&after_x[..h_end])
+        .ok()?
+        .parse()
+        .ok()?;
+    Some((w, h))
+}
+
 fn write_generated(
     entries: &BTreeMap<(u32, String), u32>,
     abilities: &BTreeMap<AbilityKey, String>,
     supply: &BTreeMap<(u32, String), u32>,
     cost: &BTreeMap<(u32, String), (u32, u32)>,
     sight: &BTreeMap<(u32, String), u32>,
+    footprint: &BTreeMap<(u32, String), (u8, u8)>,
 ) {
     let out_dir = env::var_os("OUT_DIR").expect("OUT_DIR não definido");
     let out_path = Path::new(&out_dir).join("balance_data_generated.rs");
@@ -436,6 +505,15 @@ fn write_generated(
     for ((version, name), sight_x100) in sight {
         let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
         s.push_str(&format!("    ({version}, \"{escaped}\", {sight_x100}),\n"));
+    }
+    s.push_str("];\n\n");
+
+    s.push_str("// Cada tupla é (protocol_version, unit_name, footprint_w_tiles, footprint_h_tiles).\n");
+    s.push_str("// Só estruturas — unidades mobile têm @footprint=null no JSON.\n");
+    s.push_str("pub static FOOTPRINT_ENTRIES: &[(u32, &str, u8, u8)] = &[\n");
+    for ((version, name), (w, h)) in footprint {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        s.push_str(&format!("    ({version}, \"{escaped}\", {w}, {h}),\n"));
     }
     s.push_str("];\n");
 

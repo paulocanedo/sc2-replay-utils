@@ -39,6 +39,12 @@ const MARKER_SIZE: f32 = 8.0;
 /// resolve silhuetas razoáveis (unidades ≥2 supply e todas estruturas).
 const MIN_ICON_SIZE_PX: f32 = 6.0;
 
+/// Piso de tamanho (px) para estruturas escaladas pelo footprint real.
+/// Em mapas 256×256 num minimap pequeno, um Pylon 2x2 cairia para ~3 px
+/// e desapareceria atrás das unidades. Mantém pelo menos a leitura
+/// "tem prédio aqui".
+const MIN_STRUCTURE_PX: f32 = 5.0;
+
 pub(super) fn minimap_with_size(
     ui: &mut Ui,
     loaded: &LoadedReplay,
@@ -100,7 +106,14 @@ pub(super) fn minimap_with_size(
                 draw_heatmap(&painter, rect, p, game_loop, bounds, color);
             }
         } else {
-            // Modo normal: recursos → unidades → estruturas → câmera.
+            // Modo normal: start locations → recursos → unidades →
+            // estruturas → câmera. Start locations renderizam por baixo
+            // de tudo (são marcadores estáticos, viram "background"
+            // quando as unidades começam a poluir o mapa).
+            for sl in &loaded.start_locations {
+                draw_start_location(&painter, rect, sl.x, sl.y, bounds);
+            }
+
             // CreepTumors entram no pass de estruturas; `show_creep`
             // toggle apenas os ícones de tumor — late-game Zerg pode
             // acumular dezenas, então mantemos a opção de esconder.
@@ -108,22 +121,32 @@ pub(super) fn minimap_with_size(
                 draw_resource(&painter, rect, *r, bounds);
             }
 
+            // Pré-computa px/tile uma vez por frame; usado por toda
+            // estrutura com footprint conhecido pra escalar do espaço
+            // de tile (vindo da balance data) pro espaço de tela.
+            let ppt = pixels_per_tile(rect, bounds);
+
             for (i, entities) in entities_per_player.iter().enumerate() {
                 let color = player_slot_color_bright(i);
                 for e in entities.iter().filter(|e| e.category != EntityCategory::Structure) {
                     let icon = unit_icon(&e.entity_type);
-                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, e.side, color, false, icon);
+                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, (e.side, e.side), color, false, icon);
                 }
                 // Estruturas renderizadas por cima das unidades, com
-                // borda branca para destacar. Bases (townhalls) usam
-                // `TOWNHALL_BASE_SIZE` (2× uma estrutura normal) —
-                // âncora visual das bases dos jogadores no minimapa.
+                // borda branca para destacar. Estruturas com footprint
+                // conhecido na balance data (Nexus 5x5, Pylon 2x2,
+                // Gateway 3x3, Hatchery 6x5, etc.) são escaladas pelo
+                // tamanho real em tiles — bases ficam naturalmente
+                // grandes sem precisar de heurística de townhall. As
+                // sem footprint (variantes raras) caem no `e.side`
+                // legado (9/18 px).
                 for e in entities.iter().filter(|e| {
                     e.category == EntityCategory::Structure
                         && (show_creep || e.entity_type != "CreepTumor")
                 }) {
                     let icon = structure_icon(&e.entity_type);
-                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, e.side, color, true, icon);
+                    let size = structure_size_px(e, ppt);
+                    draw_unit(ui, &painter, rect, e.x, e.y, bounds, size, color, true, icon);
                 }
             }
 
@@ -358,26 +381,32 @@ fn draw_unit(
     x: f32,
     y: f32,
     bounds: PlayableBounds,
-    side: f32,
+    size_px: (f32, f32),
     color: Color32,
     structure: bool,
     icon: Option<egui::ImageSource<'static>>,
 ) {
+    let (w, h) = size_px;
     let center = to_screen(rect, x, y, bounds);
-    let half = side * 0.5;
+    let half_w = w * 0.5;
+    let half_h = h * 0.5;
     let r = Rect::from_min_max(
-        pos2(center.x - half, center.y - half),
-        pos2(center.x + half, center.y + half),
+        pos2(center.x - half_w, center.y - half_h),
+        pos2(center.x + half_w, center.y + half_h),
     );
-    // Fill colorido primeiro: serve de background pra pixels
-    // transparentes do ícone e, com o inset abaixo, fica visível como
-    // anel fino — preserva a identificação do jogador mesmo com o
-    // sprite por cima. Entidades muito pequenas (workers de 4 px) ficam
-    // só com o quadrado sólido.
-    painter.rect_filled(r, 0.0, color);
-    if side >= MIN_ICON_SIZE_PX {
+    // Estruturas: ícone PNG renderiza por completo (a arte cheia da
+    // Blizzard tem cor própria, então não precisa de fundo) e a
+    // identificação do jogador vem só do contorno na cor do slot.
+    // Unidades: fill colorido como sempre — workers de 4 px ficam só
+    // com o quadrado sólido, e o icon (quando ≥ 6 px) sobrepõe usando
+    // o fundo como anel de identificação.
+    if !structure {
+        painter.rect_filled(r, 0.0, color);
+    }
+    let min_side = w.min(h);
+    if min_side >= MIN_ICON_SIZE_PX {
         if let Some(icon) = icon {
-            let inset = (side * 0.1).max(0.5);
+            let inset = (min_side * 0.1).max(0.5);
             let icon_r = Rect::from_min_max(
                 pos2(r.min.x + inset, r.min.y + inset),
                 pos2(r.max.x - inset, r.max.y - inset),
@@ -386,7 +415,25 @@ fn draw_unit(
         }
     }
     if structure {
-        painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::WHITE), StrokeKind::Outside);
+        painter.rect_stroke(r, 0.0, Stroke::new(1.5, color), StrokeKind::Outside);
+    }
+}
+
+/// Tamanho em px de uma estrutura no minimap.
+///
+/// Quando a balance data tem o footprint, usa `(w, h) × pixels_per_tile`
+/// — bate com o tamanho que o jogo desenha. Aplica um piso de
+/// `MIN_STRUCTURE_PX` em cada eixo pra evitar que prédios pequenos
+/// (Pylon 2x2, SupplyDepot 2x2) desapareçam em mapas grandes ou
+/// minimapas pequenos. Sem footprint (variantes não cobertas pela
+/// versão de balance data), cai no `e.side` legado (9/18 px).
+fn structure_size_px(e: &LiveEntity, pixels_per_tile: f32) -> (f32, f32) {
+    if let Some((fw, fh)) = e.footprint_tiles {
+        let w = (fw as f32 * pixels_per_tile).max(MIN_STRUCTURE_PX);
+        let h = (fh as f32 * pixels_per_tile).max(MIN_STRUCTURE_PX);
+        (w, h)
+    } else {
+        (e.side, e.side)
     }
 }
 
@@ -505,6 +552,23 @@ fn draw_camera_rect(
     painter.rect_filled(cam_rect, 0.0, fill);
     let stroke_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 140);
     painter.rect_stroke(cam_rect, 0.0, Stroke::new(1.5, stroke_color), StrokeKind::Outside);
+}
+
+/// Marcador de start location: anel branco translúcido com um ponto
+/// central da mesma cor. Renderizado por baixo de todo o resto do
+/// minimap pra ficar quase invisível quando há muita coisa acontecendo,
+/// mas claro o suficiente em `game_loop=0` (antes de qualquer unidade
+/// aparecer) pra deixar visível onde cada lado vai spawnar. Cor neutra
+/// (sem associação a slot) porque o mapeamento slot→spawn só fica
+/// definido quando a primeira townhall é construída.
+fn draw_start_location(painter: &egui::Painter, rect: Rect, x: f32, y: f32, bounds: PlayableBounds) {
+    let center = to_screen(rect, x, y, bounds);
+    let radius = 7.0;
+    let ring = Color32::from_rgba_unmultiplied(255, 255, 255, 110);
+    let fill = Color32::from_rgba_unmultiplied(255, 255, 255, 40);
+    painter.circle_filled(center, radius, fill);
+    painter.circle_stroke(center, radius, Stroke::new(1.4, ring));
+    painter.circle_filled(center, 1.6, ring);
 }
 
 /// Marcador de morte: dois segmentos diagonais formando um "X" centrado
