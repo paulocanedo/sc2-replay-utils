@@ -3118,6 +3118,7 @@ dependencies = [
  "egui_plot",
  "log",
  "mimalloc",
+ "nom-mpq",
  "notify",
  "rfd",
  "s2protocol",
