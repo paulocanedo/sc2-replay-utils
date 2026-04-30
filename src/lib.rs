@@ -29,6 +29,9 @@ mod utils;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug_addons;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod profile;
+
 // ── map_image: native real, wasm type stub ──
 //
 // `MapImage` is referenced as `Option<MapImage>` field type in
