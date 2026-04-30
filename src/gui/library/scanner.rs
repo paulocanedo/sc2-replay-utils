@@ -24,22 +24,24 @@
 //!    chega. O cache bincode persiste o resultado, então nas próximas
 //!    aberturas da biblioteca o rótulo aparece imediatamente.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::build_order::{classify_opening, extract_build_order};
+use crate::cache::{ContentId, LibraryCache, LookupOutcome};
 use crate::config::AppConfig;
 use crate::replay::parse_replay;
 
 use super::date::today_str;
 use super::filter::{LibraryFilter, StatsFilterKey, matches_filter};
 use super::stats::{LibraryStats, compute_library_stats, compute_nickname_frequencies};
-use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
+use super::types::{LibraryEntry, MetaState, OpeningLabel, ParsedMeta, PlayerMeta};
 
 /// Quantos segundos de game time parseamos *no pool de enriquecimento*
 /// para extrair o rótulo de abertura. A janela interna de classificação
@@ -67,6 +69,18 @@ const ENRICHMENT_YIELD_MS: u64 = 50;
 /// worker único é suficiente.
 const PARALLEL_THRESHOLD: usize = 100;
 
+/// A cada N updates do cache em memória durante o enriquecimento,
+/// força um flush para disco mesmo que o pool ainda esteja trabalhando.
+/// Garantia de progresso resiliente a crashes / kills — sem isso, o
+/// cache só persistia no fim do enriquecimento (que pode levar horas
+/// numa biblioteca grande) ou no shutdown gracioso.
+const ENRICHMENT_FLUSH_BATCH: u32 = 25;
+
+/// Tempo máximo entre flushes do cache durante o enriquecimento.
+/// Complementar ao batch — garante que mesmo enriquecimentos
+/// esparsos (1-2 por minuto) cheguem a disco regularmente.
+const ENRICHMENT_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Limite superior do pool multi-thread (protege contra máquinas com
 /// muitos núcleos onde o I/O do disco vira gargalo antes da CPU).
 const MAX_WORKERS: usize = 8;
@@ -79,10 +93,14 @@ enum ParseOutcome {
     Failed(String),
 }
 
-/// Mensagem enviada pelo worker de volta para a UI.
+/// Mensagem enviada pelo worker de volta para a UI. Carrega
+/// `size`/`content_id` quando disponíveis para que a UI insira no cache
+/// sem re-hashear nem re-statar.
 struct LibraryResult {
     path: PathBuf,
     mtime: Option<SystemTime>,
+    size: Option<u64>,
+    content_id: Option<ContentId>,
     outcome: ParseOutcome,
 }
 
@@ -91,6 +109,18 @@ struct ScanResult {
     path: PathBuf,
     filename: String,
     mtime: Option<SystemTime>,
+    size: Option<u64>,
+}
+
+/// Item da fila de parsing — carrega o que sabemos sobre o arquivo no
+/// momento em que decidimos parseá-lo. `content_id` vem pré-computado
+/// quando o lookup do cache já hasheou (slow-path miss); senão é
+/// computado pelo worker.
+struct ParseQueueItem {
+    path: PathBuf,
+    mtime: Option<SystemTime>,
+    size: Option<u64>,
+    content_id: Option<ContentId>,
 }
 
 /// Mensagem enviada pelo scanner de diretório em background.
@@ -100,23 +130,26 @@ enum ScanMessage {
     Done { latest: Option<(PathBuf, SystemTime)> },
 }
 
-/// Resultado do pool de enriquecimento — uma classificação de abertura
-/// por jogador, do mesmo `path`. O vetor preserva a ordem de
-/// `ParsedMeta.players`.
-struct EnrichmentResult {
-    path: PathBuf,
-    openings: Vec<Option<String>>,
+/// Resultado do pool de enriquecimento. `Classified` carrega uma
+/// classificação por jogador, na mesma ordem de `ParsedMeta.players`
+/// (o worker substitui falhas individuais por `OpeningLabel::Unclassifiable`).
+/// `Skipped` sinaliza que o item foi descartado pelo `stop_enrichment` —
+/// `poll()` apenas remove de `enrichment_in_flight` sem mudar entries/cache.
+enum EnrichmentResult {
+    Classified {
+        path: PathBuf,
+        openings: Vec<OpeningLabel>,
+    },
+    Skipped(PathBuf),
 }
 
 pub struct ReplayLibrary {
     pub entries: Vec<LibraryEntry>,
     pub working_dir: Option<PathBuf>,
-    /// Cache por caminho — preserva resultados entre refreshes. Guarda
-    /// apenas estados "finais e estáveis" (`Parsed` e `Unsupported`);
-    /// `Failed` e `Pending` nunca entram aqui — falhas são retentadas.
-    /// O `SystemTime` é o mtime do arquivo quando foi parseado, usado
-    /// para invalidar a entrada se o arquivo mudar.
-    cache: HashMap<PathBuf, (SystemTime, MetaState)>,
+    /// Cache de duas camadas (path fingerprint + content hash) que
+    /// sobrevive a path drift (separadores, casing, drive letter) e
+    /// mtime drift (sync tools, antivírus). Ver `crate::cache`.
+    cache: LibraryCache,
     /// `true` quando o cache em memória diverge do que está em disco.
     cache_dirty: bool,
     /// Canal pelo qual os workers enviam resultados para a UI. Os
@@ -131,7 +164,7 @@ pub struct ReplayLibrary {
     pub scan_latest: Option<PathBuf>,
     /// Acumulador de arquivos que precisam de parsing, preenchido
     /// progressivamente pelo scanner e despachado em lotes.
-    scan_parse_queue: Vec<(PathBuf, Option<SystemTime>)>,
+    scan_parse_queue: Vec<ParseQueueItem>,
     /// Canal de envio de trabalho para o pool de enriquecimento. É
     /// mantido vivo durante toda a vida do `ReplayLibrary` para que os
     /// workers persistentes continuem bloqueando em `recv()`; nunca
@@ -143,6 +176,19 @@ pub struct ReplayLibrary {
     /// Impede re-envios redundantes quando a mesma entrada é polada em
     /// sucessivos `poll()`s antes do worker começar a processá-la.
     enrichment_in_flight: HashSet<PathBuf>,
+    /// Flag compartilhada com os workers de enriquecimento. Quando `true`,
+    /// o worker descarta o item recém-recebido sem chamar `compute_openings`,
+    /// retornando `EnrichmentResult::Skipped` para o `poll()` limpar o
+    /// `enrichment_in_flight`. Setada por `stop_classification()` e
+    /// limpa por `start_classification()`.
+    stop_enrichment: Arc<AtomicBool>,
+    /// Updates ao `cache` desde o último flush em disco. Quando atinge
+    /// `ENRICHMENT_FLUSH_BATCH`, força `save_cache()` mesmo com o pool
+    /// de enriquecimento ainda trabalhando — garante que o trabalho
+    /// progressivo sobreviva a kills/crashes.
+    cache_updates_since_flush: u32,
+    /// Timestamp do último flush; ver `ENRICHMENT_FLUSH_INTERVAL`.
+    last_cache_flush: Instant,
     /// Derived cache: aggregates computed from `entries` on demand.
     /// Invalidated whenever `entries` mutates or when the nickname list
     /// in `AppConfig` differs from the one used to build the cache.
@@ -167,6 +213,7 @@ impl ReplayLibrary {
         let (tx_enrich_work, rx_enrich_work) = mpsc::channel::<PathBuf>();
         let (tx_enrich_result, rx_enrich_result) = mpsc::channel::<EnrichmentResult>();
         let cache = crate::cache::load();
+        let stop_enrichment = Arc::new(AtomicBool::new(false));
 
         // Pool persistente de enriquecimento. Os workers bloqueiam em
         // `recv()` esperando trabalho; sleep + yield antes de cada item
@@ -176,6 +223,7 @@ impl ReplayLibrary {
         for i in 0..ENRICHMENT_WORKERS {
             let rx = Arc::clone(&rx_enrich_work);
             let tx = tx_enrich_result.clone();
+            let stop_flag = Arc::clone(&stop_enrichment);
             let _ = thread::Builder::new()
                 .name(format!("replay-library-enricher-{i}"))
                 .spawn(move || loop {
@@ -192,12 +240,15 @@ impl ReplayLibrary {
                     };
                     match next {
                         Ok(path) => {
+                            if stop_flag.load(Ordering::Acquire) {
+                                if tx.send(EnrichmentResult::Skipped(path)).is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
                             let openings = compute_openings(&path);
                             if tx
-                                .send(EnrichmentResult {
-                                    path,
-                                    openings,
-                                })
+                                .send(EnrichmentResult::Classified { path, openings })
                                 .is_err()
                             {
                                 break;
@@ -222,6 +273,9 @@ impl ReplayLibrary {
             tx_enrich_work,
             rx_enrich_result,
             enrichment_in_flight: HashSet::new(),
+            stop_enrichment,
+            cache_updates_since_flush: 0,
+            last_cache_flush: Instant::now(),
             cached_stats: None,
             stats_dirty: true,
             cached_nicknames: Vec::new(),
@@ -234,7 +288,13 @@ impl ReplayLibrary {
     /// scanner em background que descobre arquivos progressivamente —
     /// a UI não trava mesmo com dezenas de milhares de replays.
     pub fn refresh(&mut self, dir: &Path) {
-        self.working_dir = Some(dir.to_path_buf());
+        // Canonicaliza o working_dir uma vez. Todo path produzido pelo
+        // walk começa enraizado nesse dir canônico, então `entry.path()`
+        // já vem em formato comparável byte-a-byte com o que está
+        // gravado no cache. Sem isso, mudanças de slash/case no config
+        // do usuário invalidam o cache inteiro silenciosamente.
+        let dir = crate::cache::canonicalize_path(dir);
+        self.working_dir = Some(dir.clone());
 
         // Cancela scanner anterior (se houver): dropar o Receiver faz
         // o send() do scanner falhar e a thread encerrar.
@@ -248,7 +308,6 @@ impl ReplayLibrary {
         self.rx_scan = Some(rx_scan);
         self.scanning = true;
 
-        let dir = dir.to_path_buf();
         let _ = thread::Builder::new()
             .name("replay-library-scanner".into())
             .spawn(move || {
@@ -272,7 +331,12 @@ impl ReplayLibrary {
                         {
                             continue;
                         }
-                        let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                        // Uma syscall só para pegar mtime + size (vs.
+                        // duas chamadas separadas a `fs::metadata`).
+                        let (mtime, size) = match fs::metadata(&path) {
+                            Ok(m) => (m.modified().ok(), Some(m.len())),
+                            Err(_) => (None, None),
+                        };
                         let filename = path
                             .file_name()
                             .map(|s| s.to_string_lossy().into_owned())
@@ -289,6 +353,7 @@ impl ReplayLibrary {
                                 path,
                                 filename,
                                 mtime,
+                                size,
                             }))
                             .is_err()
                         {
@@ -317,6 +382,10 @@ impl ReplayLibrary {
         mtime: Option<SystemTime>,
         meta: ParsedMeta,
     ) {
+        // Canonicaliza primeiro — as comparações com `working_dir` e
+        // com paths já em `entries` precisam ser estáveis. notify-rs
+        // pode produzir paths num formato diferente do walk.
+        let path = crate::cache::canonicalize_path(&path);
         if !self.path_under_working_dir(&path) {
             return;
         }
@@ -326,13 +395,17 @@ impl ReplayLibrary {
             .unwrap_or_else(|| path.display().to_string());
 
         // Grava no cache cedo — se um refresh concorrente reencontrar o
-        // arquivo, vai bater como cache hit (mesmo mtime) e não re-parsear.
-        if let Some(mt) = mtime {
-            self.cache.insert(
-                path.clone(),
-                (mt, MetaState::Parsed(meta.clone())),
-            );
+        // arquivo, vai bater como cache hit (mesmo fingerprint) e não
+        // re-parsear. Hash + size custam um read do arquivo (~200 KB);
+        // qualquer falha aqui (arquivo sumiu, sem permissão) só
+        // significa que o cache não vai persistir essa entrada — não é
+        // erro de UX.
+        let size = fs::metadata(&path).map(|m| m.len()).ok();
+        let content_id = crate::cache::hash_file(&path);
+        if let (Some(mt), Some(sz), Some(cid)) = (mtime, size, content_id) {
+            self.cache.insert(path.clone(), sz, mt, cid, MetaState::Parsed(meta.clone()));
             self.cache_dirty = true;
+            self.cache_updates_since_flush += 1;
         }
 
         // Enfileira enriquecimento se algum jogador ainda está sem
@@ -361,6 +434,7 @@ impl ReplayLibrary {
     /// para o pool de parse existente. Usada quando `auto_load` está
     /// desligado ou quando o load da análise falhou.
     pub fn ingest_pending(&mut self, path: PathBuf, mtime: Option<SystemTime>) {
+        let path = crate::cache::canonicalize_path(&path);
         if !self.path_under_working_dir(&path) {
             return;
         }
@@ -371,6 +445,7 @@ impl ReplayLibrary {
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
+        let size = fs::metadata(&path).map(|m| m.len()).ok();
         self.entries.insert(
             0,
             LibraryEntry {
@@ -381,7 +456,14 @@ impl ReplayLibrary {
             },
         );
         self.stats_dirty = true;
-        self.spawn_parse_burst(vec![(path, mtime)]);
+        self.spawn_parse_burst(vec![ParseQueueItem {
+            path,
+            mtime,
+            size,
+            // Worker computa o hash — economizar uma leitura aqui não
+            // vale o branching extra para o caso comum (watcher).
+            content_id: None,
+        }]);
     }
 
     fn path_under_working_dir(&self, path: &Path) -> bool {
@@ -394,8 +476,8 @@ impl ReplayLibrary {
     /// Sobe um pool efêmero de workers para processar `paths` e retorna
     /// imediatamente. Os workers encerram sozinhos quando a fila esvazia
     /// (drop do `tx_work` ao final desta função fecha o canal de entrada).
-    fn spawn_parse_burst(&self, paths: Vec<(PathBuf, Option<SystemTime>)>) {
-        let n = paths.len();
+    fn spawn_parse_burst(&self, items: Vec<ParseQueueItem>) {
+        let n = items.len();
         let n_workers = if n > PARALLEL_THRESHOLD {
             thread::available_parallelism()
                 .map(|v| v.get().clamp(2, MAX_WORKERS))
@@ -404,7 +486,7 @@ impl ReplayLibrary {
             1
         };
 
-        let (tx_work, rx_work) = mpsc::channel::<(PathBuf, Option<SystemTime>)>();
+        let (tx_work, rx_work) = mpsc::channel::<ParseQueueItem>();
         let rx_work = Arc::new(Mutex::new(rx_work));
 
         for i in 0..n_workers {
@@ -421,12 +503,22 @@ impl ReplayLibrary {
                         guard.recv()
                     };
                     match next {
-                        Ok((p, mtime)) => {
-                            let outcome = parse_meta(&p);
+                        Ok(item) => {
+                            let outcome = parse_meta(&item.path);
+                            // Calcula o hash quando não veio do
+                            // lookup (slow-path miss). Pequena
+                            // duplicação de read em cache misses do
+                            // ingest_pending, mas mantém o caminho
+                            // do scanner totalmente sem syscalls
+                            // extras quando vem com hash.
+                            let content_id =
+                                item.content_id.or_else(|| crate::cache::hash_file(&item.path));
                             if tx
                                 .send(LibraryResult {
-                                    path: p,
-                                    mtime,
+                                    path: item.path,
+                                    mtime: item.mtime,
+                                    size: item.size,
+                                    content_id,
                                     outcome,
                                 })
                                 .is_err()
@@ -439,14 +531,14 @@ impl ReplayLibrary {
                 });
         }
 
-        for item in paths {
+        for item in items {
             let _ = tx_work.send(item);
         }
     }
 
     /// Drena resultados prontos dos workers e do scanner. Retorna `true`
     /// se alguma entrada foi atualizada (para a UI pedir repaint).
-    pub fn poll(&mut self) -> bool {
+    pub fn poll(&mut self, auto_classify_on_scan: bool) -> bool {
         let mut updated = false;
 
         // Fase 1: Drena arquivos descobertos pelo scanner background.
@@ -465,22 +557,56 @@ impl ReplayLibrary {
                         if self.entries.iter().any(|e| e.path == result.path) {
                             continue;
                         }
-                        let meta = match (self.cache.get(&result.path), result.mtime) {
-                            (Some((cached_mtime, state)), Some(mt)) if *cached_mtime == mt => {
-                                state.clone()
-                            }
+                        let meta = match (result.mtime, result.size) {
+                            (Some(mt), Some(sz)) => match self.cache.lookup(
+                                &result.path,
+                                sz,
+                                mt,
+                                &result.path,
+                            ) {
+                                LookupOutcome::Hit { state, healed, .. } => {
+                                    if healed {
+                                        // Cura: a camada rápida foi
+                                        // atualizada (path/mtime drift
+                                        // recuperado via hash). Marca
+                                        // dirty para o flush incremental
+                                        // pegar.
+                                        self.cache_dirty = true;
+                                        self.cache_updates_since_flush += 1;
+                                    }
+                                    state
+                                }
+                                LookupOutcome::Miss { content_id } => {
+                                    self.scan_parse_queue.push(ParseQueueItem {
+                                        path: result.path.clone(),
+                                        mtime: result.mtime,
+                                        size: result.size,
+                                        content_id,
+                                    });
+                                    MetaState::Pending
+                                }
+                            },
                             _ => {
-                                self.scan_parse_queue
-                                    .push((result.path.clone(), result.mtime));
+                                // Sem mtime ou sem size — não dá pra
+                                // checar fingerprint, vai pro parse.
+                                self.scan_parse_queue.push(ParseQueueItem {
+                                    path: result.path.clone(),
+                                    mtime: result.mtime,
+                                    size: result.size,
+                                    content_id: None,
+                                });
                                 MetaState::Pending
                             }
                         };
-                        // Cache hit com opening=None: enfileira para
-                        // enriquecimento (v1 desta feature ainda não tem
-                        // rótulo gravado). Idempotente — dedup via
-                        // enrichment_in_flight.
-                        if let MetaState::Parsed(parsed) = &meta {
-                            self.enqueue_enrichment_if_needed(&result.path, parsed);
+                        // Cache hit (legítimo ou via cura): se algum
+                        // jogador ainda está com `OpeningLabel::Pending`
+                        // E o usuário ativou classificação em lote,
+                        // enfileira para enriquecimento. Idempotente —
+                        // dedup via `enrichment_in_flight`.
+                        if auto_classify_on_scan {
+                            if let MetaState::Parsed(parsed) = &meta {
+                                self.enqueue_enrichment_if_needed(&result.path, parsed);
+                            }
                         }
                         self.entries.push(LibraryEntry {
                             path: result.path,
@@ -515,101 +641,185 @@ impl ReplayLibrary {
 
         // Fase 2: Drena resultados de parsing dos workers.
         while let Ok(msg) = self.rx_result.try_recv() {
-            let state = match msg.outcome {
+            // Snapshot dos campos não-outcome antes do match — o
+            // pattern move o conteúdo de `outcome` e deixa `msg`
+            // parcialmente movido.
+            let LibraryResult {
+                path,
+                mtime,
+                size,
+                content_id,
+                outcome,
+            } = msg;
+            let state = match outcome {
                 ParseOutcome::Parsed(meta) => {
-                    // Fresh parse chegou com opening=None — enfileira
-                    // para enriquecimento. Idempotente.
-                    self.enqueue_enrichment_if_needed(&msg.path, &meta);
-                    let st = MetaState::Parsed(meta);
-                    if let Some(mt) = msg.mtime {
-                        self.cache.insert(msg.path.clone(), (mt, st.clone()));
-                        self.cache_dirty = true;
+                    // Fresh parse: todos os jogadores chegam com
+                    // `OpeningLabel::Pending`. Só enfileira para
+                    // enriquecimento se o usuário ativou classificação em
+                    // lote — caso contrário, fica suspenso até pedido manual.
+                    if auto_classify_on_scan {
+                        self.enqueue_enrichment_if_needed(&path, &meta);
                     }
+                    let st = MetaState::Parsed(meta);
+                    self.cache_insert_if_complete(&path, mtime, size, content_id, &st);
                     st
                 }
                 ParseOutcome::Unsupported(reason) => {
                     let st = MetaState::Unsupported(reason);
-                    if let Some(mt) = msg.mtime {
-                        self.cache.insert(msg.path.clone(), (mt, st.clone()));
-                        self.cache_dirty = true;
-                    }
+                    self.cache_insert_if_complete(&path, mtime, size, content_id, &st);
                     st
                 }
                 ParseOutcome::Failed(e) => MetaState::Failed(e),
             };
-            if let Some(entry) = self.entries.iter_mut().find(|e| e.path == msg.path) {
+            if let Some(entry) = self.entries.iter_mut().find(|e| e.path == path) {
                 entry.meta = state;
                 updated = true;
             }
         }
 
-        // Fase 3: Drena resultados do pool de enriquecimento. Atualiza
-        // o rótulo `opening` de cada jogador na entrada e no cache. Se
-        // o vetor vier vazio (parse/extract falhou), marcamos `path`
-        // como concluído para não tentar de novo nesta sessão — o
-        // próximo ciclo do app tenta novamente depois do usuário fechar.
+        // Fase 3: Drena resultados do pool de enriquecimento. O worker
+        // sempre devolve um vetor de tamanho `players.len()` (preenchido
+        // com `Unclassifiable` em qualquer falha), então qualquer
+        // `Classified` marca estado terminal e impede re-tentativa em
+        // launches futuros. `Skipped` apenas libera o slot em
+        // `enrichment_in_flight` — não toca em entries nem cache.
         while let Ok(res) = self.rx_enrich_result.try_recv() {
-            self.enrichment_in_flight.remove(&res.path);
-            if res.openings.is_empty() {
-                continue;
-            }
-            // Atualiza entrada.
-            if let Some(entry) = self.entries.iter_mut().find(|e| e.path == res.path) {
-                if let MetaState::Parsed(meta) = &mut entry.meta {
-                    for (i, op) in res.openings.iter().enumerate() {
-                        if let Some(player) = meta.players.get_mut(i) {
-                            player.opening = op.clone();
+            match res {
+                EnrichmentResult::Skipped(path) => {
+                    self.enrichment_in_flight.remove(&path);
+                }
+                EnrichmentResult::Classified { path, openings } => {
+                    self.enrichment_in_flight.remove(&path);
+                    // Atualiza entrada.
+                    if let Some(entry) = self.entries.iter_mut().find(|e| e.path == path) {
+                        if let MetaState::Parsed(meta) = &mut entry.meta {
+                            for (i, op) in openings.iter().enumerate() {
+                                if let Some(player) = meta.players.get_mut(i) {
+                                    player.opening = op.clone();
+                                }
+                            }
+                            updated = true;
                         }
                     }
-                    updated = true;
-                }
-            }
-            // Atualiza cache (pode não estar sincronizado com `entries`
-            // se o usuário mudou de diretório entre enqueue e resultado
-            // — mesmo assim gravamos o rótulo calculado, é válido).
-            if let Some((_, MetaState::Parsed(cached_meta))) = self.cache.get_mut(&res.path) {
-                for (i, op) in res.openings.iter().enumerate() {
-                    if let Some(player) = cached_meta.players.get_mut(i) {
-                        player.opening = op.clone();
+                    // Atualiza cache via path → content_id → MetaState. Pode
+                    // não estar sincronizado com `entries` se o usuário mudou
+                    // de diretório entre enqueue e resultado — mesmo assim
+                    // gravamos o rótulo calculado, é válido.
+                    if let Some(MetaState::Parsed(cached_meta)) =
+                        self.cache.state_mut_for_path(&path)
+                    {
+                        for (i, op) in openings.iter().enumerate() {
+                            if let Some(player) = cached_meta.players.get_mut(i) {
+                                player.opening = op.clone();
+                            }
+                        }
+                        self.cache_dirty = true;
+                        self.cache_updates_since_flush += 1;
                     }
                 }
-                self.cache_dirty = true;
             }
         }
 
         if updated {
             self.stats_dirty = true;
         }
-        // Salva o cache quando tudo assentar: scanner, pool principal
-        // e pool de enriquecimento ociosos. Enriquecimento pode rodar
-        // por minutos em bibliotecas grandes; a escrita fica para
-        // quando ele terminar, evitando syscalls redundantes.
-        if self.cache_dirty
-            && !self.scanning
-            && self.pending_count() == 0
-            && self.enrichment_in_flight.is_empty()
-        {
-            self.save_cache();
+        // Política de flush do cache:
+        //
+        // 1) Quando tudo assentar (scanner + pool principal + pool de
+        //    enriquecimento ociosos): flush imediato. Caso normal numa
+        //    biblioteca pequena ou após enriquecimento completo.
+        //
+        // 2) Caso contrário, flush incremental: a cada
+        //    `ENRICHMENT_FLUSH_BATCH` updates OU a cada
+        //    `ENRICHMENT_FLUSH_INTERVAL`. Isso garante que kills/crashes
+        //    durante enriquecimentos longos não percam todo o trabalho.
+        if self.cache_dirty {
+            let idle = !self.scanning
+                && self.pending_count() == 0
+                && self.enrichment_in_flight.is_empty();
+            let batch_full = self.cache_updates_since_flush >= ENRICHMENT_FLUSH_BATCH;
+            let interval_elapsed = self.last_cache_flush.elapsed() >= ENRICHMENT_FLUSH_INTERVAL
+                && self.cache_updates_since_flush > 0;
+            if idle || batch_full || interval_elapsed {
+                self.save_cache();
+                self.cache_updates_since_flush = 0;
+                self.last_cache_flush = Instant::now();
+            }
         }
         updated
     }
 
+    /// Insere o `state` no cache se temos fingerprint completo
+    /// (mtime/size/content_id). Caso falte algum, não dá pra montar
+    /// fingerprint estável — pula o cache (próximo scan re-parseia,
+    /// mas isso era o comportamento antigo também).
+    fn cache_insert_if_complete(
+        &mut self,
+        path: &Path,
+        mtime: Option<SystemTime>,
+        size: Option<u64>,
+        content_id: Option<ContentId>,
+        state: &MetaState,
+    ) {
+        if let (Some(mt), Some(sz), Some(cid)) = (mtime, size, content_id) {
+            self.cache
+                .insert(path.to_path_buf(), sz, mt, cid, state.clone());
+            self.cache_dirty = true;
+            self.cache_updates_since_flush += 1;
+        }
+    }
+
     /// Enfileira `path` no pool de enriquecimento se a meta ainda
-    /// precisa de rótulo (pelo menos um jogador com `opening: None`).
-    /// Dedup via `enrichment_in_flight`. Apenas 1v1 (2 jogadores) —
-    /// os demais já viram `Unsupported` no parse rápido e não chegam
-    /// aqui, mas o check é defensivo.
+    /// precisa de rótulo (pelo menos um jogador com `OpeningLabel::Pending`).
+    /// `Unclassifiable` é estado terminal — não enfileira de novo. Dedup
+    /// via `enrichment_in_flight`. Apenas 1v1 (2 jogadores) — os demais
+    /// já viraram `Unsupported` no parse rápido e não chegam aqui, mas
+    /// o check é defensivo.
     fn enqueue_enrichment_if_needed(&mut self, path: &Path, meta: &ParsedMeta) {
         if meta.players.len() != 2 {
             return;
         }
-        let needs = meta.players.iter().any(|p| p.opening.is_none());
+        let needs = meta.players.iter().any(|p| p.opening.is_pending());
         if !needs {
             return;
         }
         if self.enrichment_in_flight.insert(path.to_path_buf()) {
             let _ = self.tx_enrich_work.send(path.to_path_buf());
         }
+    }
+
+    /// Quantos paths estão no pool de enriquecimento (em-vôo). Usado
+    /// pela UI para mostrar "classificando aberturas (N)" enquanto o
+    /// trabalho acontece em background.
+    pub fn enrichment_in_flight_count(&self) -> usize {
+        self.enrichment_in_flight.len()
+    }
+
+    /// Reabre o portão (limpa a flag de stop) e enfileira todos os
+    /// replays cujos `opening` ainda estão `Pending`. Usado pelo botão
+    /// "Classificar pendentes agora" das Configurações. Idempotente —
+    /// `enrichment_in_flight` já protege de duplicatas.
+    pub fn start_classification(&mut self) {
+        self.stop_enrichment.store(false, Ordering::Release);
+        let pending: Vec<(PathBuf, ParsedMeta)> = self
+            .entries
+            .iter()
+            .filter_map(|e| match &e.meta {
+                MetaState::Parsed(meta) => Some((e.path.clone(), meta.clone())),
+                _ => None,
+            })
+            .collect();
+        for (path, meta) in pending {
+            self.enqueue_enrichment_if_needed(&path, &meta);
+        }
+    }
+
+    /// Sinaliza para os workers descartar o trabalho ainda enfileirado.
+    /// O item correntemente em `compute_openings` completa (não há
+    /// cancelamento mid-parse) — no pior caso, o usuário espera ~1
+    /// análise por worker (ENRICHMENT_WORKERS = 2 hoje).
+    pub fn stop_classification(&mut self) {
+        self.stop_enrichment.store(true, Ordering::Release);
     }
 
     /// Persiste o cache em disco (se houver mudanças pendentes).
@@ -702,31 +912,36 @@ fn parse_meta(path: &Path) -> ParseOutcome {
                 mmr: p.mmr,
                 result: p.result.clone().unwrap_or_default(),
                 // Enrichment preenche depois; placeholder "—" na UI.
-                opening: None,
+                opening: OpeningLabel::Pending,
             })
             .collect(),
     })
 }
 
 /// Parseia ~5 min do replay e classifica a abertura de cada jogador.
-/// Retorna um vetor alinhado com `ParsedMeta.players`. Em qualquer
-/// falha (parse/extração), retorna um vetor vazio — a chamadora deve
-/// tratar o vetor de tamanho errado como "enriquecimento falhou" e
-/// manter `opening: None` no meta.
-fn compute_openings(path: &Path) -> Vec<Option<String>> {
+/// Retorna um vetor sempre de tamanho 2, alinhado com
+/// `ParsedMeta.players`. Qualquer falha (parse/extração) vira
+/// `OpeningLabel::Unclassifiable` — estado terminal que impede o pool
+/// de re-tentar o mesmo replay em launches futuros (a próxima
+/// tentativa só acontece se o `mtime` do arquivo mudar, invalidando o
+/// cache).
+fn compute_openings(path: &Path) -> Vec<OpeningLabel> {
+    let unclassifiable_pair = || vec![OpeningLabel::Unclassifiable, OpeningLabel::Unclassifiable];
     let data = match parse_replay(path, ENRICHMENT_PARSE_SECONDS) {
         Ok(d) => d,
-        Err(_) => return Vec::new(),
+        Err(_) => return unclassifiable_pair(),
     };
     if data.players.len() != 2 {
-        return Vec::new();
+        return unclassifiable_pair();
     }
     match extract_build_order(&data) {
         Ok(bo) => bo
             .players
             .iter()
-            .map(|p| Some(classify_opening(p, bo.loops_per_second).to_display_string()))
+            .map(|p| OpeningLabel::Classified(
+                classify_opening(p, bo.loops_per_second).to_display_string(),
+            ))
             .collect(),
-        Err(_) => vec![None; data.players.len()],
+        Err(_) => unclassifiable_pair(),
     }
 }

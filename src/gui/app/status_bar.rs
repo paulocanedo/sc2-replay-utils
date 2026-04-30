@@ -20,15 +20,28 @@ impl AppState {
         // Snapshot dos campos antes do closure para evitar conflitos de
         // borrow (toast_visible empresta self inteiro).
         let loaded_file = self.loaded.as_ref().map(|l| l.file_name());
+        #[cfg(not(target_arch = "wasm32"))]
         let watcher_dir = self
             .watcher
             .as_ref()
             .map(|w| w.watched_dir().to_path_buf());
         let toast_msg = self.toast_visible().map(|s| s.to_string());
         let screen = self.screen;
+        #[cfg(not(target_arch = "wasm32"))]
         let library_total = self.library.entries.len();
+        #[cfg(not(target_arch = "wasm32"))]
         let library_pending = self.library.pending_count();
+        #[cfg(not(target_arch = "wasm32"))]
         let library_scanning = self.library.scanning;
+        #[cfg(not(target_arch = "wasm32"))]
+        let library_enriching = self.library.enrichment_in_flight_count();
+        // Snapshot da carga em andamento. Quando presente, suplanta o
+        // conteúdo padrão da status bar (independente da `screen`).
+        #[cfg(not(target_arch = "wasm32"))]
+        let load_status = self
+            .load_in_flight
+            .as_ref()
+            .map(|h| (h.file_name.clone(), h.current_stage));
 
         // `exact_size` pins the reserved height so that `Panel::bottom` always
         // carves out the same strip on every frame. Without it egui falls
@@ -56,7 +69,25 @@ impl AppState {
             .show(ctx, |ui| {
             ui.add_space(SPACE_XS);
             ui.horizontal(|ui| {
-                match screen {
+                // Carga em background sobrepõe o conteúdo "normal" — o
+                // usuário vê o nome do arquivo e a etapa atual em vez
+                // do replay carregado / contagem da biblioteca.
+                #[cfg(not(target_arch = "wasm32"))]
+                let load_drawn = if let Some((file_name, stage)) = &load_status {
+                    let stage_label = t(stage.locale_key(), lang);
+                    ui.label("⏳");
+                    ui.monospace(file_name);
+                    ui.label(
+                        RichText::new(format!("· {stage_label}")).color(LABEL_DIM),
+                    );
+                    true
+                } else {
+                    false
+                };
+                #[cfg(target_arch = "wasm32")]
+                let load_drawn = false;
+
+                if !load_drawn { match screen {
                     Screen::Analysis => match &loaded_file {
                         Some(file) => {
                             ui.label("📼");
@@ -68,6 +99,7 @@ impl AppState {
                             );
                         }
                     },
+                    #[cfg(not(target_arch = "wasm32"))]
                     Screen::Library => {
                         let msg = if library_scanning {
                             tf(
@@ -84,6 +116,15 @@ impl AppState {
                                     ("total", &library_total.to_string()),
                                 ],
                             )
+                        } else if library_enriching > 0 {
+                            tf(
+                                "status.library.enriching",
+                                lang,
+                                &[
+                                    ("total", &library_total.to_string()),
+                                    ("remaining", &library_enriching.to_string()),
+                                ],
+                            )
                         } else {
                             tf(
                                 "status.library.count",
@@ -93,15 +134,9 @@ impl AppState {
                         };
                         ui.label(RichText::new(msg).color(LABEL_DIM));
                     }
-                    Screen::Rename => {
-                        ui.label(
-                            RichText::new(t("rename_bar.title", lang))
-                                .italics()
-                                .color(LABEL_DIM),
-                        );
-                    }
-                }
+                }}
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
                     if let Some(dir) = &watcher_dir {
                         ui.label("👁").on_hover_text(tf(
                             "app.status.watching",

@@ -64,6 +64,21 @@ pub struct BuildOrderEntry {
     /// comparando o tempo real `finish - start` com o
     /// `build_time_loops` base da ação.
     pub chrono_boosts: u8,
+    /// Tipo da entidade que produziu esta entrada (ex.: "Barracks",
+    /// "Larva", "Forge"). `None` quando o produtor não é rastreado:
+    /// estruturas via UnitInit (worker construindo prédio), Inject
+    /// Larva (ainda sem producer_tags em inject_cmds) e fallbacks
+    /// onde o cmd matching não pôde resolver. Ver "trabalho futuro"
+    /// no plano de design.
+    pub producer_type: Option<String>,
+    /// ID sequencial 1-based do produtor por tipo, dentro do jogador
+    /// (ex.: "Barracks" #1, #2, #3 conforme a ordem em que foram
+    /// vistos pela primeira vez). Permite distinguir qual instância
+    /// daquele tipo de produtor gerou esta entrada — útil quando o
+    /// jogador tem múltiplas Barracks/Gateway. Sempre `Some` quando
+    /// `producer_type` é `Some`; `None` em conjunto com
+    /// `producer_type = None`.
+    pub producer_id: Option<u32>,
 }
 
 pub struct PlayerBuildOrder {

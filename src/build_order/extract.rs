@@ -8,7 +8,10 @@
 
 use std::collections::HashMap;
 
+use s2protocol::tracker_events::unit_tag_index;
+
 use crate::balance_data::build_time_loops;
+use crate::production_lanes::{self, LaneMode, PlayerProductionLanes};
 use crate::replay::{
     EntityCategory, EntityEventKind, PlayerTimeline, ProductionCmd, ReplayTimeline,
     UNIT_INIT_MARKER,
@@ -18,16 +21,25 @@ use super::types::{BuildOrderEntry, BuildOrderResult, EntryOutcome, PlayerBuildO
 
 /// Constrói o `BuildOrderResult` a partir de um `ReplayTimeline` já
 /// parseado. Chama O(eventos), sem I/O.
+///
+/// Internamente roda `production_lanes::extract(_, LaneMode::Army)` uma
+/// vez para obter `reactor_since_loop` por estrutura — single source of
+/// truth para detecção de Reactor (cobre swaps Lift/Land, que a antiga
+/// pré-passada via cmds `BarracksReactor` perdia, gerando entries de
+/// duração zero quando dois Born events com mesmo `projected_finish`
+/// caíam no caminho sequencial).
 pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult, String> {
     let base_build = timeline.base_build;
+    let army_lanes = production_lanes::extract(timeline, LaneMode::Army);
     let players = timeline
         .players
         .iter()
-        .map(|p| PlayerBuildOrder {
+        .enumerate()
+        .map(|(idx, p)| PlayerBuildOrder {
             name: p.name.clone(),
             race: p.race.clone(),
             mmr: p.mmr,
-            entries: build_player_entries(p, base_build),
+            entries: build_player_entries(p, base_build, army_lanes.get(idx)),
         })
         .collect();
 
@@ -39,7 +51,11 @@ pub fn extract_build_order(timeline: &ReplayTimeline) -> Result<BuildOrderResult
     })
 }
 
-fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOrderEntry> {
+fn build_player_entries(
+    player: &PlayerTimeline,
+    base_build: u32,
+    lanes: Option<&PlayerProductionLanes>,
+) -> Vec<BuildOrderEntry> {
     let mut raw: Vec<BuildOrderEntry> = Vec::new();
 
     // Index tag → (loop do cancel/destroy, killer). Só `ProductionCancelled`
@@ -51,9 +67,51 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     // morreu depois — não afeta o outcome do build order, então é
     // ignorado deliberadamente.
     let mut cancel_by_tag: HashMap<i64, (u32, Option<u8>)> = HashMap::new();
+    // Index tag → entity_type. Construído a partir de qualquer evento
+    // do tracker (ProductionStarted/Finished) que reveste a tag com seu
+    // tipo. Usado para resolver `creator_tag` em "Barracks", "Larva",
+    // "Forge" etc. ao montar o `producer_type` da entry.
+    let mut tag_to_type: HashMap<i64, String> = HashMap::new();
+    // ID sequencial 1-based por tipo, atribuído na primeira vez que
+    // cada `tag` aparece. Permite distinguir "Barracks #1" de
+    // "Barracks #2" no display do produtor. A iteração é feita na
+    // mesma ordem cronológica de `entity_events` (tracker.rs já
+    // garante essa ordem), então a numeração reflete a ordem em que
+    // o jogador construiu/recebeu os produtores.
+    let mut tag_to_producer_id: HashMap<i64, u32> = HashMap::new();
+    let mut next_id_per_type: HashMap<String, u32> = HashMap::new();
+    // Index → producer_id, usado por injects (que carregam só o
+    // `target_tag_index`, sem recycle). Last-write-wins na ordem
+    // cronológica — se o `unit_tag_index` for reciclado, a entrada
+    // mais recente prevalece, que é o estado plausível no momento do
+    // inject (que sempre vem depois da estrutura nascer).
+    let mut index_to_producer_id: HashMap<u32, u32> = HashMap::new();
+    // Larva → tag da Hatchery/Lair/Hive que a originou. Usado para
+    // "saltar" a Larva ao exibir o produtor de unidades Zerg: um
+    // Zergling tem `creator_tag = larva_tag`, mas o produtor
+    // humanamente significativo é a base que gerou aquela larva.
+    // O engine popula `creator_unit_tag_*` em 100% dos UnitBorn de
+    // Larva (auditado via diagnóstico no replay do Serral).
+    let mut larva_to_creator: HashMap<i64, i64> = HashMap::new();
     for ev in &player.entity_events {
         if ev.kind == EntityEventKind::ProductionCancelled {
             cancel_by_tag.insert(ev.tag, (ev.game_loop, ev.killer_player_id));
+        }
+        if !tag_to_type.contains_key(&ev.tag) {
+            tag_to_type.insert(ev.tag, ev.entity_type.clone());
+            let counter = next_id_per_type
+                .entry(ev.entity_type.clone())
+                .or_insert(0);
+            *counter += 1;
+            tag_to_producer_id.insert(ev.tag, *counter);
+            index_to_producer_id.insert(unit_tag_index(ev.tag), *counter);
+            // Captura larva → criador na primeira aparição da tag.
+            // Só registra Larvae cujo `creator_tag` está disponível.
+            if ev.entity_type == "Larva" {
+                if let Some(creator) = ev.creator_tag {
+                    larva_to_creator.insert(ev.tag, creator);
+                }
+            }
         }
     }
 
@@ -73,7 +131,47 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         }
     }
     let mut consumed = vec![false; player.production_cmds.len()];
+    // Slot-tracking per-producer: end_loop da última unidade computada
+    // em cada slot. Slot 0 = trilha única (sem Reactor) ou superior
+    // (com Reactor); Slot 1 = inferior (apenas com Reactor ativo).
+    //
+    // Modelo: 1 click = 1 unidade. O Reactor não emite par 1→2 — apenas
+    // habilita capacidade-2 concorrente. Cada Marine consome seu próprio
+    // cmd; quando o Reactor está ativo e há slot livre em `raw_start`,
+    // o `start_loop` da entry é o cmd_loop direto (sem clamping ao
+    // finish da unidade anterior).
+    let mut slot_end_by_producer: HashMap<i64, [u32; 2]> = HashMap::new();
+    // Estado para detecção de par paralelo (Reactor sibling handoff):
+    // quando dois Born events do mesmo produtor têm `projected_finish`
+    // separados por gap pequeno (≤ PARALLEL_PAIR_TOLERANCE), o
+    // segundo herda o `start_loop` do primeiro. Isso é essencial para
+    // que o `deduplicate` final funda os dois irmãos em um único
+    // `Marine x2` em vez de dois rows separados (potencialmente com
+    // outro um deles "sumindo" no fallback `subtract_build_time`,
+    // entre eles, perdendo o pareamento). É a heurística do código
+    // pré-`a2473eb`, mantida aqui como rede de segurança quando
+    // `production_lanes` não capta o Reactor (ex.: swap Lift/Land).
     let mut prev_finish_by_producer: HashMap<i64, u32> = HashMap::new();
+    let mut prev_start_by_producer: HashMap<i64, u32> = HashMap::new();
+    const PARALLEL_PAIR_TOLERANCE: u32 = 50;
+
+    // Detecção de Reactor: `loop` em que cada estrutura passou a ter
+    // Reactor anexado, vindo do pipeline canônico de `production_lanes`
+    // (resolução de parent em três estágios + lift/land tracking,
+    // commit 579c29e). Cobre Reactors adquiridos via Lift/Land swap —
+    // a Barracks decola, pousa em cima de um Reactor existente sem
+    // emitir cmd `BarracksReactor` próprio. A pré-passada antiga via
+    // cmds perdia esse caso e levava a entries de duração zero quando
+    // dois Born events com mesmo `projected_finish` caíam no caminho
+    // sequencial (ver `examples/winter_madness_69.SC2Replay`).
+    let reactor_since_by_parent: HashMap<i64, u32> = lanes
+        .map(|l| {
+            l.lanes
+                .iter()
+                .filter_map(|s| s.reactor_since_loop.map(|r| (s.tag, r)))
+                .collect()
+        })
+        .unwrap_or_default();
 
     // Entidades — só ProductionStarted, filtrado por origem da habilidade.
     for ev in &player.entity_events {
@@ -128,7 +226,48 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         // metade é uma margem segura.
         let max_cmd_loop = projected_finish
             .saturating_sub(build_time_loops(&ev.entity_type, base_build) / 2);
-        let cmd_match: Option<(i64, u32)> = if from_unit_init {
+
+        // Detecção de par paralelo (sibling): se este event tem um
+        // antecessor recente do mesmo produtor com `projected_finish`
+        // dentro de PARALLEL_PAIR_TOLERANCE, é o segundo de uma pair
+        // emitida pelo Reactor (1 click → 2 Born events com offset
+        // interno de 0-15 loops). Tratado ANTES de cmd_matching para
+        // que ambos os irmãos compartilhem o mesmo `start_loop` (via
+        // herança do antecessor) e o `deduplicate` final possa
+        // consolidá-los como `Marine x2` em vez de duas rows
+        // separadas com timings distintos.
+        let parallel_sibling_start: Option<u32> = if from_unit_init {
+            None
+        } else {
+            ev.creator_tag.and_then(|t| {
+                let prev_finish = prev_finish_by_producer.get(&t).copied()?;
+                if projected_finish.saturating_sub(prev_finish)
+                    <= PARALLEL_PAIR_TOLERANCE
+                {
+                    prev_start_by_producer.get(&t).copied()
+                } else {
+                    None
+                }
+            })
+        };
+
+        // Cada unidade-target consome seu próprio cmd (1 click = 1
+        // unidade). O Reactor não emite par 1→2 — apenas dobra a
+        // capacidade de produção concorrente do producer. Mantemos
+        // last-valid no matching (filtra phantom cmds antigos); slot-
+        // tracking abaixo aceita atribuições eventualmente cruzadas
+        // como custo aceitável para preservar a robustez contra
+        // phantoms vista em replays reais.
+        //
+        // Pares paralelos do Reactor pulam o cmd matching: o segundo
+        // sibling herda o cmd conceitualmente do primeiro (mesmo
+        // click do jogador). Tentar consumir um cmd separado roubaria
+        // de unidades reais subsequentes (caso o engine tenha
+        // emitido só 1 cmd pra pair) ou bagunçaria o pareamento de
+        // start_loops para o dedupe (caso tenha emitido 2 cmds).
+        let cmd_match: Option<(i64, u32)> = if from_unit_init
+            || parallel_sibling_start.is_some()
+        {
             None
         } else {
             ev.creator_tag.and_then(|t| {
@@ -144,14 +283,45 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             })
         };
 
+        // Slot-tracking: determina `start_loop` respeitando capacidade
+        // do producer. Sem Reactor: 1 slot, próxima unidade enfileira
+        // após a anterior (start = max(cmd_loop, slot0_end)). Com
+        // Reactor ativo em `raw_start`: 2 slots; se houver livre, o
+        // start é o cmd_loop direto (paralelismo real). Se ambos
+        // ocupados em raw_start, enfileira no que liberar primeiro.
         let start_loop = if from_unit_init {
             raw_loop
+        } else if let Some(start) = parallel_sibling_start {
+            // Sibling de par paralelo: herda o `start_loop` do irmão
+            // imediatamente anterior do mesmo producer.
+            start
         } else if let Some((producer_tag, cmd_loop)) = cmd_match {
-            let prev = prev_finish_by_producer
+            let reactor_active = reactor_since_by_parent
                 .get(&producer_tag)
-                .copied()
-                .unwrap_or(0);
-            cmd_loop.max(prev)
+                .map(|&r| r <= cmd_loop)
+                .unwrap_or(false);
+            let slots = slot_end_by_producer
+                .entry(producer_tag)
+                .or_insert([0, 0]);
+            let (start, slot_idx) = if reactor_active {
+                let s0_free = slots[0] <= cmd_loop;
+                let s1_free = slots[1] <= cmd_loop;
+                match (s0_free, s1_free) {
+                    (true, _) => (cmd_loop, 0usize),
+                    (false, true) => (cmd_loop, 1usize),
+                    (false, false) => {
+                        if slots[0] <= slots[1] {
+                            (slots[0], 0usize)
+                        } else {
+                            (slots[1], 1usize)
+                        }
+                    }
+                }
+            } else {
+                (cmd_loop.max(slots[0]), 0usize)
+            };
+            slots[slot_idx] = projected_finish;
+            start
         } else {
             // Fallback: mantém o cálculo legado para entradas sem
             // produtor identificável (warp-ins e ramos onde game.rs
@@ -160,12 +330,15 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             subtract_build_time(raw_loop, &ev.entity_type, base_build)
         };
 
-        // Encadeia o próximo cmd do mesmo produtor no `projected_finish`
-        // observado — assim a próxima unidade da fila não pode começar
-        // antes do término da atual, mesmo que o jogador tenha clicado
-        // o train cedo (queue de cmds enquanto a anterior produz).
-        if let Some((producer_tag, _)) = cmd_match {
-            prev_finish_by_producer.insert(producer_tag, projected_finish);
+        // Atualiza o estado pra detecção de par paralelo do PRÓXIMO
+        // event. Só registramos quando há `creator_tag` (UnitInit não
+        // tem produtor rastreado) e o instante de início faz sentido
+        // (>0).
+        if !from_unit_init {
+            if let Some(t) = ev.creator_tag {
+                prev_finish_by_producer.insert(t, projected_finish);
+                prev_start_by_producer.insert(t, start_loop);
+            }
         }
 
         // Se essa tag aparece no cancel_by_tag, a produção não chegou
@@ -207,6 +380,29 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             0
         };
 
+        // Producer: para Trains/Morphs (e par paralelo) o `creator_tag`
+        // aponta diretamente pra estrutura/Larva produtora; UnitInit
+        // (warp-in / construção via worker) e fallbacks ficam sem
+        // producer rastreado — ver "trabalho futuro" no plano de design.
+        let (producer_type, producer_id) = if from_unit_init {
+            (None, None)
+        } else {
+            // Hop através da Larva: pra unidades Zerg morfadas (Drone,
+            // Zergling, Roach, etc.), `creator_tag` aponta pra Larva
+            // consumida — sem informação útil pro usuário. Substitui
+            // pelo criador da Larva (Hatchery/Lair/Hive) quando temos
+            // esse mapeamento. Pra outros casos (trains de Marine,
+            // Zealot, etc., e morphs in-place tipo CC→Orbital) não há
+            // entrada em `larva_to_creator`, então o tag passa
+            // inalterado.
+            let resolved = ev
+                .creator_tag
+                .map(|t| larva_to_creator.get(&t).copied().unwrap_or(t));
+            let t_ = resolved.and_then(|t| tag_to_type.get(&t).cloned());
+            let id = resolved.and_then(|t| tag_to_producer_id.get(&t).copied());
+            (t_, id)
+        };
+
         raw.push(BuildOrderEntry {
             supply,
             supply_made,
@@ -219,6 +415,8 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             is_structure,
             outcome,
             chrono_boosts,
+            producer_type,
+            producer_id,
         });
     }
 
@@ -235,16 +433,23 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
         let finish_loop = u.game_loop;
         let expected_bt = build_time_loops(&u.name, base_build);
         let max_cmd = finish_loop.saturating_sub(expected_bt / 2);
-        let cmd_loop =
+        let cmd_match =
             consume_global_cmd(&mut consumed, &player.production_cmds, &u.name, max_cmd);
-        let start_loop =
-            cmd_loop.unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
-        let chrono_boosts = if player.race == "Protoss" && cmd_loop.is_some() {
+        let start_loop = cmd_match
+            .map(|(loop_, _)| loop_)
+            .unwrap_or_else(|| subtract_build_time(finish_loop, &u.name, base_build));
+        let chrono_boosts = if player.race == "Protoss" && cmd_match.is_some() {
             let actual_bt = finish_loop.saturating_sub(start_loop);
             estimate_chrono_count(expected_bt, actual_bt)
         } else {
             0
         };
+        // Producer da pesquisa: tag candidato no `producer_tags[0]` do
+        // cmd consumido (estrutura selecionada no momento do click).
+        // Resolvemos via `tag_to_type` para algo como "Forge", "EngBay".
+        let producer_tag = cmd_match.and_then(|(_, tag)| tag);
+        let producer_type = producer_tag.and_then(|t| tag_to_type.get(&t).cloned());
+        let producer_id = producer_tag.and_then(|t| tag_to_producer_id.get(&t).copied());
         let (supply, supply_made) = supply_at(player, start_loop);
         raw.push(BuildOrderEntry {
             supply,
@@ -260,6 +465,8 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
             // só emite o evento quando o research conclui).
             outcome: EntryOutcome::Completed,
             chrono_boosts,
+            producer_type,
+            producer_id,
         });
     }
 
@@ -268,21 +475,36 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     // string pra permitir distinguir bases diferentes na UI.
     for inject in &player.inject_cmds {
         let (supply, supply_made) = supply_at(player, inject.game_loop);
+        // Resolve a Hatchery/Lair/Hive alvo pelo `target_tag_index` →
+        // `producer_id`. Quando achamos o ID, codificamos no action
+        // como `InjectLarva@Hatchery#N` (preferido, mais conciso e
+        // estável que coordenadas). Caso o índice não esteja no mapa
+        // (eventos faltando ou recycle ambíguo), caímos no formato
+        // antigo com coordenadas para preservar a desambiguação.
+        let target_id = index_to_producer_id.get(&inject.target_tag_index).copied();
+        let action = match target_id {
+            Some(id) => format!("InjectLarva@{}#{}", inject.target_type, id),
+            None => format!(
+                "InjectLarva@{}@{}_{}",
+                inject.target_type, inject.target_x, inject.target_y
+            ),
+        };
         raw.push(BuildOrderEntry {
             supply,
             supply_made,
             game_loop: inject.game_loop,
             finish_loop: inject.game_loop, // ação instantânea
             seq: u32::MAX,
-            action: format!(
-                "InjectLarva@{}@{}_{}",
-                inject.target_type, inject.target_x, inject.target_y
-            ),
+            action,
             count: 1,
             is_upgrade: false,
             is_structure: false,
             outcome: EntryOutcome::Completed,
             chrono_boosts: 0,
+            // Queen produtora ainda não é capturada em inject_cmds —
+            // trabalho futuro.
+            producer_type: None,
+            producer_id: None,
         });
     }
 
@@ -293,16 +515,22 @@ fn build_player_entries(player: &PlayerTimeline, base_build: u32) -> Vec<BuildOr
     deduplicate(raw)
 }
 
-/// Procura o primeiro cmd não-consumido emitido pelo `producer_tag`
-/// cuja `ability` bate com `action` E cujo `game_loop` satisfaz
-/// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Marca o
-/// cmd como consumido e retorna seu `game_loop`. Quando não há match,
-/// retorna `None` e o caller cai no fallback `subtract_build_time`.
+/// Procura o cmd não-consumido emitido pelo `producer_tag` cuja
+/// `ability` bate com `action` E cujo `game_loop` satisfaz
+/// `cmd_loop <= max_cmd_loop` (constraint de causalidade). Quando há
+/// múltiplos candidatos, escolhe o **mais recente** (maior
+/// `game_loop`) — é o que tem maior probabilidade de ter realmente
+/// produzido a unidade concluída em `finish_loop`. Cmds "fantasma"
+/// mais antigos (cliques cancelados, double-clicks, queue cheia)
+/// ficam não-consumidos e não roubam o cmd da próxima unidade real,
+/// evitando entries com `start_loop` muito anterior ao treino e o
+/// sintoma de "Marine instantâneo" quando uma unidade real depois
+/// fica sem cmd e cai no fallback `subtract_build_time`.
 ///
 /// Iteramos a fila inteira (não só o front) porque um produtor pode
 /// receber cmds de tipos diferentes intercalados (ex.: Stargate
-/// alternando Phoenix/Voidray) e queremos sempre achar a próxima
-/// ocorrência da ação certa, não a primeira da fila.
+/// alternando Phoenix/Voidray) e queremos a ocorrência mais recente
+/// dentro da janela válida.
 fn consume_producer_cmd(
     by_producer: &HashMap<i64, Vec<usize>>,
     consumed: &mut [bool],
@@ -312,6 +540,7 @@ fn consume_producer_cmd(
     max_cmd_loop: u32,
 ) -> Option<u32> {
     let queue = by_producer.get(&producer_tag)?;
+    let mut last_valid: Option<usize> = None;
     for &i in queue {
         if consumed[i] {
             continue;
@@ -324,6 +553,9 @@ fn consume_producer_cmd(
             // próximos seriam ainda mais tarde, então paramos aqui.
             break;
         }
+        last_valid = Some(i);
+    }
+    if let Some(i) = last_valid {
         consumed[i] = true;
         return Some(cmds[i].game_loop);
     }
@@ -333,13 +565,15 @@ fn consume_producer_cmd(
 /// Match global por nome de ação (sem filtrar por produtor). Usado
 /// para upgrades, que são one-shot e não enfileiram — basta o primeiro
 /// cmd disponível com a ability certa que respeite a mesma constraint
-/// de causalidade `cmd_loop <= max_cmd_loop`.
+/// de causalidade `cmd_loop <= max_cmd_loop`. Retorna o `game_loop` do
+/// cmd e o primeiro `producer_tag` candidato (a estrutura selecionada
+/// no momento do click), quando disponível.
 fn consume_global_cmd(
     consumed: &mut [bool],
     cmds: &[ProductionCmd],
     action: &str,
     max_cmd_loop: u32,
-) -> Option<u32> {
+) -> Option<(u32, Option<i64>)> {
     for (i, cmd) in cmds.iter().enumerate() {
         if consumed[i] {
             continue;
@@ -351,7 +585,7 @@ fn consume_global_cmd(
             continue;
         }
         consumed[i] = true;
-        return Some(cmd.game_loop);
+        return Some((cmd.game_loop, cmd.producer_tags.first().copied()));
     }
     None
 }
@@ -426,6 +660,11 @@ fn supply_at(player: &PlayerTimeline, loop_: u32) -> (u16, u16) {
 /// incrementado. Só funde se o **outcome** também for igual — um
 /// SupplyDepot cancelado seguido de um SupplyDepot que completou precisam
 /// aparecer como linhas separadas para que o usuário veja a diferença.
+///
+/// Também só funde quando o **produtor** é o mesmo (mesmo `producer_id`):
+/// duas Marines treinadas em Barracks diferentes no mesmo instante
+/// devem aparecer como linhas separadas, caso contrário a coluna de
+/// produtor mostra só uma das fontes e a outra se perde.
 fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
     let mut out: Vec<BuildOrderEntry> = Vec::new();
     for entry in entries {
@@ -433,6 +672,7 @@ fn deduplicate(entries: Vec<BuildOrderEntry>) -> Vec<BuildOrderEntry> {
             Some(last)
                 if last.action == entry.action
                     && last.outcome == entry.outcome
+                    && last.producer_id == entry.producer_id
                     && !last.action.starts_with("InjectLarva") =>
             {
                 last.count += 1;

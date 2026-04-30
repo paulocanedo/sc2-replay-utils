@@ -1,24 +1,87 @@
 [package]
 name = "sc2-replay-utils"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2024"
+# Há dois binários no crate: o app GUI (`sc2-replay-utils`, em src/main.rs)
+# e o diagnóstico CLI (`debug_addons`, em src/bin/). Sem este campo,
+# `cargo run` sem `--bin` falha por ambiguidade.
+default-run = "sc2-replay-utils"
 
 [dependencies]
-s2protocol = "3.5"
-serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0"
-dirs = "6"
-eframe    = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "persistence"] }
-egui      = "0.34"
+# s2protocol's default features (`dep_arrow`, `syntax`) pull in arrow/syntect
+# transitively, which we don't use. `syntect` in particular brings `onig_sys`
+# (Oniguruma C lib) that breaks wasm builds without clang.
+#
+# Desligar tracing em release é crítico para perf: o s2protocol anota
+# TODOS os bit-packed decoders com
+# `#[tracing::instrument(level="debug", fields(input = peek_bits(input)))]`
+# e `peek_bits` constrói uma string colorida byte-a-byte com vários
+# `format!()` por bit. Sem filtros estáticos, o `fields(...)` é avaliado
+# em toda chamada — milhões de allocs/format por replay, dominando o
+# parse (game stage ~2.7s no `serral.SC2Replay` vs ~100ms esperado).
+#
+# São NECESSÁRIOS três flags simultâneos:
+#
+# 1. `s2protocol/tracing_off` — ativa `tracing/{max,release_max}_level_off`,
+#    derrubando `tracing::STATIC_MAX_LEVEL` para `Off` em compile time.
+# 2. `nom-mpq` re-declarado com `default-features = false` — o `default`
+#    do crate inclui `tracing_debug_level`, e features são aditivas;
+#    contudo o `STATIC_MAX_LEVEL` do tracing usa `if cfg!(release_max_level_off)`
+#    como PRIMEIRA arm, então essa override é defensiva (não estritamente
+#    necessária, mas evita rebaixar caso a ordem mude).
+# 3. `log/release_max_level_off` — `eframe/calloop` ativa o feature `log`
+#    do tracing, e o macro `instrument` gera código que cai numa segunda
+#    branch via `if_log_enabled!(...)`, controlada pelo `log::STATIC_MAX_LEVEL`.
+#    Sem isso o `peek_bits` continua sendo chamado em runtime mesmo com
+#    o tracing-side desligado.
+s2protocol  = { version = "3.5", default-features = false, features = ["tracing_off"] }
+nom-mpq     = { version = "2", default-features = false, features = ["tracing_off"] }
+log         = { version = "0.4", features = ["release_max_level_off"] }
+serde       = { version = "1", features = ["derive"] }
+serde_yml   = "0.0"
+eframe      = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+egui        = "0.34"
 egui_extras = { version = "0.34", default-features = false, features = ["svg", "image"] }
-egui_plot = "0.35"
-rfd       = "0.17"
-notify    = "8"
-bitcode   = { version = "0.6", features = ["serde"] }
+egui_plot   = "0.35"
+rfd         = "0.17"
+bitcode     = { version = "0.6", features = ["serde"] }
 
-[[bin]]
-name = "sc2-replay-utils"
-path = "src/bin/gui.rs"
+# Native-only deps.
+#   - `dirs`   resolves OS config/data directories.
+#   - `notify` watches the replay folder for new SC2Replay files.
+#   - `blake3` is the content hash used by the library cache to identify
+#     replays by content rather than path+mtime — survives OneDrive sync,
+#     antivirus mtime touches, and `working_dir` casing/separator changes.
+#   - `dunce` canonicalizes Windows paths without the `\\?\` UNC prefix
+#     (std's `fs::canonicalize` adds it, breaking byte-equality with
+#     paths produced by `fs::read_dir`).
+# None of these have meaningful wasm32 implementations.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dirs   = "6"
+notify = "8"
+blake3 = "1"
+dunce  = "1"
+# mimalloc é o `#[global_allocator]` em main.rs / bins. O glibc malloc
+# do Linux degrada feio com o padrão de alocação pequena/frequente do
+# `s2protocol::GameSSelectionDeltaEvent` (ordens de magnitude mais
+# lento que o HeapAlloc do Windows em replays com muita seleção). O
+# mimalloc neutraliza essa diferença e ainda é cross-platform.
+mimalloc = { version = "0.1", default-features = false }
+
+# Linux native uses Wayland/X11 backends. Cargo merges feature lists from
+# both this section and `[dependencies]` for the same crate, so the Linux
+# build ends up with `default_fonts + glow + persistence + wayland + x11`.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.34", default-features = false, features = ["wayland", "x11"] }
+
+# Wasm-only deps. `wasm-bindgen-futures` bridges Rust async to JS event
+# loop; `web-sys` exposes browser APIs (canvas, window); panic hook routes
+# Rust panics to the JS console.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures     = "0.4"
+web-sys                  = { version = "0.3", features = ["HtmlCanvasElement", "Window", "Document"] }
+console_error_panic_hook = "0.1"
+log                      = "0.4"
 
 # build.rs gera `balance_data_generated.rs` (tabela
 # `nome → loops` por versão de protocolo) lendo as JSONs de

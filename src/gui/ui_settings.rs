@@ -18,6 +18,8 @@ use crate::locale::{t, tf, Language};
 pub struct SettingsOutcome {
     pub saved: bool,
     pub reset_defaults: bool,
+    pub classify_now: bool,
+    pub stop_classification: bool,
 }
 
 pub fn show(
@@ -54,9 +56,12 @@ pub fn show(
             });
             ui.separator();
         }
-        ui.heading(t("settings.section.folders", lang));
-        working_dir_row(ui, config);
-        ui.small(t("settings.working_dir.desc", lang));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            ui.heading(t("settings.section.folders", lang));
+            working_dir_row(ui, config);
+            ui.small(t("settings.working_dir.desc", lang));
+        }
         ui.add_space(4.0);
 
         ui.separator();
@@ -158,6 +163,22 @@ pub fn show(
         });
 
         ui.separator();
+        ui.heading(t("settings.section.classification", lang));
+        ui.checkbox(
+            &mut config.auto_classify_on_scan,
+            t("settings.auto_classify_on_scan", lang),
+        );
+        ui.small(t("settings.auto_classify_on_scan.desc", lang));
+        ui.horizontal(|ui| {
+            if ui.button(t("settings.classify_now", lang)).clicked() {
+                outcome.classify_now = true;
+            }
+            if ui.button(t("settings.stop_classification", lang)).clicked() {
+                outcome.stop_classification = true;
+            }
+        });
+
+        ui.separator();
         ui.heading(t("settings.section.language", lang));
         ui.horizontal(|ui| {
             ui.label(t("settings.language.label", lang));
@@ -212,6 +233,7 @@ pub fn show(
                     config.language_selected = true;
                     outcome.reset_defaults = true;
                 }
+                #[cfg(not(target_arch = "wasm32"))]
                 if let Some(path) = AppConfig::config_path() {
                     ui.separator();
                     ui.small(tf(
@@ -231,6 +253,7 @@ pub fn show(
 /// (persistido ou auto-detectado) e oferece um botão "Detectar SC2"
 /// que preenche `working_dir` com o diretório padrão do SC2, para que
 /// o usuário possa persistir esse valor clicando em "Salvar".
+#[cfg(not(target_arch = "wasm32"))]
 fn working_dir_row(ui: &mut egui::Ui, config: &mut crate::config::AppConfig) {
     let lang = config.language;
     let detected = crate::utils::sc2_default_dir();

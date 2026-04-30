@@ -16,11 +16,10 @@
 // `#[allow(deprecated)]`; the path is still fully supported by egui
 // (deprecation is advisory, not removal).
 //
-// A UI alterna entre três telas mutuamente exclusivas:
+// A UI alterna entre duas telas mutuamente exclusivas:
 // - `Screen::Library`: a biblioteca de replays ocupa toda a janela.
 // - `Screen::Analysis`: replay bar + tab bar + central panel + painel
 //   direito de jogadores ocupam toda a janela.
-// - `Screen::Rename`: barra de rename + central panel de preview.
 //
 // Em todas as telas há uma status bar inferior persistente exibindo o
 // replay atualmente carregado, o estado do watcher e os toasts.
@@ -33,12 +32,13 @@
 // Organização dos submódulos:
 //   - `state`      — `Screen`, `AppState`, métodos de ownership.
 //   - `menu_bar`   — barra de menu superior.
-//   - `topbar`     — topbars de Library, Rename e Analysis (+ tab bar).
+//   - `topbar`     — topbars de Library e Analysis (+ tab bar).
 //   - `status_bar` — status bar inferior persistente.
 //   - `central`    — roteamento do painel central + `LibraryAction`.
 //   - `modals`     — janelas modais (language prompt, about).
 
 mod central;
+#[cfg(not(target_arch = "wasm32"))]
 mod library_detail;
 mod menu_bar;
 mod modals;
@@ -101,20 +101,27 @@ impl eframe::App for AppState {
             return;
         }
 
-        // Polling do watcher ANTES de qualquer painel. Também roda antes
-        // do gate de settings forçado para que o scan da biblioteca
-        // progrida enquanto o usuário está na tela inicial (populando
-        // as sugestões de nickname).
-        self.poll_watcher(&ctx);
-        // Drena resultados do worker da biblioteca.
-        if self.library.poll() {
-            ctx.request_repaint();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Polling do watcher ANTES de qualquer painel. Também roda
+            // antes do gate de settings forçado para que o scan da
+            // biblioteca progrida enquanto o usuário está na tela inicial
+            // (populando as sugestões de nickname).
+            self.poll_watcher(&ctx);
+            // Drena progresso da carga em andamento (replay em background).
+            self.poll_load(&ctx);
+            // Drena resultados do worker da biblioteca.
+            if self.library.poll(self.config.auto_classify_on_scan) {
+                ctx.request_repaint();
+            }
+            // Recompute derived library stats if entries, nicknames, or
+            // the active filter changed.
+            self.library
+                .ensure_stats(&self.config, &self.library_filter);
         }
-        // Recompute derived library stats if entries, nicknames, or the
-        // active filter changed — keeps the hero KPIs in sync with the
-        // visible list.
-        self.library
-            .ensure_stats(&self.config, &self.library_filter);
+        // Web: drain any replay bytes uploaded via the browser file picker.
+        #[cfg(target_arch = "wasm32")]
+        self.drain_pending_upload();
 
         // -------- First-run forced settings (modal) --------
         // Mostrado quando `settings_confirmed` é false — inclui todos
@@ -123,6 +130,7 @@ impl eframe::App for AppState {
         // saída é clicar em Save; ao salvar, a flag é persistida e o
         // gate não aparece mais. Blocos de auto-load / autodetect ficam
         // adiante para não disparar durante o setup.
+        #[cfg(not(target_arch = "wasm32"))]
         if !self.config.settings_confirmed {
             let prev_effective_dir = self.config.effective_working_dir();
             let mut dummy_open = true;
@@ -157,56 +165,62 @@ impl eframe::App for AppState {
             return;
         }
 
-        // Carrega o replay mais recente quando o scanner terminar.
-        if self.pending_load_latest && !self.library.scanning {
-            self.pending_load_latest = false;
-            if let Some(path) = self.library.scan_latest.clone() {
-                self.load_path(path);
-            }
-        }
-
-        // Auto-detect do DateRange no primeiro launch (config sem
-        // `library_date_range` persistido). Só roda depois que o scan
-        // termina e todas as entries viraram `Parsed`. Se nenhum replay
-        // for encontrado, não persistimos nada — o próximo launch tenta
-        // de novo. A flag garante execução única por sessão.
-        if self.pending_date_range_autodetect
-            && !self.library.scanning
-            && self.library.pending_count() == 0
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            self.pending_date_range_autodetect = false;
-            let today = library::today_str();
-            if let Some(chosen) =
-                library::detect_best_date_range(&self.library.entries, &today)
-            {
-                self.library_filter.date_range = chosen;
-                self.config.library_date_range = Some(chosen);
-                if let Err(e) = self.config.save() {
-                    self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
-                } else {
-                    let range_label = library::date_range_label(chosen, &self.config);
-                    self.set_toast(tf(
-                        "toast.date_range_autodetect",
-                        lang,
-                        &[("range", &range_label)],
-                    ));
+            // Carrega o replay mais recente quando o scanner terminar.
+            if self.pending_load_latest && !self.library.scanning {
+                self.pending_load_latest = false;
+                if let Some(path) = self.library.scan_latest.clone() {
+                    self.load_path(path, &ctx);
                 }
-                ctx.request_repaint();
             }
-        }
 
-        // Guarda: Tela Análise exige replay carregado. Se por qualquer
-        // motivo o estado divergir, força fallback para a biblioteca.
-        if self.screen == Screen::Analysis && self.loaded.is_none() {
-            self.screen = Screen::Library;
-        }
+            // Auto-detect do DateRange no primeiro launch (config sem
+            // `library_date_range` persistido). Só roda depois que o scan
+            // termina e todas as entries viraram `Parsed`. Se nenhum
+            // replay for encontrado, não persistimos nada — o próximo
+            // launch tenta de novo. A flag garante execução única por
+            // sessão.
+            if self.pending_date_range_autodetect
+                && !self.library.scanning
+                && self.library.pending_count() == 0
+            {
+                self.pending_date_range_autodetect = false;
+                let today = library::today_str();
+                if let Some(chosen) =
+                    library::detect_best_date_range(&self.library.entries, &today)
+                {
+                    self.library_filter.date_range = chosen;
+                    self.config.library_date_range = Some(chosen);
+                    if let Err(e) = self.config.save() {
+                        self.set_toast(tf("toast.save_config_error", lang, &[("err", &e)]));
+                    } else {
+                        let range_label = library::date_range_label(chosen, &self.config);
+                        self.set_toast(tf(
+                            "toast.date_range_autodetect",
+                            lang,
+                            &[("range", &range_label)],
+                        ));
+                    }
+                    ctx.request_repaint();
+                }
+            }
 
-        // F5 atalha o "Refresh library" do menu View. Só dispara na tela
-        // de biblioteca para não surpreender em Analysis/Rename.
-        if self.screen == Screen::Library
-            && ctx.input(|i| i.key_pressed(egui::Key::F5))
-        {
-            self.refresh_library();
+            // Guarda: Tela Análise exige replay carregado. Se por
+            // qualquer motivo o estado divergir, força fallback para a
+            // biblioteca. (Não aplica em wasm — Analysis com sem replay
+            // mostra o "empty state" com botão de upload.)
+            if self.screen == Screen::Analysis && self.loaded.is_none() {
+                self.screen = Screen::Library;
+            }
+
+            // F5 atalha o "Refresh library" do menu View. Só dispara na
+            // tela de biblioteca para não surpreender em Analysis.
+            if self.screen == Screen::Library
+                && ctx.input(|i| i.key_pressed(egui::Key::F5))
+            {
+                self.refresh_library();
+            }
         }
 
         // Top-level panels: use `.show(ctx, ...)` so each call updates the
@@ -217,18 +231,24 @@ impl eframe::App for AppState {
         //
         // The eframe-provided `ui` above is only used for modals / ctx
         // extraction; we deliberately do NOT nest panels inside it.
-        self.show_menu_bar(&ctx);
+        // The hamburger ☰ that used to live here is rendered as the
+        // leftmost widget of each topbar — see `topbar.rs`.
 
         match self.screen {
+            #[cfg(not(target_arch = "wasm32"))]
             Screen::Library => self.show_library_topbar(&ctx),
-            Screen::Rename => self.show_rename_topbar(&ctx),
             Screen::Analysis => self.show_analysis_topbar(&ctx),
         }
 
         self.show_status_bar(&ctx);
 
-        let action = self.show_central(&ctx);
-        self.handle_library_action(action);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let action = self.show_central(&ctx);
+            self.handle_library_action(action, &ctx);
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.show_central(&ctx);
 
         // Silence unused-var warning: `ui` is intentionally not used for
         // panel nesting (see note above). We keep it in the trait
@@ -236,32 +256,46 @@ impl eframe::App for AppState {
         let _ = ui;
 
         // Mantém repaint enquanto a biblioteca estiver parseando em background.
+        #[cfg(not(target_arch = "wasm32"))]
         library::keep_alive(&ctx, &self.library);
 
         // -------- Settings window --------
-        let prev_effective_dir = self.config.effective_working_dir();
-        let outcome = ui_settings::show(
-            &ctx,
-            &mut self.show_settings,
-            &mut self.config,
-            &mut self.nickname_input,
-            self.library.nickname_frequencies().unwrap_or(&[]),
-            /* force_initial */ false,
-        );
-        if outcome.saved {
-            match self.config.save() {
-                Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
-                Err(e) => self.set_toast(tf("toast.save_error", lang, &[("err", &e)])),
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let prev_effective_dir = self.config.effective_working_dir();
+            let outcome = ui_settings::show(
+                &ctx,
+                &mut self.show_settings,
+                &mut self.config,
+                &mut self.nickname_input,
+                self.library.nickname_frequencies().unwrap_or(&[]),
+                /* force_initial */ false,
+            );
+            if outcome.saved {
+                match self.config.save() {
+                    Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
+                    Err(e) => self.set_toast(tf("toast.save_error", lang, &[("err", &e)])),
+                }
+                apply_style(&ctx, &self.config);
+                self.restart_watcher();
+                if self.config.effective_working_dir() != prev_effective_dir {
+                    self.refresh_library();
+                }
+            } else if outcome.reset_defaults {
+                apply_style(&ctx, &self.config);
+                if self.config.effective_working_dir() != prev_effective_dir {
+                    self.refresh_library();
+                }
             }
-            apply_style(&ctx, &self.config);
-            self.restart_watcher();
-            if self.config.effective_working_dir() != prev_effective_dir {
-                self.refresh_library();
+            if outcome.classify_now {
+                self.library.start_classification();
+                self.set_toast(t("toast.classification_started", lang).to_string());
+                ctx.request_repaint();
             }
-        } else if outcome.reset_defaults {
-            apply_style(&ctx, &self.config);
-            if self.config.effective_working_dir() != prev_effective_dir {
-                self.refresh_library();
+            if outcome.stop_classification {
+                self.library.stop_classification();
+                self.set_toast(t("toast.classification_stopped", lang).to_string());
+                ctx.request_repaint();
             }
         }
 
@@ -299,11 +333,13 @@ impl eframe::App for AppState {
         }
 
         // Mantém o ciclo de polling do watcher vivo mesmo sem input.
+        #[cfg(not(target_arch = "wasm32"))]
         if self.watcher.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         self.library.save_cache();
         let _ = self.config.save();

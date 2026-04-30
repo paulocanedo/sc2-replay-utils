@@ -4,19 +4,27 @@
 // são `impl` separados sobre `AppState` espalhados pelos submódulos.
 
 use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::Context;
 
 use crate::build_order::{classify_opening, BuildOrderResult};
 use crate::config::AppConfig;
-use crate::library::{self, ParsedMeta, ReplayLibrary};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::library::{self, OpeningLabel, ParsedMeta, ReplayLibrary};
 use crate::locale::{t, tf, Language};
-use crate::map_image::{self, MapImage};
+use crate::map_image::MapImage;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::map_image;
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::watcher::ReplayWatcher;
 
 /// Janela (em segundos) suficiente para o classificador de abertura
@@ -34,11 +42,16 @@ pub(super) const TOAST_TTL: Duration = Duration::from_secs(4);
 /// Tela atualmente ativa. A transição é dirigida por intent do usuário,
 /// não pelo estado de `loaded` — ao voltar para `Library`, o replay
 /// carregado permanece na memória e o usuário pode reentrar na análise.
+///
+/// On wasm32, only `Analysis` exists — the Library screen depends on a
+/// filesystem-resident replay collection that the web build can't
+/// realistically scan. Variants are gated to keep match exhaustiveness
+/// honest in both targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
+    #[cfg(not(target_arch = "wasm32"))]
     Library,
     Analysis,
-    Rename,
 }
 
 pub struct AppState {
@@ -49,29 +62,32 @@ pub struct AppState {
     pub screen: Screen,
     pub show_settings: bool,
     pub nickname_input: String,
+    #[cfg(not(target_arch = "wasm32"))]
     pub watcher: Option<ReplayWatcher>,
     pub toast: Option<(String, Instant)>,
+    #[cfg(not(target_arch = "wasm32"))]
     pub library: ReplayLibrary,
+    #[cfg(not(target_arch = "wasm32"))]
     pub library_filter: library::LibraryFilter,
-    /// Whether the left filter sidebar on the Library screen is expanded.
-    /// Toggled by the ☰ button in the Library topbar; persisted only in
-    /// session memory (not saved to disk).
-    pub library_sidebar_open: bool,
     /// Caminho do replay atualmente *selecionado* na biblioteca (clique
     /// único). Diferente de `loaded`: selecionar apenas alimenta o card
     /// lateral de detalhes; carregar (duplo-clique ou botão "Abrir
     /// análise") atualiza `loaded` e troca para a tela `Analysis`.
     /// `None` colapsa o card de detalhes e devolve a largura à lista.
+    #[cfg(not(target_arch = "wasm32"))]
     pub library_selection: Option<PathBuf>,
     /// Marcação múltipla na biblioteca (checkbox por linha). Usada para
     /// ações em lote como "salvar como…". É estado de UI puro, não
     /// persistido no config — limpa em `refresh_library` (paths podem
     /// desaparecer).
+    #[cfg(not(target_arch = "wasm32"))]
     pub library_selected: HashSet<PathBuf>,
     /// Template aplicado ao nome de destino quando o usuário salva
-    /// cópias dos replays marcados. Mesmas variáveis do template de
-    /// rename (`{datetime}`, `{map}`, `{p1}`, …). Quando um replay não
+    /// cópias dos replays marcados. Suporta variáveis como
+    /// `{datetime}`, `{map}`, `{p1}`, `{r1}`, `{loops}` etc. — definição
+    /// canônica em `crate::library::save_template`. Quando um replay não
     /// tem metadados parseáveis, cai no nome de arquivo original.
+    #[cfg(not(target_arch = "wasm32"))]
     pub library_save_template: String,
     /// Minimapa carregado para `library_selection`. Cache simples: ao
     /// selecionar outra entrada, descarregamos o anterior e reabrimos o
@@ -82,6 +98,10 @@ pub struct AppState {
     /// resolvido. Usado para detectar mudança de seleção e disparar o
     /// recarregamento do minimapa (sem reentrar no MPQ a cada frame).
     pub library_selection_minimap_path: Option<PathBuf>,
+    /// Wasm-only: result of the in-flight async file pick. Drained at
+    /// the start of each frame and turned into `loaded`.
+    #[cfg(target_arch = "wasm32")]
+    pub pending_upload: Arc<Mutex<Option<(String, Vec<u8>)>>>,
     /// Game loop selecionado no slider da aba Timeline (mini-mapa).
     /// Resetado a cada `load_path` para que troca de replay sempre
     /// comece em t=0.
@@ -113,12 +133,6 @@ pub struct AppState {
     /// nas instâncias correspondentes. Resetado a `None` no começo de
     /// cada frame da Timeline — vida do hover ligada ao frame ativo.
     pub timeline_hovered_entity: Option<(usize, String)>,
-    /// Template de renomeação em lote.
-    pub rename_template: String,
-    /// Previews gerados a partir do template + biblioteca.
-    pub rename_previews: Vec<(PathBuf, String)>,
-    /// Status da última operação de rename.
-    pub rename_status: Option<String>,
     /// Carregamento do replay mais recente adiado até o scanner terminar.
     pub pending_load_latest: bool,
     /// Auto-detect pendente do `DateRange` inicial da biblioteca: quando
@@ -152,6 +166,16 @@ pub struct AppState {
     /// o primeiro render pós-load, que resolve pelo nickname do usuário
     /// (cai em 0 se não houver match). Resetado a cada novo replay.
     pub insights_pov: Option<usize>,
+    /// Carga de replay em andamento numa thread de background. `Some`
+    /// enquanto o worker estiver vivo; `None` quando ocioso. Drenado
+    /// frame a frame em `poll_load`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub load_in_flight: Option<crate::load_progress::LoadHandle>,
+    /// Geração monotônica do load atual. Cresce a cada `load_path`;
+    /// uma worker thread "antiga" continua viva mas seu `Sender` fica
+    /// órfão quando `load_in_flight` é substituído (drop do Receiver).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub load_generation: u64,
 }
 
 impl AppState {
@@ -161,27 +185,39 @@ impl AppState {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         apply_style(&cc.egui_ctx, &config);
 
+        #[cfg(not(target_arch = "wasm32"))]
         let library_filter = library::LibraryFilter::from_config(&config);
         let pending_date_range_autodetect = config.library_date_range.is_none();
         let language_draft = config.language;
+        #[allow(unused_mut)]
         let mut me = Self {
             config,
             loaded: None,
             load_error: None,
             active_tab: Tab::Timeline,
+            #[cfg(not(target_arch = "wasm32"))]
             screen: Screen::Library,
+            #[cfg(target_arch = "wasm32")]
+            screen: Screen::Analysis,
             show_settings: false,
             nickname_input: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             watcher: None,
             toast: None,
+            #[cfg(not(target_arch = "wasm32"))]
             library: ReplayLibrary::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             library_filter,
-            library_sidebar_open: true,
+            #[cfg(not(target_arch = "wasm32"))]
             library_selection: None,
+            #[cfg(not(target_arch = "wasm32"))]
             library_selected: HashSet::new(),
-            library_save_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
+            #[cfg(not(target_arch = "wasm32"))]
+            library_save_template: crate::library::save_template::DEFAULT_TEMPLATE.to_string(),
             library_selection_minimap: None,
             library_selection_minimap_path: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_upload: Arc::new(Mutex::new(None)),
             timeline_tab_loop: 0,
             timeline_playing: false,
             timeline_playback_speed: 1,
@@ -194,9 +230,6 @@ impl AppState {
             timeline_show_fog: false,
             timeline_fog_player: 0,
             timeline_hovered_entity: None,
-            rename_template: crate::rename::DEFAULT_TEMPLATE.to_string(),
-            rename_previews: Vec::new(),
-            rename_status: None,
             pending_load_latest: false,
             pending_date_range_autodetect,
             language_draft,
@@ -205,17 +238,25 @@ impl AppState {
             timeline_experimental_dismissed_session: false,
             insights_experimental_dismissed_session: false,
             insights_pov: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            load_in_flight: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            load_generation: 0,
         };
-        me.restart_watcher();
-        me.refresh_library();
-        if me.config.auto_load_latest {
-            me.pending_load_latest = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            me.restart_watcher();
+            me.refresh_library();
+            if me.config.auto_load_latest {
+                me.pending_load_latest = true;
+            }
         }
         me
     }
 
     /// Recarrega a biblioteca a partir do diretório de trabalho efetivo
     /// (persistido no config ou auto-detectado a partir do SC2).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn refresh_library(&mut self) {
         if let Some(dir) = self.config.effective_working_dir() {
             self.library.refresh(&dir);
@@ -231,6 +272,7 @@ impl AppState {
     /// ou o template não pode ser expandido, cai no nome de arquivo
     /// original. No-op se a marcação está vazia ou se o diálogo for
     /// cancelado.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn copy_selected_replays(&mut self) {
         let lang = self.config.language;
         if self.library_selected.is_empty() {
@@ -282,10 +324,11 @@ impl AppState {
         }
     }
 
-    pub(super) fn try_load_latest(&mut self) {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn try_load_latest(&mut self, ctx: &Context) {
         // Se o scanner já rodou, usa o resultado dele (sem I/O extra).
         if let Some(p) = self.library.scan_latest.clone() {
-            self.load_path(p);
+            self.load_path(p, ctx);
             return;
         }
         let lang = self.config.language;
@@ -294,7 +337,7 @@ impl AppState {
             return;
         };
         match crate::utils::find_latest_replay(&dir) {
-            Some(p) => self.load_path(p),
+            Some(p) => self.load_path(p, ctx),
             None => self.set_toast(tf(
                 "toast.no_replays_found",
                 lang,
@@ -303,38 +346,171 @@ impl AppState {
         }
     }
 
-    pub(super) fn load_path(&mut self, p: PathBuf) {
+    /// Spawna uma thread one-shot para carregar o replay em background
+    /// e devolve imediatamente. A thread emite `LoadProgress::Stage(...)`
+    /// para a status bar e termina com `Done`/`Failed`. O frame loop
+    /// drena o canal em `poll_load` e plugga o resultado em `loaded`.
+    ///
+    /// Concorrência (substituir): se já houver uma carga em andamento,
+    /// ela é simplesmente substituída — o `Receiver` antigo é dropado e
+    /// a thread antiga, ao terminar, encontra o `Sender` órfão; suas
+    /// mensagens são silenciosamente descartadas.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn load_path(&mut self, p: PathBuf, ctx: &Context) {
+        use crate::load_progress::{LoadHandle, LoadProgress, LoadStage};
+
+        let max_time = self.config.default_max_time;
+        self.load_generation = self.load_generation.wrapping_add(1);
+        let generation = self.load_generation;
+        let (tx, rx) = std::sync::mpsc::channel::<LoadProgress>();
+        let file_name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        self.load_in_flight = Some(LoadHandle {
+            generation,
+            file_name: file_name.clone(),
+            current_stage: LoadStage::ReadingFile,
+            rx,
+        });
+        // Limpa o erro anterior — se este load falhar, será reposto;
+        // se der certo, `adopt_loaded` mantém limpo.
+        self.load_error = None;
+
+        let ctx_thread = ctx.clone();
+        let path_thread = p.clone();
+        std::thread::spawn(move || {
+            let tx_stage = tx.clone();
+            let ctx_stage = ctx_thread.clone();
+            let mut on_stage = move |stage: LoadStage| {
+                let _ = tx_stage.send(LoadProgress::Stage(stage));
+                ctx_stage.request_repaint();
+            };
+            let result =
+                LoadedReplay::load_with_progress(&path_thread, max_time, &mut on_stage);
+            match result {
+                Ok(r) => {
+                    let _ = tx.send(LoadProgress::Done(Box::new(r)));
+                }
+                Err(e) => {
+                    let _ = tx.send(LoadProgress::Failed(e));
+                }
+            }
+            ctx_thread.request_repaint();
+        });
+    }
+
+    /// Drena o canal da carga em andamento e atualiza `load_in_flight`,
+    /// `loaded` e `load_error`. Chamado uma vez por frame em `app/mod.rs`.
+    /// Mantém o repaint vivo enquanto o worker não terminou — sem isso,
+    /// uma etapa muito longa (ex.: tracker decoding) deixaria o egui
+    /// dormir entre as mensagens do canal.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn poll_load(&mut self, ctx: &Context) {
+        use crate::load_progress::LoadProgress;
+
+        let Some(handle) = self.load_in_flight.as_mut() else {
+            return;
+        };
+        let lang = self.config.language;
+        let mut finished = false;
+        loop {
+            match handle.rx.try_recv() {
+                Ok(LoadProgress::Stage(s)) => {
+                    handle.current_stage = s;
+                }
+                Ok(LoadProgress::Done(replay)) => {
+                    self.adopt_loaded(*replay);
+                    finished = true;
+                    break;
+                }
+                Ok(LoadProgress::Failed(err)) => {
+                    let path_label = handle.file_name.clone();
+                    self.load_error = Some(tf(
+                        "error.load_failed",
+                        lang,
+                        &[("path", &path_label), ("err", &err)],
+                    ));
+                    finished = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Worker terminou sem enviar Done/Failed — improvável,
+                    // mas por defesa: limpamos o handle e seguimos.
+                    finished = true;
+                    break;
+                }
+            }
+        }
+        if finished {
+            self.load_in_flight = None;
+        } else {
+            // Fallback de keep-alive: a etapa de tracker pode demorar
+            // segundos sem emitir nada. Mesmo padrão de `library::keep_alive`.
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
+    }
+
+    /// Shared "I have a `LoadedReplay`, plug it into the UI" path. Used
+    /// by both `load_path` (native) and the wasm upload flow.
+    fn adopt_loaded(&mut self, r: LoadedReplay) {
+        self.loaded = Some(r);
+        self.load_error = None;
+        self.timeline_tab_loop = 0;
+        self.timeline_playing = false;
+        self.timeline_playback_speed = 1;
+        self.timeline_fog_player = 0;
+        self.insights_pov = None;
+        self.screen = Screen::Analysis;
+    }
+
+    /// Wasm-only: spawns the async file picker. Bytes are written to
+    /// `pending_upload` and consumed by `drain_pending_upload` on the
+    /// next frame.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn spawn_file_pick(&self, ctx: &Context) {
+        let pending = self.pending_upload.clone();
+        let ctx = ctx.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let dialog = rfd::AsyncFileDialog::new().add_filter("SC2Replay", &["SC2Replay"]);
+            let Some(handle) = dialog.pick_file().await else {
+                return;
+            };
+            let file_name = handle.file_name();
+            let bytes = handle.read().await;
+            if let Ok(mut g) = pending.lock() {
+                *g = Some((file_name, bytes));
+            }
+            ctx.request_repaint();
+        });
+    }
+
+    /// Wasm-only: drains a pending uploaded replay (if any) and turns it
+    /// into the active `LoadedReplay`. Called once per frame.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn drain_pending_upload(&mut self) {
+        let picked = match self.pending_upload.try_lock() {
+            Ok(mut g) => g.take(),
+            Err(_) => return,
+        };
+        let Some((file_name, bytes)) = picked else { return };
         let max_time = self.config.default_max_time;
         let lang = self.config.language;
-        match LoadedReplay::load(&p, max_time) {
-            Ok(r) => {
-                self.loaded = Some(r);
-                self.load_error = None;
-                // Reset do scrubbing da aba Timeline: replay novo
-                // sempre começa em t=0.
-                self.timeline_tab_loop = 0;
-                // Pausa ao trocar de replay — evita "perseguir" a
-                // transição com playback ligado do replay anterior.
-                self.timeline_playing = false;
-                self.timeline_playback_speed = 1;
-                self.timeline_fog_player = 0;
-                // Reset do POV da aba Insights: novo replay
-                // re-resolve o default via user_nicknames.
-                self.insights_pov = None;
-                // Carregar com sucesso sempre transiciona para a Tela
-                // Análise — é a única forma de chegar lá.
-                self.screen = Screen::Analysis;
-            }
+        match LoadedReplay::from_bytes(file_name, &bytes, max_time) {
+            Ok(r) => self.adopt_loaded(r),
             Err(e) => {
                 self.load_error = Some(tf(
                     "error.load_failed",
                     lang,
-                    &[("path", &p.display().to_string()), ("err", &e.to_string())],
+                    &[("path", "uploaded"), ("err", &e)],
                 ));
             }
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn restart_watcher(&mut self) {
         self.watcher = None;
         if !self.config.watch_replays {
@@ -358,6 +534,7 @@ impl AppState {
     /// de minimapa decodifica em milissegundos). Se a entrada não tiver
     /// `cache_handles` cacheados (cache antigo) ou se a resolução falhar,
     /// o minimapa fica `None` e o card mostra um placeholder.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn set_library_selection(&mut self, sel: Option<PathBuf>) {
         if self.library_selection == sel {
             return;
@@ -373,8 +550,8 @@ impl AppState {
             return;
         };
         match map_image::load_for_replay(&meta.map, &meta.cache_handles) {
-            Ok(img) => {
-                self.library_selection_minimap = Some(img);
+            Ok(assets) => {
+                self.library_selection_minimap = Some(assets.image);
                 self.library_selection_minimap_path = Some(path);
             }
             Err(e) => {
@@ -383,6 +560,7 @@ impl AppState {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn poll_watcher(&mut self, ctx: &Context) {
         let Some(w) = self.watcher.as_ref() else { return };
         if let Some(path) = w.poll_latest() {
@@ -390,20 +568,12 @@ impl AppState {
             let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
 
             if self.config.auto_load_on_new_replay {
-                self.load_path(path.clone());
-                // load_path pode ter falhado (replay corrompido, não-1v1…).
-                // Só derivamos meta quando o LoadedReplay atual é
-                // exatamente este path — caso contrário caímos no
-                // ingest_pending para que o pool da biblioteca tente.
-                let derived = self
-                    .loaded
-                    .as_ref()
-                    .filter(|l| l.path == path)
-                    .and_then(|l| build_ingest_meta(l, self.config.default_max_time));
-                match derived {
-                    Some(meta) => self.library.ingest_parsed(path.clone(), mtime, meta),
-                    None => self.library.ingest_pending(path.clone(), mtime),
-                }
+                self.load_path(path.clone(), ctx);
+                // O load roda em background; ainda não temos `LoadedReplay`
+                // para derivar meta da biblioteca. Empurra como pending —
+                // o pool da biblioteca parseia o header em paralelo
+                // (custo desprezível, max_time=1).
+                self.library.ingest_pending(path.clone(), mtime);
                 self.set_toast(tf(
                     "toast.new_replay_loaded",
                     lang,
@@ -431,6 +601,7 @@ impl AppState {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -442,11 +613,12 @@ fn file_name(p: &Path) -> String {
 /// de arquivo original. Devolve `None` apenas se o path não tiver
 /// componente final (nunca deveria acontecer pra paths vindos da
 /// biblioteca).
+#[cfg(not(target_arch = "wasm32"))]
 fn expand_save_name(src: &Path, library: &ReplayLibrary, template: &str) -> Option<String> {
     let entry = library.entries.iter().find(|e| e.path == src);
     if let Some(entry) = entry {
         if let crate::library::MetaState::Parsed(meta) = &entry.meta {
-            if let Some(name) = crate::rename::expand_template(template, meta) {
+            if let Some(name) = crate::library::save_template::expand_template(template, meta) {
                 return Some(name);
             }
         }
@@ -459,6 +631,7 @@ fn expand_save_name(src: &Path, library: &ReplayLibrary, template: &str) -> Opti
 /// janela completa de classificação (`OPENING_CLASSIFICATION_WINDOW_SECS`),
 /// caso contrário deixa `None` para que o pool de enriquecimento da
 /// biblioteca complete depois parseando só os 5 min necessários.
+#[cfg(not(target_arch = "wasm32"))]
 fn build_ingest_meta(loaded: &LoadedReplay, default_max_time: u32) -> Option<ParsedMeta> {
     let mut meta = ParsedMeta::from_timeline(&loaded.timeline)?;
     let cover_window = default_max_time == 0
@@ -470,11 +643,14 @@ fn build_ingest_meta(loaded: &LoadedReplay, default_max_time: u32) -> Option<Par
     Some(meta)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fill_openings_from_build_order(meta: &mut ParsedMeta, bo: Option<&BuildOrderResult>) {
     let Some(bo) = bo else { return };
     for (i, p) in bo.players.iter().enumerate() {
         if let Some(pm) = meta.players.get_mut(i) {
-            pm.opening = Some(classify_opening(p, bo.loops_per_second).to_display_string());
+            pm.opening = OpeningLabel::Classified(
+                classify_opening(p, bo.loops_per_second).to_display_string(),
+            );
         }
     }
 }

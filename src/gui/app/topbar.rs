@@ -1,6 +1,6 @@
-// Topbars de cada tela — Library, Rename e Analysis. O topbar de análise
-// é o mais rico: back + mapa + matchup + popover de detalhes + chips de
-// jogadores + atalhos (abrir/rename) + a tab bar logo abaixo.
+// Topbars de cada tela — Library e Analysis. O topbar de análise é o
+// mais rico: back + mapa + matchup + popover de detalhes + chips de
+// jogadores + atalhos (abrir) + a tab bar logo abaixo.
 
 // See `app/mod.rs` for why we use deprecated `Panel::show(ctx, ...)`.
 #![allow(deprecated)]
@@ -22,10 +22,10 @@ use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label, Nam
 use super::state::{AppState, Screen};
 
 impl AppState {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn show_library_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut reload_clicked = false;
-        let mut toggle_sidebar = false;
         let working_dir_display = self
             .library
             .working_dir
@@ -39,14 +39,8 @@ impl AppState {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    // Sidebar toggle sits left-most — right next to the
-                    // panel it actually controls. Keeping it on the far
-                    // right created a cross-window pointer trip.
-                    if icon_button(ui, "☰", t("library.sidebar.toggle_tooltip", lang))
-                        .clicked()
-                    {
-                        toggle_sidebar = true;
-                    }
+                    // ☰ first — global app menu (open, settings, quit, …).
+                    self.show_menu_button(ui);
                     ui.add_space(SPACE_S);
                     ui.label(
                         RichText::new(t("library.title", lang))
@@ -75,7 +69,7 @@ impl AppState {
                     }
 
                     // Reload stays on the right (screen-level action).
-                    // Working dir → Settings, rename → menu View.
+                    // Working dir → Settings.
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
@@ -91,38 +85,12 @@ impl AppState {
         if reload_clicked {
             self.refresh_library();
         }
-        if toggle_sidebar {
-            self.library_sidebar_open = !self.library_sidebar_open;
-        }
-    }
-
-    pub(super) fn show_rename_topbar(&mut self, ctx: &egui::Context) {
-        let lang = self.config.language;
-        Panel::top("rename_bar")
-            .frame(
-                egui::Frame::new()
-                    .fill(SURFACE_ALT)
-                    .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if icon_button(ui, "←", t("topbar.back_tooltip", lang)).clicked() {
-                        self.screen = Screen::Library;
-                    }
-                    ui.add_space(SPACE_S);
-                    ui.label(
-                        RichText::new(t("rename_bar.title", lang))
-                            .size(size_subtitle(&self.config))
-                            .strong(),
-                    );
-                });
-            });
     }
 
     pub(super) fn show_analysis_topbar(&mut self, ctx: &egui::Context) {
         let lang = self.config.language;
         let mut back_clicked = false;
-        if let Some(loaded) = self.loaded.as_ref() {
+        if self.loaded.is_some() {
             let user_idx = self
                 .loaded
                 .as_ref()
@@ -134,18 +102,36 @@ impl AppState {
                         .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_S as i8)),
                 )
                 .show(ctx, |ui| {
-                    analysis_topbar(
-                        ui,
-                        loaded,
-                        &self.config,
-                        user_idx,
-                        lang,
-                        &mut back_clicked,
-                    );
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(TOPBAR_HEIGHT - (SPACE_S as f32) * 2.0);
+
+                        // ☰ first — global app menu.
+                        self.show_menu_button(ui);
+
+                        let loaded = self.loaded.as_ref().expect("guarded by is_some above");
+                        analysis_topbar_row(
+                            ui,
+                            loaded,
+                            &self.config,
+                            user_idx,
+                            lang,
+                            &mut back_clicked,
+                        );
+                    });
                 });
         }
         if back_clicked {
-            self.screen = Screen::Library;
+            // Native: voltar para a tela de biblioteca.
+            // Web: descarrega o replay atual para mostrar o prompt de
+            // upload novamente.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.screen = Screen::Library;
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.loaded = None;
+            }
         }
 
         Panel::top("tabs").show(ctx, |ui| {
@@ -160,11 +146,13 @@ impl AppState {
     }
 }
 
-/// Renders the rich analysis top bar: back-to-library affordance, map
-/// summary, per-player chips and a details popover. Open/rename live
-/// in the menu bar (File → Open replay…, View → Rename), so this bar
-/// stays focused on the loaded replay's identity.
-fn analysis_topbar(
+/// Renders the analysis top bar contents (back affordance, map
+/// summary, per-player chips and details popover) into an existing
+/// `ui.horizontal`. The caller is responsible for opening that
+/// horizontal — and for prepending the global ☰ menu button before
+/// us. Open replay lives in the hamburger, so this row stays focused
+/// on the loaded replay's identity.
+fn analysis_topbar_row(
     ui: &mut egui::Ui,
     loaded: &LoadedReplay,
     config: &AppConfig,
@@ -177,9 +165,7 @@ fn analysis_topbar(
     let duration = fmt_time(tl.game_loops, tl.loops_per_second);
     let date_display = format_date_short(&tl.datetime, lang);
 
-    ui.horizontal(|ui| {
-        ui.set_min_height(TOPBAR_HEIGHT - (SPACE_S as f32) * 2.0);
-
+    {
         // ── Back + map summary (whole secondary line is the popover trigger) ──
         // `📚` is the same glyph the menu uses for "view library", so the
         // affordance reads consistently. A bare `←` glyph is missing from
@@ -237,9 +223,9 @@ fn analysis_topbar(
         });
 
         // ── Flex spacer + right cluster (apenas chips) ──────────
-        // Open/rename foram movidos para a menu bar (File → Open replay
-        // e View → Rename) — a topbar de análise agora só carrega
-        // identidade do replay carregado.
+        // Open foi movido para a menu bar (File → Open replay) — a
+        // topbar de análise agora só carrega identidade do replay
+        // carregado.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Player chips flow right-to-left so P2 sits at the far
             // right edge. We draw P2 first, then "vs", then P1.
@@ -250,7 +236,7 @@ fn analysis_topbar(
                 player_chip_topbar(ui, &players[0], 0, user_idx == Some(0), config, lang);
             }
         });
-    });
+    }
 }
 
 /// One player chip rendered inside the analysis top bar. Compact card

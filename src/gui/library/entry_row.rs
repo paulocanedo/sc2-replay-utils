@@ -304,7 +304,9 @@ pub(super) fn entry_row(
                     ui.close();
                 }
 
-                if let Some(op) = find_user_player(meta, config).and_then(|p| p.opening.clone()) {
+                if let Some(op) = find_user_player(meta, config)
+                    .and_then(|p| p.opening.as_classified().map(str::to_string))
+                {
                     if ui
                         .button(tf(
                             "library.related.menu.same_opening",

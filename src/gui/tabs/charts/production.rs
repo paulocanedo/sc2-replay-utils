@@ -3,10 +3,10 @@
 //
 //   Workers | Army | Pesquisas | Upgrades
 //
-// `Workers` e `Army` compartilham o pipeline de extração e render
-// (`production_lanes`), variando apenas o `LaneMode` consumido. As lanes
-// se desenham igual: ícone da estrutura à esquerda + Gantt horizontal
-// com baseline fina + blocos de produção/morph/impeded.
+// Todos os modos compartilham o mesmo pipeline de extração e render
+// (`production_lanes`), variando apenas o `LaneMode` consumido. As
+// lanes se desenham igual: ícone da estrutura à esquerda + Gantt
+// horizontal com baseline fina + blocos de produção/morph/impeded.
 //
 // `Army` adiciona o bloco `Impeded` (Terran com addon em construção,
 // renderizado em `ACCENT_WARNING` — mesma cor do morph CC→Orbital, já
@@ -16,8 +16,11 @@
 // que warpgates podem warpinar várias unidades em rajadas paralelas
 // entre estruturas distintas.
 //
-// `Pesquisas` e `Upgrades` ficam como stubs por enquanto — só o seletor
-// fica visível com label "Em breve".
+// `Pesquisas` e `Upgrades` constroem lanes a partir das estruturas-de-
+// pesquisa (EngineeringBay, Forge, EvoChamber, TechLabs, etc.) e
+// atribuem cada `UpgradeEntry` ao produtor via `producer_tag` do cmd
+// casado por nome. A separação entre os dois modos é por sufixo do
+// nome: leveled (`*Level1/2/3`) → Upgrades, demais → Research.
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
@@ -65,10 +68,17 @@ impl Default for ProductionChartOptions {
 }
 
 const ICON_SIZE: f32 = 28.0;
-const ROW_HEIGHT_WORKERS: f32 = 32.0;
+// Workers e Army compartilham as mesmas dimensões. Antes Workers tinha
+// row=32/block=11 — a faixa ocupava só 34% da altura da linha contra
+// os 28px do ícone à esquerda, deixando um espaço vertical morto
+// considerável e tornando ícones de impedimento (CC→Orbital) e
+// sub-trilhas thin de drones Zerg quase ilegíveis. Usar 36/22 em ambos
+// os modos casa com a altura do ícone e dá espaço pros 3 slots de
+// larva renderizarem com folga.
+const ROW_HEIGHT_WORKERS: f32 = 36.0;
 const ROW_HEIGHT_ARMY: f32 = 36.0;
 const ROW_GAP: f32 = 4.0;
-const BLOCK_HEIGHT_WORKERS: f32 = 11.0;
+const BLOCK_HEIGHT_WORKERS: f32 = 22.0;
 const BLOCK_HEIGHT_ARMY: f32 = 22.0;
 const RIGHT_PAD: f32 = 8.0;
 const LEFT_GUTTER: f32 = 8.0;
@@ -109,23 +119,11 @@ pub fn show(
         opts.selected_player = 0;
     }
 
-    // Army temporariamente desativado — a implementação fica preservada
-    // (testes + extrator), mas o render fica como stub "em breve" até
-    // a feature ser revisada. Pesquisas/Upgrades também são stubs.
-    match opts.view {
-        ProductionView::Army | ProductionView::Research | ProductionView::Upgrades => {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(t("charts.production.coming_soon", lang)).italics(),
-            );
-            return;
-        }
-        _ => {}
-    }
-
     let mode = match opts.view {
         ProductionView::Workers => LaneMode::Workers,
-        _ => unreachable!(),
+        ProductionView::Army => LaneMode::Army,
+        ProductionView::Research => LaneMode::Research,
+        ProductionView::Upgrades => LaneMode::Upgrades,
     };
 
     // Cabeçalho: seletor de jogador + reset.
@@ -168,6 +166,8 @@ pub fn show(
         let key = match mode {
             LaneMode::Workers => "charts.production.empty.workers",
             LaneMode::Army => "charts.production.empty.army",
+            LaneMode::Research => "charts.production.empty.research",
+            LaneMode::Upgrades => "charts.production.empty.upgrades",
         };
         ui.label(egui::RichText::new(t(key, lang)).italics());
         return;
@@ -185,10 +185,15 @@ pub fn show(
     let row_height = match mode {
         LaneMode::Workers => ROW_HEIGHT_WORKERS,
         LaneMode::Army => ROW_HEIGHT_ARMY,
+        // Pesquisas/Upgrades reaproveitam as mesmas dimensões que
+        // Workers — mesma altura de ícone (28) e bloco (22) deixa as
+        // quatro views consistentes na altura de cada lane.
+        LaneMode::Research | LaneMode::Upgrades => ROW_HEIGHT_WORKERS,
     };
     let block_height = match mode {
         LaneMode::Workers => BLOCK_HEIGHT_WORKERS,
         LaneMode::Army => BLOCK_HEIGHT_ARMY,
+        LaneMode::Research | LaneMode::Upgrades => BLOCK_HEIGHT_WORKERS,
     };
 
     let total_w = ui.available_width();
@@ -486,6 +491,8 @@ fn draw_lane(
             if !matches!(b.kind, BlockKind::Producing) {
                 return false;
             }
+            // Blocos pós-Reactor (Terran) não vão pra thin tracks —
+            // têm sua própria render dual-track top/bottom.
             let post_reactor = lane
                 .reactor_since_loop
                 .map(|r| b.start_loop >= r)
@@ -528,12 +535,6 @@ fn draw_lane(
         let x0 = loop_to_x(s, view_start, view_end, track_left, track_w);
         let x1 = loop_to_x(e, view_start, view_end, track_left, track_w);
 
-        let block_post_reactor = matches!(block.kind, BlockKind::Producing)
-            && lane
-                .reactor_since_loop
-                .map(|r| block.start_loop >= r)
-                .unwrap_or(false);
-
         let color = match block.kind {
             BlockKind::Producing => player_color,
             // Morph in-place (CC→Orbital/PF) e Impeded (addon Terran em
@@ -542,11 +543,18 @@ fn draw_lane(
             BlockKind::Morphing | BlockKind::Impeded => ACCENT_WARNING,
         };
 
+        // Lane Terran com Reactor anexado — blocos `Producing`
+        // pós-Reactor são pintados em duas faixas top/bottom (capacidade
+        // paralela 2x). O `sub_track` (0 ou 1) decide qual metade
+        // ocupar; o gap fino entre elas distingue visualmente as duas
+        // unidades simultâneas.
+        let block_post_reactor = matches!(block.kind, BlockKind::Producing)
+            && lane
+                .reactor_since_loop
+                .map(|r| block.start_loop >= r)
+                .unwrap_or(false);
+
         if block_post_reactor {
-            // Lane Terran com reactor anexado: duas faixas top/bottom
-            // representando capacidade paralela 2x. O `sub_track` do
-            // bloco (0 ou 1) decide qual metade ocupar, com gap fino
-            // entre elas para distinguir visualmente.
             let gap = 1.0;
             let half_h = ((block_height - gap) * 0.5).max(3.0);
             let (top, bot) = if block.sub_track == 0 {
@@ -568,6 +576,31 @@ fn draw_lane(
         } else {
             let rect = Rect::from_min_max(Pos2::new(x0, block_top), Pos2::new(x1, block_bot));
             painter.rect_filled(rect, 1.5, color);
+
+            // Blocos `Morphing` (CC→Orbital/PF) e `Impeded` (addon Terran
+            // em construção) desenham o ícone do motivo do impedimento
+            // centralizado na faixa: Orbital/PF mostra o destino do
+            // morph; Impeded mostra o Reactor/TechLab. Producing fica
+            // sem ícone — o `player_color` e o ícone da estrutura na
+            // coluna esquerda já comunicam o que está sendo produzido,
+            // e ícones por unidade poluiriam runs longos de Marines/etc.
+            if matches!(block.kind, BlockKind::Morphing | BlockKind::Impeded) {
+                if let Some(name) = block.produced_type {
+                    if let Some(src) = structure_icon(name) {
+                        let icon_size = (block_height - 2.0).max(0.0);
+                        let avail_w = rect.width() - 2.0;
+                        if icon_size >= 6.0 && avail_w >= icon_size {
+                            let icon_rect = Rect::from_center_size(
+                                rect.center(),
+                                Vec2::splat(icon_size),
+                            );
+                            egui::Image::new(src)
+                                .fit_to_exact_size(Vec2::splat(icon_size))
+                                .paint_at(ui, icon_rect);
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::load_progress::LoadStage;
 use crate::utils::{extract_clan_and_name, game_speed_to_loops_per_second};
 
 use super::types::{PlayerTimeline, ReplayTimeline, Toon};
@@ -20,15 +21,47 @@ use super::{finalize, game, message, tracker};
 /// é um fast-path usado pela biblioteca da GUI: o parser retorna logo
 /// após carregar metadados, sem decodificar tracker/message events.
 pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline, String> {
-    let path_str = path.to_str().unwrap_or_default();
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    parse_replay_from_bytes(&file_name, &bytes, max_time_seconds)
+}
 
-    let (mpq, file_contents) =
-        s2protocol::read_mpq(path_str).map_err(|e| format!("{:?}", e))?;
+/// In-memory variant of `parse_replay`. Used by the web target (browser
+/// upload via FileReader) and as the implementation backbone of
+/// `parse_replay`. Bypasses `s2protocol::read_mpq` (which reads from
+/// disk) by calling `s2protocol::parser::parse` on the bytes directly.
+///
+/// Wrapper sem progress reporting — usado pelo scanner da biblioteca
+/// e pelos testes. O loader da GUI usa `parse_replay_from_bytes_with_progress`
+/// para alimentar a status bar.
+pub fn parse_replay_from_bytes(
+    file_name: &str,
+    bytes: &[u8],
+    max_time_seconds: u32,
+) -> Result<ReplayTimeline, String> {
+    parse_replay_from_bytes_with_progress(file_name, bytes, max_time_seconds, &mut |_| {})
+}
+
+/// Igual a `parse_replay_from_bytes`, mas reporta `LoadStage` para um
+/// callback antes de cada bloco custoso (tracker / game / message).
+/// O fast-path metadata-only (`max_time_seconds == 1`) só emite
+/// `ParsingHeader` — as etapas de decoding são puladas.
+pub fn parse_replay_from_bytes_with_progress(
+    file_name: &str,
+    bytes: &[u8],
+    max_time_seconds: u32,
+    on_stage: &mut dyn FnMut(LoadStage),
+) -> Result<ReplayTimeline, String> {
+    on_stage(LoadStage::ParsingHeader);
+    let (_, mpq) = s2protocol::parser::parse(bytes).map_err(|e| format!("{:?}", e))?;
     let (_, header) =
         s2protocol::read_protocol_header(&mpq).map_err(|e| format!("{:?}", e))?;
     let details =
-        s2protocol::read_details(path_str, &mpq, &file_contents).map_err(|e| format!("{:?}", e))?;
-    let init_data = s2protocol::read_init_data(path_str, &mpq, &file_contents).ok();
+        s2protocol::read_details(file_name, &mpq, bytes).map_err(|e| format!("{:?}", e))?;
+    let init_data = s2protocol::read_init_data(file_name, &mpq, bytes).ok();
 
     let active_count = details.player_list.iter().filter(|p| p.observe == 0).count();
     if active_count < 2 {
@@ -127,10 +160,7 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         })
         .collect();
 
-    let file = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let file = file_name.to_string();
     let map = details.title.clone();
     let duration_seconds = (game_loops as f64 / loops_per_second).round() as u32;
 
@@ -177,11 +207,12 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         (max_time_seconds as f64 * loops_per_second).round() as u32
     };
 
+    on_stage(LoadStage::DecodingTracker);
     let mut index_owner: tracker::IndexOwnerMap = HashMap::new();
     tracker::process_tracker_events(
-        path_str,
+        file_name,
         &mpq,
-        &file_contents,
+        bytes,
         &player_idx,
         &mut timeline.players,
         &mut index_owner,
@@ -203,10 +234,11 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         &details,
     );
 
+    on_stage(LoadStage::DecodingGame);
     game::process_game_events(
-        path_str,
+        file_name,
         &mpq,
-        &file_contents,
+        bytes,
         &user_to_player_idx,
         &index_owner,
         base_build,
@@ -214,10 +246,11 @@ pub fn parse_replay(path: &Path, max_time_seconds: u32) -> Result<ReplayTimeline
         max_loops,
     )?;
 
+    on_stage(LoadStage::DecodingMessages);
     message::process_message_events(
-        path_str,
+        file_name,
         &mpq,
-        &file_contents,
+        bytes,
         &user_names,
         max_loops,
         &mut timeline.chat,

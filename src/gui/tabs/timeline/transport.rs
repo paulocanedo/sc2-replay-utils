@@ -122,6 +122,41 @@ pub(super) fn advance_playback(
     }
 }
 
+/// Atalhos de teclado para scrubbing fino: setas movem o `current_loop`
+/// pela timeline. Modificadores ajustam o tamanho do passo:
+/// - sem modificador: 22 loops (~1s de jogo @ 22.4 lps)
+/// - Ctrl: 100 loops (passo grosso)
+/// - Alt: 1 loop (frame-a-frame)
+/// Alt tem precedência sobre Ctrl quando ambos estão pressionados.
+pub(super) fn handle_keyboard_scrub(
+    ctx: &egui::Context,
+    current_loop: &mut u32,
+    max_loop: u32,
+) {
+    let (left, right, alt, ctrl) = ctx.input(|i| {
+        (
+            i.key_pressed(egui::Key::ArrowLeft),
+            i.key_pressed(egui::Key::ArrowRight),
+            i.modifiers.alt,
+            i.modifiers.ctrl,
+        )
+    });
+    if !left && !right {
+        return;
+    }
+    let step: i64 = if alt {
+        1
+    } else if ctrl {
+        100
+    } else {
+        22
+    };
+    let delta = if right { step } else { -step };
+    let next = (*current_loop as i64 + delta).clamp(0, max_loop as i64);
+    *current_loop = next as u32;
+    reset_playback_accumulator(ctx);
+}
+
 fn reset_playback_accumulator(ctx: &egui::Context) {
     let id = Id::new(PLAYBACK_ACCUM_ID);
     ctx.memory_mut(|m| m.data.insert_temp(id, 0.0_f32));

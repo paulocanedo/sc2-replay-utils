@@ -90,6 +90,7 @@ pub fn list_replays_recursive(base: &Path) -> Vec<PathBuf> {
 /// Retorna o diretório padrão de replays do StarCraft II, se existir.
 /// Usa a pasta de Documentos real do sistema (resolve corretamente nomes
 /// localizados como "Documentos" no Windows em português).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn sc2_default_dir() -> Option<PathBuf> {
     let p = dirs::document_dir()?.join("StarCraft II");
     p.is_dir().then_some(p)

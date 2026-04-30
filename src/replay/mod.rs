@@ -52,10 +52,10 @@ mod types;
 mod tests;
 
 pub use classify::{
-    is_army_producer, is_incapacitating_addon, is_larva_born_army, is_structure_name,
-    is_worker_name, is_zerg_hatch,
+    is_incapacitating_addon, is_larva_born_army, is_structure_name, is_worker_name, is_zerg_hatch,
 };
-pub use parse::parse_replay;
+#[allow(unused_imports)]
+pub use parse::{parse_replay, parse_replay_from_bytes, parse_replay_from_bytes_with_progress};
 pub use types::{
     ChatEntry, EntityCategory, EntityEventKind, PlayerTimeline, ReplayTimeline, UNIT_INIT_MARKER,
 };

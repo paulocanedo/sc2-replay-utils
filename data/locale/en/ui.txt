@@ -10,25 +10,19 @@ app.title = sc2-replay-utils
 app.status.no_replay = (no replay loaded)
 app.status.watching = Watching: {dir}
 
-# ── Menu bar ────────────────────────────────────────────────────────────────
-menu.file = File
+# ── Hamburger menu ──────────────────────────────────────────────────────────
+menu.tooltip = Menu
 menu.file.open = Open replay…
 menu.file.load_latest = Load latest
 menu.file.quit = Quit
-menu.view = View
 menu.view.library = Library
 menu.view.analysis = Analysis
-menu.view.rename = Rename
 menu.view.refresh = Refresh library
 menu.view.settings = Settings…
-menu.help = Help
 menu.help.about = About
 
 # ── File dialogs ────────────────────────────────────────────────────────────
 dialog.filter.sc2_replay = SC2 Replay
-
-# ── Rename bar ──────────────────────────────────────────────────────────────
-rename_bar.title = Batch Rename Replays
 
 # ── About dialog ────────────────────────────────────────────────────────────
 about.title = About
@@ -79,6 +73,8 @@ toast.date_range_autodetect = Showing replays: {range}
 toast.copy_ok = Copied {count} replays to {dir}
 toast.copy_partial = Copied {ok} replays · {err_count} failed (see logs)
 toast.copy_mkdir_err = Could not create destination: {err}
+toast.classification_started = Opening classification started
+toast.classification_stopped = Classification stopped (in-flight items will finish)
 error.load_failed = Error loading {path}: {err}
 
 # ── Empty state ─────────────────────────────────────────────────────────────
@@ -94,6 +90,16 @@ status.library.count = {total} replays
 status.library.filtered = {total} replays · {shown} shown
 status.library.scanning = Scanning… ({found} found)
 status.library.parsing = Parsing {pending}/{total}
+status.library.enriching = {total} replays · classifying openings ({remaining})
+
+# ── Replay loading stages (background loader) ──────────────────────────────
+load.stage.reading_file = Reading file…
+load.stage.parsing_header = Parsing replay header…
+load.stage.decoding_tracker = Decoding tracker events…
+load.stage.decoding_game = Decoding game events…
+load.stage.decoding_messages = Decoding chat…
+load.stage.extracting_features = Computing build order, army value…
+load.stage.loading_minimap = Loading minimap…
 
 # ── Analysis top bar (match chrome above the tabs) ──────────────────────────
 topbar.back_tooltip = Back to library
@@ -140,6 +146,11 @@ settings.max_time.label = Default max_time (s, 0 = no limit):
 settings.auto_load_latest = Load latest replay on startup
 settings.watch_replays = Watch SC2 folder (file watcher)
 settings.auto_load_new = Automatically load new replays
+settings.section.classification = Opening classification
+settings.auto_classify_on_scan = Classify openings during library scan
+settings.auto_classify_on_scan.desc = When enabled, the app classifies pending openings in batch as the library is scanned. Loaded replays and replays detected by the watcher are always classified immediately, regardless of this setting.
+settings.classify_now = Classify pending now
+settings.stop_classification = Stop classification
 settings.section.language = Language
 settings.language.label = App language:
 settings.section.appearance = Appearance
@@ -179,6 +190,7 @@ library.date.this_week = This week
 library.date.this_month = This month
 library.scanning = 🔍 scanning folder… {found} found
 library.parsing = 🔄 {pending}/{total} reading metadata…
+library.enriching = 🧠 classifying openings… {remaining} remaining
 library.setup_hint = Set a 'Working directory' (📂 button above or in Settings) to list your replays here.
 library.no_match = No replay matches the filter.
 library.filter_status = 🔎 {shown}/{total} match the filter
@@ -205,6 +217,8 @@ library.detail.open_analysis = Open analysis
 library.detail.section.match = Match
 library.detail.section.players = Players
 library.detail.section.openings = Build orders
+library.detail.section.file = File
+library.detail.show_in_explorer = Show in Explorer
 library.detail.played_at = Played at
 library.detail.duration = Duration
 library.detail.version = Version
@@ -243,7 +257,6 @@ library.sidebar.ascending = Ascending
 library.sidebar.descending = Descending
 library.sidebar.insights_matchup = Matchup winrate
 library.sidebar.insights_maps = Top maps
-library.sidebar.toggle_tooltip = Toggle filter sidebar
 library.filter.clear_all = Clear filters
 library.related.menu.title = Find related
 library.related.menu.vs_opponent = Games vs {name}
@@ -280,16 +293,20 @@ build_order.legend.destroyed = destroyed
 build_order.copy_tooltip = Copy build order to clipboard
 build_order.salt_button_tooltip = Generate SALT Encoding
 build_order.empty_entries = (no entries)
+build_order.col.id = id
 build_order.col.start = start
 build_order.col.end = end
 build_order.col.supply = supply
 build_order.col.action = action
+build_order.col.producer = producer
+build_order.columns.button = Columns
+build_order.columns.action_required_tooltip = The action column is always shown.
+build_order.producer.untracked_tooltip = Producer not tracked yet for this entry type.
 build_order.outcome.cancelled = cancelled by player
 build_order.outcome.destroyed = destroyed during construction
 build_order.unavailable = Build Order is not available for this replay.
 build_order.no_players = No player found.
 build_order.no_match = (nothing matches the filters)
-build_order.clipboard.header = type  start   end     supply  action
 build_order.clipboard.cancelled_mark =  [cancelled]
 build_order.clipboard.destroyed_mark =  [destroyed]
 build_order.chrono_tooltip = Chrono Boost ×{count}
@@ -342,6 +359,8 @@ charts.production.coming_soon = Coming soon.
 charts.production.player = Player:
 charts.production.empty.workers = No worker-producing structures found.
 charts.production.empty.army = No army-producing structures found.
+charts.production.empty.research = No research recorded for this player.
+charts.production.empty.upgrades = No upgrades recorded for this player.
 charts.production.reset_view = Reset view
 charts.production.reset_view.hint = Reset zoom and pan. Tip: scroll to zoom, drag to pan, double-click to reset.
 
@@ -373,30 +392,21 @@ timeline.tt.idle_worker = Time worker production slots sat idle while capacity w
 timeline.tt.idle_army = Time army producers sat idle while capacity was free. Zerg: each Hatch/Lair/Hive counts as 1 larva-bandwidth slot. Counts up to current slider position.
 timeline.tt.blocks = Supply-blocked periods up to current time — total count and accumulated duration.
 timeline.tt.unit_chip = {name} × {count}
-timeline.tt.research_chip = {name} · finished at {mm}:{ss}
+timeline.tt.research_chip = {name} · started {start_mm}:{start_ss} · finished {end_mm}:{end_ss}
+timeline.tt.research_chip_in_progress = {name} · started {start_mm}:{start_ss} · finishes ~{end_mm}:{end_ss}
 
-# ── Rename screen ───────────────────────────────────────────────────────────
-rename.heading = Batch Rename Replays
-rename.template_label = Name template:
-rename.vars_header = Available variables
-rename.var.datetime = Compact date/time (YYYYMMDDHHMM)
-rename.var.map = Map name (sanitized)
-rename.var.p1 = Player 1 name (sanitized)
-rename.var.p2 = Player 2 name (sanitized)
-rename.var.r1 = Player 1 race (T, P, Z or R)
-rename.var.r2 = Player 2 race (T, P, Z or R)
-rename.var.loops = Total game loops
-rename.var.duration = Match duration (MMmSSs)
-rename.note_special = Special characters in player/map names are replaced with '_'.
-rename.note_ext = The .SC2Replay extension is added automatically.
-rename.total = {count} replays will be renamed
-rename.skipped = ({count} skipped — pending or non-1v1)
-rename.execute = Rename All…
-rename.execute_tooltip = Choose the destination folder to copy the renamed replays
-rename.status.ok = {count} replays copied to {dir}
-rename.status.mkdir_err = Error creating directory: {err}
-rename.status.partial = {ok} copied, {errors} errors:
-rename.status.error_marker = errors
+# ── Library "Save as…" template (help popup) ────────────────────────────────
+library.template.vars_header = Available variables
+library.template.var.datetime = Compact date/time (YYYYMMDDHHMM)
+library.template.var.map = Map name (sanitized)
+library.template.var.p1 = Player 1 name (sanitized)
+library.template.var.p2 = Player 2 name (sanitized)
+library.template.var.r1 = Player 1 race (T, P, Z or R)
+library.template.var.r2 = Player 2 race (T, P, Z or R)
+library.template.var.loops = Total game loops
+library.template.var.duration = Match duration (MMmSSs)
+library.template.note_special = Special characters in player/map names are replaced with '_'.
+library.template.note_ext = The .SC2Replay extension is added automatically.
 
 # ── Insights tab ────────────────────────────────────────────────────────────
 insights.pov_label = Point of view

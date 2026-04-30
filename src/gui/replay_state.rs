@@ -5,12 +5,17 @@
 // sobre o `ReplayTimeline` resultante. Os resultados ficam em cache
 // no struct e as abas leem sem recomputar.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
 
 use crate::army_value::{self, ArmyValueResult};
 use crate::build_order::{self, BuildOrderResult};
 use crate::chat::{self, ChatResult};
-use crate::map_image::{self, MapImage};
+use crate::load_progress::LoadStage;
+use crate::map_image::{MapImage, MapInfo, StartLocation};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::map_image;
 use crate::production_gap::{self, ProductionGapResult};
 use crate::replay::{self, EntityEventKind, ReplayTimeline};
 use crate::supply_block::{self, SupplyBlockEntry};
@@ -46,14 +51,85 @@ pub struct LoadedReplay {
     /// encontrado em nenhum dos diretórios padrão ou quando a extração
     /// falhou — não é fatal, a aba Timeline cai pro fundo cinza.
     pub map_image: Option<MapImage>,
+    /// Metadados do `MapInfo` quando disponíveis (área jogável real,
+    /// dimensões totais). Preferidos sobre o cálculo heurístico em
+    /// `compute_playable_bounds`. `None` para mapas custom não cacheados
+    /// ou parse-fail.
+    pub map_info: Option<MapInfo>,
+    /// Spawn points definidos pelo mapper. Coordenadas em tiles
+    /// (com fração). Vazio quando não conseguimos abrir/parsear o
+    /// arquivo `Objects` do mapa.
+    pub start_locations: Vec<StartLocation>,
     /// Bounds da playable area derivados dos eventos do replay. `None`
     /// se nenhum evento posicionou alguma entidade (replay vazio).
     pub playable_bounds: Option<PlayableBounds>,
 }
 
 impl LoadedReplay {
+    /// Native-only path-based loader. Reads bytes from disk, delegates the
+    /// parsing/extraction work to `from_bytes`, then attempts the minimap
+    /// lookup (which requires the local Battle.net Cache and is therefore
+    /// native-only).
+    ///
+    /// Wrapper sem progress reporting — usado em tests e em fluxos
+    /// (improváveis) que não precisam do feedback. O caminho real da
+    /// GUI é `load_with_progress`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(path: &Path, max_time: u32) -> Result<Self, String> {
-        let timeline = replay::parse_replay(path, max_time)?;
+        Self::load_with_progress(path, max_time, &mut |_| {})
+    }
+
+    /// Igual a `load`, mas reporta `LoadStage` para um callback antes
+    /// de cada bloco de trabalho (read file → parse → extract features
+    /// → load minimap). Usado pelo loader em background.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_with_progress(
+        path: &Path,
+        max_time: u32,
+        on_stage: &mut dyn FnMut(LoadStage),
+    ) -> Result<Self, String> {
+        on_stage(LoadStage::ReadingFile);
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut me = Self::from_bytes_with_progress(file_name, &bytes, max_time, on_stage)?;
+        me.path = path.to_path_buf();
+        on_stage(LoadStage::LoadingMinimap);
+        match map_image::load_for_replay(&me.timeline.map, &me.timeline.cache_handles) {
+            Ok(assets) => {
+                me.map_image = Some(assets.image);
+                me.map_info = assets.info;
+                me.start_locations = assets.start_locations;
+            }
+            Err(e) => {
+                eprintln!("map_image: {e}");
+            }
+        }
+        // Recalcula bounds agora que sabemos se temos `MapInfo` real.
+        me.playable_bounds = compute_playable_bounds(&me.timeline, me.map_info.as_ref());
+        Ok(me)
+    }
+
+    /// Bytes-in-memory loader. Used by the web build (FileReader upload)
+    /// and shared as the implementation core of `load`. Does NOT attempt
+    /// to resolve the minimap — that requires the local Battle.net Cache
+    /// and is the caller's responsibility on native.
+    pub fn from_bytes(file_name: String, bytes: &[u8], max_time: u32) -> Result<Self, String> {
+        Self::from_bytes_with_progress(file_name, bytes, max_time, &mut |_| {})
+    }
+
+    /// Igual a `from_bytes`, mas reporta `LoadStage` ao callback.
+    pub fn from_bytes_with_progress(
+        file_name: String,
+        bytes: &[u8],
+        max_time: u32,
+        on_stage: &mut dyn FnMut(LoadStage),
+    ) -> Result<Self, String> {
+        let timeline = replay::parse_replay_from_bytes_with_progress(
+            &file_name, bytes, max_time, on_stage,
+        )?;
 
         // O app só suporta 1v1. Rejeitamos aqui também (além do filtro
         // da biblioteca) para cobrir carregamentos diretos via diálogo
@@ -65,6 +141,7 @@ impl LoadedReplay {
             ));
         }
 
+        on_stage(LoadStage::ExtractingFeatures);
         let build_order = match build_order::extract_build_order(&timeline) {
             Ok(v) => Some(v),
             Err(e) => {
@@ -99,26 +176,19 @@ impl LoadedReplay {
             .map(|p| supply_block::extract_supply_blocks(p, timeline.game_loops, timeline.base_build))
             .collect();
 
-        let map_image = match map_image::load_for_replay(&timeline.map, &timeline.cache_handles)
-        {
-            Ok(img) => Some(img),
-            Err(e) => {
-                eprintln!("map_image: {e}");
-                None
-            }
-        };
-
-        let playable_bounds = compute_playable_bounds(&timeline);
+        let playable_bounds = compute_playable_bounds(&timeline, None);
 
         Ok(Self {
-            path: path.to_path_buf(),
+            path: PathBuf::from(&file_name),
             timeline,
             build_order,
             chat,
             army,
             production,
             supply_blocks_per_player,
-            map_image,
+            map_image: None,
+            map_info: None,
+            start_locations: Vec::new(),
             playable_bounds,
         })
     }
@@ -140,14 +210,46 @@ impl LoadedReplay {
     }
 }
 
-/// Calcula os bounds da playable area a partir das posições observadas
-/// nos `entity_events` de todos os jogadores. Adiciona uma pequena
-/// margem (`MARGIN`) em cada lado pra deixar respiro visual quando as
-/// unidades estão exatamente no canto da área jogável.
+/// Calcula os bounds da playable area, preferindo o `MapInfo` real do
+/// `.SC2Map` quando disponível e caindo para a heurística baseada em
+/// posições observadas como fallback.
 ///
-/// `None` quando o replay não tem nenhum evento posicionado (replay
-/// vazio ou parser sem rastreamento).
-fn compute_playable_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> {
+/// **Preferência por `MapInfo`:** quando temos os bounds canônicos do
+/// arquivo do mapa, eles batem exatamente com o que a Blizzard expõe
+/// como playable area. Isso elimina o jitter de canto provocado pela
+/// margem fixa de 4 tiles e alinha a minimap.tga com as coordenadas de
+/// unidade sem precisar de calibração empírica.
+///
+/// **Fallback heurístico:** sem `MapInfo` (mapa custom não cacheado,
+/// parser falhou, build wasm), derivamos os extremos a partir de
+/// `entity_events`, `unit_positions` e `resources` com margem
+/// `MARGIN` para respiro visual quando unidades estão no canto.
+///
+/// `None` quando ambos os caminhos falham (replay vazio sem `MapInfo`).
+fn compute_playable_bounds(
+    timeline: &ReplayTimeline,
+    map_info: Option<&MapInfo>,
+) -> Option<PlayableBounds> {
+    if let Some(info) = map_info {
+        // `MapInfo` é canônico quando dimensões cabem em u8 (mapas
+        // de ladder vão até 256x256 — `max_x/y` exclusivos podem
+        // chegar a 256, que estoura u8). Se algum bound não couber,
+        // caímos no fallback heurístico em vez de truncar errado.
+        if info.playable_max_x <= u8::MAX as u32 + 1
+            && info.playable_max_y <= u8::MAX as u32 + 1
+        {
+            return Some(PlayableBounds {
+                min_x: info.playable_min_x as u8,
+                max_x: info.playable_max_x.min(u8::MAX as u32) as u8,
+                min_y: info.playable_min_y as u8,
+                max_y: info.playable_max_y.min(u8::MAX as u32) as u8,
+            });
+        }
+    }
+    compute_heuristic_bounds(timeline)
+}
+
+fn compute_heuristic_bounds(timeline: &ReplayTimeline) -> Option<PlayableBounds> {
     const MARGIN: u8 = 4;
     let mut min_x = u8::MAX;
     let mut max_x = 0u8;

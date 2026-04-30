@@ -27,7 +27,6 @@ pub enum LibraryAction {
     ClearSelection,
     Refresh,
     PickWorkingDir(PathBuf),
-    OpenRename,
     /// Persiste filtros que sobrevivem entre sessões (date range + race).
     /// Sempre carrega o snapshot completo, pra não perder uma mudança quando
     /// duas acontecem no mesmo frame (ex.: botão "limpar tudo").
@@ -121,7 +120,7 @@ pub fn show(
     let mut action = LibraryAction::None;
     let lang = config.language;
 
-    // Header chrome (title + folder path + reload/pick/rename icons) and
+    // Header chrome (title + folder path + reload/pick icons) and
     // the filter sidebar (search/chips/sort) live in app-level panels.
     // The hero KPI strip is now rendered by `show_hero` from `central.rs`
     // (so it can span the full width above the detail card). This
@@ -140,6 +139,7 @@ pub fn show(
         );
     } else {
         let pending = library.pending_count();
+        let enriching = library.enrichment_in_flight_count();
         if pending > 0 {
             ui.small(tf(
                 "library.parsing",
@@ -149,6 +149,16 @@ pub fn show(
                     ("total", &library.entries.len().to_string()),
                 ],
             ));
+        } else if enriching > 0 {
+            ui.small(
+                RichText::new(tf(
+                    "library.enriching",
+                    lang,
+                    &[("remaining", &enriching.to_string())],
+                ))
+                .italics()
+                .color(Color32::from_gray(160)),
+            );
         }
     }
 
@@ -408,8 +418,8 @@ pub fn show(
 }
 
 /// Botão de ajuda com popup explicando as variáveis do template de
-/// "salvar como…". Reusa as strings `rename.var.*` da tela Rename para
-/// uma única fonte de verdade da documentação.
+/// "salvar como…". As chaves `library.template.*` são definidas em
+/// `data/locale/{en,pt-BR}/ui.txt`.
 fn template_help_popup(ui: &mut Ui, lang: crate::locale::Language) {
     let resp = ui
         .button("?")
@@ -418,21 +428,21 @@ fn template_help_popup(ui: &mut Ui, lang: crate::locale::Language) {
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(280.0);
-            ui.label(RichText::new(t("rename.vars_header", lang)).strong());
+            ui.label(RichText::new(t("library.template.vars_header", lang)).strong());
             ui.add_space(SPACE_S);
             egui::Grid::new("library_save_template_vars")
                 .num_columns(2)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
                     let vars: [(&str, &str); 8] = [
-                        ("{datetime}", t("rename.var.datetime", lang)),
-                        ("{map}", t("rename.var.map", lang)),
-                        ("{p1}", t("rename.var.p1", lang)),
-                        ("{p2}", t("rename.var.p2", lang)),
-                        ("{r1}", t("rename.var.r1", lang)),
-                        ("{r2}", t("rename.var.r2", lang)),
-                        ("{loops}", t("rename.var.loops", lang)),
-                        ("{duration}", t("rename.var.duration", lang)),
+                        ("{datetime}", t("library.template.var.datetime", lang)),
+                        ("{map}", t("library.template.var.map", lang)),
+                        ("{p1}", t("library.template.var.p1", lang)),
+                        ("{p2}", t("library.template.var.p2", lang)),
+                        ("{r1}", t("library.template.var.r1", lang)),
+                        ("{r2}", t("library.template.var.r2", lang)),
+                        ("{loops}", t("library.template.var.loops", lang)),
+                        ("{duration}", t("library.template.var.duration", lang)),
                     ];
                     for (var, desc) in vars {
                         ui.monospace(var);
@@ -441,8 +451,8 @@ fn template_help_popup(ui: &mut Ui, lang: crate::locale::Language) {
                     }
                 });
             ui.add_space(SPACE_S);
-            ui.small(t("rename.note_special", lang));
-            ui.small(t("rename.note_ext", lang));
+            ui.small(t("library.template.note_special", lang));
+            ui.small(t("library.template.note_ext", lang));
             ui.add_space(SPACE_S);
             ui.small(
                 RichText::new(t("library.selection.help_fallback_note", lang))
@@ -458,5 +468,9 @@ pub fn keep_alive(ctx: &Context, library: &ReplayLibrary) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     } else if library.pending_count() > 0 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    } else if library.enrichment_in_flight_count() > 0 {
+        // Enriquecimento é "best effort" lento — repaint mais espaçado
+        // só pra atualizar o contador visível na status bar / header.
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 }
