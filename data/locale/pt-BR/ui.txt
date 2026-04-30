@@ -74,6 +74,8 @@ toast.date_range_autodetect = Mostrando replays: {range}
 toast.copy_ok = {count} replays copiados para {dir}
 toast.copy_partial = {ok} replays copiados · {err_count} falharam (veja o log)
 toast.copy_mkdir_err = Não foi possível criar o destino: {err}
+toast.classification_started = Classificação de aberturas iniciada
+toast.classification_stopped = Classificação interrompida (itens em andamento concluem)
 error.load_failed = Erro ao carregar {path}: {err}
 
 # ── Estado vazio ────────────────────────────────────────────────────────────
@@ -145,6 +147,11 @@ settings.max_time.label = max_time padrão (s, 0 = sem limite):
 settings.auto_load_latest = Carregar replay mais recente ao abrir
 settings.watch_replays = Observar pasta do SC2 (file watcher)
 settings.auto_load_new = Carregar automaticamente quando surgir novo replay
+settings.section.classification = Classificação de aberturas
+settings.auto_classify_on_scan = Classificar aberturas durante o scan da biblioteca
+settings.auto_classify_on_scan.desc = Quando ativado, o app classifica em lote as aberturas pendentes durante o scan da biblioteca. Replays carregados manualmente e detectados pelo watcher são sempre classificados imediatamente, independente desta opção.
+settings.classify_now = Classificar pendentes agora
+settings.stop_classification = Interromper classificação
 settings.section.language = Idioma
 settings.language.label = Idioma do aplicativo:
 settings.section.appearance = Aparência

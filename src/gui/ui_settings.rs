@@ -18,6 +18,8 @@ use crate::locale::{t, tf, Language};
 pub struct SettingsOutcome {
     pub saved: bool,
     pub reset_defaults: bool,
+    pub classify_now: bool,
+    pub stop_classification: bool,
 }
 
 pub fn show(
@@ -158,6 +160,22 @@ pub fn show(
                     t("settings.auto_load_new", lang),
                 );
             });
+        });
+
+        ui.separator();
+        ui.heading(t("settings.section.classification", lang));
+        ui.checkbox(
+            &mut config.auto_classify_on_scan,
+            t("settings.auto_classify_on_scan", lang),
+        );
+        ui.small(t("settings.auto_classify_on_scan.desc", lang));
+        ui.horizontal(|ui| {
+            if ui.button(t("settings.classify_now", lang)).clicked() {
+                outcome.classify_now = true;
+            }
+            if ui.button(t("settings.stop_classification", lang)).clicked() {
+                outcome.stop_classification = true;
+            }
         });
 
         ui.separator();

@@ -73,6 +73,8 @@ toast.date_range_autodetect = Showing replays: {range}
 toast.copy_ok = Copied {count} replays to {dir}
 toast.copy_partial = Copied {ok} replays · {err_count} failed (see logs)
 toast.copy_mkdir_err = Could not create destination: {err}
+toast.classification_started = Opening classification started
+toast.classification_stopped = Classification stopped (in-flight items will finish)
 error.load_failed = Error loading {path}: {err}
 
 # ── Empty state ─────────────────────────────────────────────────────────────
@@ -144,6 +146,11 @@ settings.max_time.label = Default max_time (s, 0 = no limit):
 settings.auto_load_latest = Load latest replay on startup
 settings.watch_replays = Watch SC2 folder (file watcher)
 settings.auto_load_new = Automatically load new replays
+settings.section.classification = Opening classification
+settings.auto_classify_on_scan = Classify openings during library scan
+settings.auto_classify_on_scan.desc = When enabled, the app classifies pending openings in batch as the library is scanned. Loaded replays and replays detected by the watcher are always classified immediately, regardless of this setting.
+settings.classify_now = Classify pending now
+settings.stop_classification = Stop classification
 settings.section.language = Language
 settings.language.label = App language:
 settings.section.appearance = Appearance
