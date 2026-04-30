@@ -1,6 +1,10 @@
 #![cfg_attr(all(not(target_arch = "wasm32"), target_os = "windows"), windows_subsystem = "windows")]
 
 #[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     let opts = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

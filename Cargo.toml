@@ -36,6 +36,12 @@ dirs   = "6"
 notify = "8"
 blake3 = "1"
 dunce  = "1"
+# mimalloc é o `#[global_allocator]` em main.rs / bins. O glibc malloc
+# do Linux degrada feio com o padrão de alocação pequena/frequente do
+# `s2protocol::GameSSelectionDeltaEvent` (ordens de magnitude mais
+# lento que o HeapAlloc do Windows em replays com muita seleção). O
+# mimalloc neutraliza essa diferença e ainda é cross-platform.
+mimalloc = { version = "0.1", default-features = false }
 
 # Linux native uses Wayland/X11 backends. Cargo merges feature lists from
 # both this section and `[dependencies]` for the same crate, so the Linux
