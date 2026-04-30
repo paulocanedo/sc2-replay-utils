@@ -136,6 +136,7 @@ pub fn show(
     let dt = ui.input(|i| i.unstable_dt);
     let ctx = ui.ctx().clone();
     transport::advance_playback(tl, current_loop, max_loop, playing, *playback_speed, dt, &ctx);
+    transport::handle_keyboard_scrub(&ctx, current_loop, max_loop);
     if *playing {
         ctx.request_repaint();
     }
