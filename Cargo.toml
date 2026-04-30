@@ -11,7 +11,32 @@ default-run = "sc2-replay-utils"
 # s2protocol's default features (`dep_arrow`, `syntax`) pull in arrow/syntect
 # transitively, which we don't use. `syntect` in particular brings `onig_sys`
 # (Oniguruma C lib) that breaks wasm builds without clang.
-s2protocol  = { version = "3.5", default-features = false }
+#
+# Desligar tracing em release é crítico para perf: o s2protocol anota
+# TODOS os bit-packed decoders com
+# `#[tracing::instrument(level="debug", fields(input = peek_bits(input)))]`
+# e `peek_bits` constrói uma string colorida byte-a-byte com vários
+# `format!()` por bit. Sem filtros estáticos, o `fields(...)` é avaliado
+# em toda chamada — milhões de allocs/format por replay, dominando o
+# parse (game stage ~2.7s no `serral.SC2Replay` vs ~100ms esperado).
+#
+# São NECESSÁRIOS três flags simultâneos:
+#
+# 1. `s2protocol/tracing_off` — ativa `tracing/{max,release_max}_level_off`,
+#    derrubando `tracing::STATIC_MAX_LEVEL` para `Off` em compile time.
+# 2. `nom-mpq` re-declarado com `default-features = false` — o `default`
+#    do crate inclui `tracing_debug_level`, e features são aditivas;
+#    contudo o `STATIC_MAX_LEVEL` do tracing usa `if cfg!(release_max_level_off)`
+#    como PRIMEIRA arm, então essa override é defensiva (não estritamente
+#    necessária, mas evita rebaixar caso a ordem mude).
+# 3. `log/release_max_level_off` — `eframe/calloop` ativa o feature `log`
+#    do tracing, e o macro `instrument` gera código que cai numa segunda
+#    branch via `if_log_enabled!(...)`, controlada pelo `log::STATIC_MAX_LEVEL`.
+#    Sem isso o `peek_bits` continua sendo chamado em runtime mesmo com
+#    o tracing-side desligado.
+s2protocol  = { version = "3.5", default-features = false, features = ["tracing_off"] }
+nom-mpq     = { version = "2", default-features = false, features = ["tracing_off"] }
+log         = { version = "0.4", features = ["release_max_level_off"] }
 serde       = { version = "1", features = ["derive"] }
 serde_yml   = "0.0"
 eframe      = { version = "0.34", default-features = false, features = ["default_fonts", "glow", "persistence"] }
