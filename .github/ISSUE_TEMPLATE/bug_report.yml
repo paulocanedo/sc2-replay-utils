@@ -1,0 +1,128 @@
+name: Bug report
+description: Report a problem with sc2-replay-utils (crash, wrong output, parsing issue, UI glitch).
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please fill in as much detail as you can — incomplete reports are hard to triage.
+
+  - type: checkboxes
+    id: prereqs
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I'm running the latest release (or built from `master`).
+          required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Affected area
+      description: Which part of the app is affected? Maps to commit scopes in CONTRIBUTING.md.
+      options:
+        - build_order
+        - timeline
+        - charts
+        - replay (parsing)
+        - gui
+        - library
+        - map
+        - balance (balance data)
+        - army-value
+        - supply-block
+        - localization
+        - other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear summary of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the bug.
+      placeholder: |
+        1. Open the app
+        2. Load replay X
+        3. Click "Build Order" tab
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include error messages verbatim if any.
+    validations:
+      required: true
+
+  - type: textarea
+    id: replay-context
+    attributes:
+      label: Replay context (if applicable)
+      description: |
+        If the bug is replay-specific, describe the replay: matchup (e.g. PvZ), map name, approximate length, game version if known.
+        **Please do not attach `.SC2Replay` files directly to public issues.** If a replay is needed for reproduction, the maintainers will follow up to arrange a private share.
+      placeholder: |
+        Matchup: PvZ
+        Map: Goldenaura LE
+        Length: ~14 min
+        Game version: 5.0.13
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (please specify distro in description)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Found in the app's About / window title, or via `sc2-replay-utils --version`.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build-source
+    attributes:
+      label: Build source
+      options:
+        - Pre-built release binary
+        - Built from source
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or additional context
+      description: Paste console output (use code blocks), attach screenshots, or add anything else relevant.
+      render: shell
