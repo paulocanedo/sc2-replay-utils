@@ -16,16 +16,13 @@ use egui::{Align, Button, Color32, Id, Layout, Response, RichText, Slider, Ui};
 use crate::colors::FOCUS_RING;
 use crate::replay::ReplayTimeline;
 use crate::replay_state::fmt_time;
-use crate::tokens::{RADIUS_BUTTON, SPACE_S};
+use crate::tokens::{CONTROL_HEIGHT_L, RADIUS_BUTTON, SPACE_S};
+use crate::widgets::{icon_text, phosphor};
 
 /// Velocidades suportadas pelo botão de speed. Ciclamos nessa ordem ao
 /// clicar; também é o conjunto de valores válidos de
 /// `AppState.timeline_playback_speed`.
 const SPEEDS: [u8; 4] = [1, 2, 4, 8];
-
-/// Largura fixa para o botão de play/pause e de velocidade, de modo que
-/// o layout não "pule" quando o rótulo muda (▶ ↔ ⏸ / "1×" ↔ "8×").
-const CTRL_BUTTON_WIDTH: f32 = 36.0;
 
 /// Chave do acumulador fracionário de playback no `egui::Memory`. Como
 /// existe apenas uma timeline ativa por vez, um ID global basta — o
@@ -164,11 +161,15 @@ fn reset_playback_accumulator(ctx: &egui::Context) {
 
 fn play_pause_button(ui: &mut Ui, playing: &mut bool, current_loop: &mut u32, max_loop: u32) {
     let (glyph, hover) = if *playing {
-        ("⏸", "Pause")
+        (phosphor::PAUSE, "Pause")
     } else {
-        ("▶", "Play")
+        (phosphor::PLAY, "Play")
     };
-    let resp = ctrl_button(ui, glyph, *playing);
+    // Phosphor glyph through `icon_text` so it resolves via the dedicated
+    // `Icons` font family — passing it as a raw `&str` would route through
+    // Inter (Proportional family) and render as garbled PUA alternates.
+    let label = icon_text(glyph).color(ctrl_button_text_color(*playing));
+    let resp = ctrl_button(ui, label, *playing);
     if resp.on_hover_text(hover).clicked() {
         // Clicar em Play no fim do replay reinicia do zero (comportamento
         // de replay de video player). Caso contrário, apenas alterna.
@@ -182,7 +183,10 @@ fn play_pause_button(ui: &mut Ui, playing: &mut bool, current_loop: &mut u32, ma
 fn speed_button(ui: &mut Ui, speed: &mut u8, playing: bool) {
     // Quando playing=false, o botão fica "atenuado" visualmente para
     // reforçar que a velocidade só tem efeito durante reprodução.
-    let resp = ctrl_button(ui, &format!("{}×", speed), playing);
+    let label = RichText::new(format!("{}×", speed))
+        .color(ctrl_button_text_color(playing))
+        .monospace();
+    let resp = ctrl_button(ui, label, playing);
     if resp.on_hover_text("Playback speed").clicked() {
         *speed = next_speed(*speed);
     }
@@ -193,26 +197,33 @@ fn next_speed(current: u8) -> u8 {
     SPEEDS[(idx + 1) % SPEEDS.len()]
 }
 
+fn ctrl_button_text_color(highlighted: bool) -> Color32 {
+    if highlighted {
+        Color32::WHITE
+    } else {
+        Color32::from_gray(210)
+    }
+}
+
 /// Botão pill com aparência consistente para os controles de transport
-/// (play/pause e velocidade). `highlighted` pinta o fundo com o accent
-/// para indicar estado ativo (reproduzindo).
-fn ctrl_button(ui: &mut Ui, label: &str, highlighted: bool) -> Response {
-    let (fill, text) = if highlighted {
-        (
-            Color32::from_rgb(
-                FOCUS_RING.r() / 2 + 20,
-                FOCUS_RING.g() / 2 + 20,
-                FOCUS_RING.b() / 2 + 20,
-            ),
-            Color32::WHITE,
+/// (play/pause e velocidade). Caller fornece o `RichText` já estilizado
+/// com a família correta (Icons para o glyph play/pause, Monospace para
+/// "1×".."8×"). `highlighted` pinta o fundo com o accent para indicar
+/// estado ativo (reproduzindo).
+fn ctrl_button(ui: &mut Ui, label: RichText, highlighted: bool) -> Response {
+    let fill = if highlighted {
+        Color32::from_rgb(
+            FOCUS_RING.r() / 2 + 20,
+            FOCUS_RING.g() / 2 + 20,
+            FOCUS_RING.b() / 2 + 20,
         )
     } else {
-        (Color32::from_gray(40), Color32::from_gray(210))
+        Color32::from_gray(40)
     };
     ui.add(
-        Button::new(RichText::new(label).color(text).monospace())
+        Button::new(label)
             .fill(fill)
             .corner_radius(RADIUS_BUTTON)
-            .min_size(egui::vec2(CTRL_BUTTON_WIDTH, 0.0)),
+            .min_size(egui::vec2(CONTROL_HEIGHT_L, 0.0)),
     )
 }

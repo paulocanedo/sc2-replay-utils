@@ -9,7 +9,8 @@ use egui::{Color32, Panel, RichText};
 
 use crate::colors::LABEL_DIM;
 use crate::locale::{t, tf};
-use crate::tokens::{SPACE_M, SPACE_XS, STATUSBAR_HEIGHT};
+use crate::tokens::{statusbar_height, SPACE_M, SPACE_XS};
+use crate::widgets::{icon_text, phosphor};
 
 use super::state::{AppState, Screen};
 
@@ -48,8 +49,8 @@ impl AppState {
         // back to `spacing.interact_size.y + margin` on the first frame (no
         // `PanelState` cached yet), which means the very first render can
         // under-reserve and let the virtualized replay list below it paint
-        // over the bar. `STATUSBAR_HEIGHT` is the design-token value the
-        // bar is drawn at (≈22 px, covers `SPACE_XS*2 + small text line`).
+        // over the bar. `statusbar_height` derives from the user's
+        // `font_size` so the bar grows with larger fonts.
         //
         // `.show(ctx, ...)` (not `show_inside`) is load-bearing: it calls
         // `pass_state.allocate_bottom_panel(rect)` so the subsequent
@@ -60,11 +61,11 @@ impl AppState {
         // includes the bottom strip, letting its ScrollArea paint over us.
         Panel::bottom("status_bar")
             .resizable(false)
-            .exact_size(STATUSBAR_HEIGHT)
+            .exact_size(statusbar_height(&self.config))
             .frame(
                 egui::Frame::new()
                     .fill(Color32::from_gray(18))
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin::symmetric(SPACE_M as i8, SPACE_XS as i8)),
             )
             .show(ctx, |ui| {
             ui.add_space(SPACE_XS);
@@ -75,7 +76,7 @@ impl AppState {
                 #[cfg(not(target_arch = "wasm32"))]
                 let load_drawn = if let Some((file_name, stage)) = &load_status {
                     let stage_label = t(stage.locale_key(), lang);
-                    ui.label("⏳");
+                    ui.label(icon_text(phosphor::HOURGLASS_MEDIUM));
                     ui.monospace(file_name);
                     ui.label(
                         RichText::new(format!("· {stage_label}")).color(LABEL_DIM),
@@ -90,7 +91,7 @@ impl AppState {
                 if !load_drawn { match screen {
                     Screen::Analysis => match &loaded_file {
                         Some(file) => {
-                            ui.label("📼");
+                            ui.label(icon_text(phosphor::FILM_REEL));
                             ui.monospace(file);
                         }
                         None => {
@@ -138,7 +139,7 @@ impl AppState {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     #[cfg(not(target_arch = "wasm32"))]
                     if let Some(dir) = &watcher_dir {
-                        ui.label("👁").on_hover_text(tf(
+                        ui.label(icon_text(phosphor::EYE)).on_hover_text(tf(
                             "app.status.watching",
                             lang,
                             &[("dir", &dir.display().to_string())],

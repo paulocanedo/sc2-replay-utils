@@ -17,6 +17,7 @@ use crate::locale::{t, Language};
 use crate::locale::tf;
 use crate::tabs::{self, Tab};
 use crate::tokens::{SPACE_M, SPACE_S, SPACE_XXL};
+use crate::widgets::{icon_text, phosphor};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::colors::LABEL_DIM;
 #[cfg(not(target_arch = "wasm32"))]
@@ -37,16 +38,16 @@ impl AppState {
                 egui::Frame::new()
                     .fill(Color32::from_rgb(60, 20, 20))
                     .stroke(egui::Stroke::new(1.0, Color32::LIGHT_RED))
-                    .inner_margin(egui::Margin::same(8))
+                    .inner_margin(egui::Margin::same(SPACE_M as i8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(err).color(Color32::LIGHT_RED));
-                            if ui.small_button("×").clicked() {
+                            if ui.small_button(icon_text(phosphor::X)).clicked() {
                                 self.load_error = None;
                             }
                         });
                     });
-                ui.add_space(8.0);
+                ui.add_space(SPACE_M);
             }
 
             // Carga em background: substitui o conteúdo da tela
@@ -223,7 +224,7 @@ fn show_loading_screen(ui: &mut egui::Ui, handle: &LoadHandle, lang: Language) {
 fn empty_state(ui: &mut egui::Ui, lang: Language) {
     ui.add_space(SPACE_XXL * 2.5);
     ui.vertical_centered(|ui| {
-        ui.label(RichText::new("🎮").size(56.0));
+        ui.label(icon_text(phosphor::GAME_CONTROLLER).size(56.0));
         ui.add_space(SPACE_M);
         ui.label(RichText::new(t("empty.heading", lang)).heading());
         ui.add_space(SPACE_S);
@@ -243,16 +244,16 @@ impl AppState {
                 egui::Frame::new()
                     .fill(Color32::from_rgb(60, 20, 20))
                     .stroke(egui::Stroke::new(1.0, Color32::LIGHT_RED))
-                    .inner_margin(egui::Margin::same(8))
+                    .inner_margin(egui::Margin::same(SPACE_M as i8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(err).color(Color32::LIGHT_RED));
-                            if ui.small_button("×").clicked() {
+                            if ui.small_button(icon_text(phosphor::X)).clicked() {
                                 self.load_error = None;
                             }
                         });
                     });
-                ui.add_space(8.0);
+                ui.add_space(SPACE_M);
             }
 
             match self.loaded.as_ref() {
@@ -309,7 +310,7 @@ fn web_upload_prompt(
 ) {
     ui.add_space(SPACE_XXL * 2.0);
     ui.vertical_centered(|ui| {
-        ui.label(RichText::new("📂").size(56.0));
+        ui.label(icon_text(phosphor::FOLDER_OPEN).size(56.0));
         ui.add_space(SPACE_M);
         ui.label(RichText::new(t("empty.heading", lang)).heading());
         ui.add_space(SPACE_S);

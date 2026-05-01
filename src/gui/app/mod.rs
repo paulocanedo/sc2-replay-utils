@@ -440,9 +440,27 @@ fn apply_dark_palette(v: &mut egui::Visuals) {
     v.slider_trailing_fill = true;
 }
 
-/// Registers Inter (UI) and JetBrains Mono (monospace) as the primary
-/// fonts, keeping egui's default fallbacks for glyphs Inter/JB Mono
-/// don't cover (CJK, emoji). Called once from `AppState::new`.
+/// Registers Inter (UI), JetBrains Mono (monospace) and Phosphor (icons).
+///
+/// **Phosphor lives in its own family**, not as a fallback for the text
+/// families. Two reasons forced this design:
+///
+/// 1. Inter and Phosphor both claim glyphs across the Private Use Area
+///    (Inter for stylistic alternates, Phosphor for icons). Whoever
+///    shows up first wins, so the other's PUA glyphs render as garbage.
+///
+/// 2. Phosphor's TTF cmap claims `space`, `hyphen` and **every lowercase
+///    a–z** (with empty/blank glyphs, presumably from the build pipeline
+///    used by the upstream font generator). If Phosphor sits in front of
+///    Inter, every lowercase letter renders blank — "Library" collapses
+///    to "L" because uppercase L falls through to Inter while the rest
+///    is silently consumed by Phosphor.
+///
+/// The fix is to expose Phosphor only through a custom
+/// `FontFamily::Name("Icons")` family. Call sites that want an icon
+/// resolve through `widgets::icon_text(glyph)` (a `RichText` helper that
+/// sets `.family(...)`), so Phosphor never participates in normal text
+/// shaping.
 pub fn install_fonts(ctx: &Context) {
     const INTER: &[u8] =
         include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
@@ -458,15 +476,24 @@ pub fn install_fonts(ctx: &Context) {
         "JetBrainsMono".to_owned(),
         Arc::new(FontData::from_static(JETBRAINS_MONO)),
     );
+    fonts.font_data.insert(
+        "phosphor".to_owned(),
+        Arc::new(egui_phosphor::Variant::Regular.font_data()),
+    );
 
-    // Prepend our fonts to each family so Inter/JB Mono render first,
-    // with egui's defaults (Ubuntu-Light, Hack, Noto Emoji) as fallback.
+    // Inter / JB Mono first, egui's defaults stay as fallback for CJK
+    // and emoji in user-supplied content (chat messages).
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
         prop.insert(0, "Inter".to_owned());
     }
     if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
         mono.insert(0, "JetBrainsMono".to_owned());
     }
+
+    // Custom family for Phosphor icons. Use via `widgets::icon_text`.
+    fonts
+        .families
+        .insert(FontFamily::Name("Icons".into()), vec!["phosphor".to_owned()]);
 
     ctx.set_fonts(fonts);
 }

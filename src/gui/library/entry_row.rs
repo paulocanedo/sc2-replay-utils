@@ -13,10 +13,13 @@
 
 use egui::{Color32, RichText, Sense, Ui};
 
-use crate::colors::{race_color, ACCENT_DANGER, ACCENT_SUCCESS, LABEL_DIM};
+use crate::colors::{race_color, ACCENT_DANGER, ACCENT_SUCCESS, BORDER, LABEL_DIM};
 use crate::config::AppConfig;
 use crate::locale::{t, tf};
-use crate::tokens::{size_caption, SPACE_S};
+use crate::tokens::{
+    size_caption, CHECKBOX_COL_W, FRAME_CHROME_V, RADIUS_BUTTON, ROW_INNER_MX, ROW_INNER_MY,
+    ROW_RIGHT_ZONE_W, SPACE_S, STROKE_HAIRLINE,
+};
 
 use super::types::{LibraryEntry, MetaState, ParsedMeta, PlayerMeta};
 
@@ -121,19 +124,10 @@ pub(super) fn row_height(ui: &Ui) -> f32 {
     body + FRAME_CHROME_V
 }
 
-const FRAME_CHROME_V: f32 = 14.0;
-
-/// Largura da coluna fixa do checkbox de seleção. Calibrada para caber
-/// o glifo do checkbox (~18px) com margem confortável.
-const CHECKBOX_COL_W: f32 = 22.0;
-
-/// Largura fixa da zona direita (matchup code + W/L). Garante que a
-/// coluna fique alinhada entre linhas, independentemente do comprimento
-/// dos nomes dos jogadores. Calibrada para caber "TvZ" + gap + "LOSS"
-/// confortavelmente, sem cortar em fontes maiores do slider de tamanho.
-const RIGHT_ZONE_W: f32 = 110.0;
-
-// Paleta dos estados visuais do row.
+// Paleta dos estados visuais do row. Component-private porque os tons
+// foram calibrados especificamente para o entry row (slot-blue para
+// selected/current); generalizar exigiria revalidar contra os outros
+// componentes que aplicam SELECTION_BG / FOCUS_RING via egui Visuals.
 const SELECTED_FILL: Color32 = Color32::from_rgb(32, 44, 60);
 const SELECTED_STROKE: Color32 = Color32::from_rgb(110, 150, 200);
 const CURRENT_STROKE: Color32 = Color32::from_rgb(80, 110, 150);
@@ -153,18 +147,18 @@ pub(super) fn entry_row(
     let fill = if is_selected {
         SELECTED_FILL
     } else if matches!(entry.meta, MetaState::Unsupported(_)) {
-        Color32::from_gray(22)
+        crate::colors::SURFACE
     } else {
-        Color32::from_gray(28)
+        crate::colors::SURFACE_ALT
     };
     let stroke = if is_selected {
         egui::Stroke::new(1.0, SELECTED_STROKE)
     } else if is_current {
         egui::Stroke::new(1.0, CURRENT_STROKE)
     } else if matches!(entry.meta, MetaState::Unsupported(_)) {
-        egui::Stroke::new(0.5, Color32::from_gray(50))
+        egui::Stroke::new(STROKE_HAIRLINE, BORDER)
     } else {
-        egui::Stroke::new(0.5, Color32::from_gray(60))
+        egui::Stroke::new(STROKE_HAIRLINE, Color32::from_gray(60))
     };
 
     let content_h = (row_h - FRAME_CHROME_V).max(0.0);
@@ -196,8 +190,8 @@ pub(super) fn entry_row(
             egui::Frame::new()
                 .fill(fill)
                 .stroke(stroke)
-                .corner_radius(4.0)
-                .inner_margin(egui::Margin::symmetric(10, 5))
+                .corner_radius(RADIUS_BUTTON)
+                .inner_margin(egui::Margin::symmetric(ROW_INNER_MX, ROW_INNER_MY))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.set_min_height(content_h);
@@ -340,12 +334,12 @@ fn render_parsed(ui: &mut Ui, meta: &ParsedMeta, config: &AppConfig, content_h: 
     );
 
     let right_rect = egui::Rect::from_min_size(
-        strip_rect.right_top() - egui::vec2(RIGHT_ZONE_W, 0.0),
-        egui::vec2(RIGHT_ZONE_W, content_h),
+        strip_rect.right_top() - egui::vec2(ROW_RIGHT_ZONE_W, 0.0),
+        egui::vec2(ROW_RIGHT_ZONE_W, content_h),
     );
     let left_rect = egui::Rect::from_min_max(
         strip_rect.left_top(),
-        egui::pos2(strip_rect.right() - RIGHT_ZONE_W, strip_rect.bottom()),
+        egui::pos2(strip_rect.right() - ROW_RIGHT_ZONE_W, strip_rect.bottom()),
     );
 
     // ── LEFT: "Player1 vs Player2" ───────────────────────────

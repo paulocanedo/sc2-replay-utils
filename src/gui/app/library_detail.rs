@@ -20,6 +20,7 @@ use crate::replay_state::format_date_short;
 use crate::tokens::{
     size_body, size_caption, RADIUS_BUTTON, SPACE_M, SPACE_S, SPACE_XS,
 };
+use crate::widgets::{icon_text, phosphor};
 
 use super::state::AppState;
 
@@ -282,7 +283,7 @@ fn detail_card_empty(ui: &mut egui::Ui, lang: Language, config: &crate::config::
         egui::Layout::top_down(egui::Align::Center),
         |ui| {
             ui.add_space(avail_h * 0.25);
-            ui.label(RichText::new("📋").size(40.0));
+            ui.label(icon_text(phosphor::CLIPBOARD).size(40.0));
             ui.add_space(SPACE_M);
             ui.label(
                 RichText::new(t("library.detail.empty.title", lang))
