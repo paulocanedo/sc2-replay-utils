@@ -590,3 +590,34 @@ pub fn copy_labeled_button(ui: &mut Ui, label: &str) -> Response {
     ui.add(egui::Button::image_and_text(copy_icon_image(side), label))
 }
 
+/// Button widget (not yet added) for the copy affordance. Useful when
+/// the caller needs `add_sized` to control the rect — egui consumes a
+/// `Widget` there, and the helpers above already call `ui.add` for you.
+pub fn copy_labeled_button_widget(
+    ui: &Ui,
+    label: impl Into<egui::WidgetText>,
+) -> egui::Button<'static> {
+    let side = ui.text_style_height(&egui::TextStyle::Body);
+    egui::Button::image_and_text(copy_icon_image(side), label)
+}
+
+// ── Reveal-in-file-manager glyph ────────────────────────────────────
+//
+// "Show in Explorer / Finder" affordance. Same Feather-stroke style as
+// `copy.svg` so the two read as part of the same icon family.
+
+fn folder_open_icon_image(side: f32) -> egui::Image<'static> {
+    egui::Image::new(egui::include_image!("../../assets/icons/folder-open.svg"))
+        .fit_to_exact_size(egui::vec2(side, side))
+        .tint(Color32::from_gray(210))
+}
+
+/// Sibling of `copy_labeled_button_widget` for the reveal affordance.
+pub fn reveal_in_explorer_button_widget(
+    ui: &Ui,
+    label: impl Into<egui::WidgetText>,
+) -> egui::Button<'static> {
+    let side = ui.text_style_height(&egui::TextStyle::Body);
+    egui::Button::image_and_text(folder_open_icon_image(side), label)
+}
+

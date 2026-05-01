@@ -235,15 +235,41 @@ fn detail_card_filled(
         .wrap(),
     );
     ui.add_space(SPACE_XS);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let btn = egui::Button::new(
-            RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
-        );
-        if ui.add_sized([ui.available_width(), 28.0], btn).clicked() {
-            reveal_in_file_manager(path);
+    ui.horizontal(|ui| {
+        let item_spacing = ui.spacing().item_spacing.x;
+        // Em wasm o botão de reveal não existe — `Copy path` ocupa a
+        // largura inteira nesse caso.
+        #[cfg(not(target_arch = "wasm32"))]
+        let half = ((ui.available_width() - item_spacing) / 2.0).max(0.0);
+        #[cfg(target_arch = "wasm32")]
+        let half = {
+            let _ = item_spacing;
+            ui.available_width()
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let reveal = crate::widgets::reveal_in_explorer_button_widget(
+                ui,
+                RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
+            );
+            if ui.add_sized([half, 28.0], reveal).clicked() {
+                reveal_in_file_manager(path);
+            }
         }
-    }
+
+        let copy = crate::widgets::copy_labeled_button_widget(
+            ui,
+            RichText::new(t("library.detail.copy_path", lang)).size(size_body(config)),
+        );
+        if ui
+            .add_sized([half, 28.0], copy)
+            .on_hover_text(t("library.detail.copy_path_tooltip", lang))
+            .clicked()
+        {
+            ui.ctx().copy_text(path.display().to_string());
+        }
+    });
 }
 
 /// Estado vazio — convida o usuário a clicar numa entry e explica o
