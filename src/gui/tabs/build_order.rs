@@ -12,9 +12,10 @@ use crate::locale::{self, t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::salt;
 use crate::tabs::timeline::unit_column::{structure_icon, unit_icon};
-use crate::tokens::SPACE_S;
+use crate::tokens::{CONTROL_HEIGHT_M, SPACE_S, SPACE_XS};
 use crate::widgets::{
-    copy_icon_button, copy_labeled_button, player_identity, toggle_chip_bool, NameDensity,
+    copy_icon_button, copy_labeled_button, icon_text, phosphor, player_identity, toggle_chip_bool,
+    NameDensity,
 };
 
 /// Todas as categorias, na ordem de exibição da legenda / filtros.
@@ -156,7 +157,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 
     // ── Campo de busca (lupa dentro do input) ────────────────────
     let resp = ui.add_sized(
-        [ui.available_width(), 28.0],
+        [ui.available_width(), CONTROL_HEIGHT_M],
         TextEdit::singleline(&mut search)
             .hint_text(t("build_order.search_placeholder", lang))
             .font(egui::TextStyle::Body),
@@ -171,14 +172,20 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
             egui::pos2(resp.rect.right() - 22.0, resp.rect.top() + 2.0),
             egui::vec2(20.0, resp.rect.height() - 4.0),
         );
-        if ui.put(clear_rect, egui::Button::new("×").small().frame(false)).clicked() {
+        if ui
+            .put(
+                clear_rect,
+                egui::Button::new(icon_text(phosphor::X)).small().frame(false),
+            )
+            .clicked()
+        {
             search.clear();
             ui.ctx()
                 .data_mut(|d| d.insert_temp(search_id, search.clone()));
         }
     }
 
-    ui.add_space(2.0);
+    ui.add_space(SPACE_XS);
 
     // ── Filtros de categoria ────────────────────────────────────
     let mut filter_changed = false;
@@ -331,19 +338,19 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
         ui.add_space(4.0);
         legend_icon(
             ui,
-            "⚡",
+            phosphor::LIGHTNING,
             Color32::from_rgb(180, 200, 255),
             t("build_order.legend.chrono", lang),
         );
         legend_icon(
             ui,
-            "⊘",
+            phosphor::PROHIBIT,
             Color32::from_rgb(220, 180, 80),
             t("build_order.legend.cancelled", lang),
         );
         legend_icon(
             ui,
-            "□",
+            phosphor::X,
             Color32::from_rgb(230, 90, 90),
             t("build_order.legend.destroyed", lang),
         );
@@ -379,7 +386,7 @@ fn legend_chip(ui: &mut Ui, kind: EntryKind, lang: locale::Language) {
 
 /// Ícone de status: símbolo colorido + label
 fn legend_icon(ui: &mut Ui, icon: &str, color: Color32, label: &str) {
-    ui.label(RichText::new(icon).strong().color(color).size(11.0));
+    ui.label(icon_text(icon).strong().color(color).size(11.0));
     ui.label(RichText::new(label).small().weak());
 }
 
@@ -517,12 +524,12 @@ fn player_column(
                             EntryOutcome::Completed => (None, None, None),
                             EntryOutcome::Cancelled => (
                                 Some(Color32::from_rgb(220, 180, 80)),
-                                Some("⊘"),
+                                Some(phosphor::PROHIBIT),
                                 Some(t("build_order.outcome.cancelled", lang)),
                             ),
                             EntryOutcome::DestroyedInProgress => (
                                 Some(Color32::from_rgb(230, 90, 90)),
-                                Some("✕"),
+                                Some(phosphor::X),
                                 Some(t("build_order.outcome.destroyed", lang)),
                             ),
                         };
@@ -572,10 +579,8 @@ fn player_column(
                                 }
                             }
                             if let (Some(icon), Some(tint)) = (outcome_icon, outcome_tint) {
-                                ui.label(
-                                    RichText::new(icon).monospace().strong().color(tint),
-                                )
-                                .on_hover_text(outcome_tooltip.unwrap_or(""));
+                                ui.label(icon_text(icon).strong().color(tint))
+                                    .on_hover_text(outcome_tooltip.unwrap_or(""));
                             }
                             let mut rt = RichText::new(action_text);
                             if strike {

@@ -19,10 +19,30 @@ use crate::colors::{
 use crate::config::AppConfig;
 use crate::locale::{t, Language};
 use crate::tokens::{
-    size_body, size_caption, size_subtitle, size_title, CARD_INNER_MX, CARD_INNER_MY,
-    CHIP_MIN_HEIGHT, RADIUS_CARD, RADIUS_CHIP, SHADOW_CARD, SPACE_L, SPACE_M, SPACE_S, SPACE_XL,
-    SPACE_XS, STROKE_HAIRLINE,
+    icon_size_caption, size_body, size_caption, size_subtitle, size_title, CARD_INNER_MX,
+    CARD_INNER_MY, CHIP_INNER_MX, CHIP_INNER_MY, CHIP_MIN_HEIGHT, RADIUS_CARD, RADIUS_CHIP,
+    SHADOW_CARD, SPACE_L, SPACE_M, SPACE_S, SPACE_XL, SPACE_XS, STROKE_HAIRLINE,
 };
+
+/// Re-export the regular phosphor variant so call sites import icons via
+/// `crate::widgets::phosphor::X` instead of pulling in the upstream crate.
+/// Keeps icon usage discoverable from the same module that owns
+/// `icon_button`/`icon_text` and lets us swap variants in one place if we
+/// ever change weights.
+pub use egui_phosphor::regular as phosphor;
+
+/// Wrap a phosphor glyph in a `RichText` configured to use the custom
+/// `Icons` font family registered in `app::install_fonts`.
+///
+/// **Always go through this helper for icon rendering.** Passing a
+/// phosphor glyph as a plain `&str` to `ui.label` / `Button::new` /
+/// `ui.small_button` resolves through Inter (Proportional family),
+/// which claims the same Private Use Area codepoints as Phosphor and
+/// renders garbage. The `Icons` family contains *only* Phosphor, so
+/// every PUA codepoint resolves correctly.
+pub fn icon_text(glyph: &str) -> RichText {
+    RichText::new(glyph).family(egui::FontFamily::Name("Icons".into()))
+}
 
 // ── Chip ─────────────────────────────────────────────────────────────
 //
@@ -80,24 +100,35 @@ fn chip_fill(selected: bool, accent: Option<Color32>) -> Color32 {
 // ── Removable chip ───────────────────────────────────────────────────
 //
 // Pill com label + ícone × à direita. Clique em qualquer parte retorna
-// `clicked()`. O × é desenhado com `line_segment` (não depende da fonte
-// conter o glyph ✕/✖, que falha em algumas famílias). No hover, o fundo
-// ganha um tint de perigo e o × fica vermelho vivo para sinalizar que a
-// ação é destrutiva (remover o filtro).
+// `clicked()`. O × usa o glyph phosphor::X — vem da fonte de ícones
+// registrada no `install_fonts`, então renderiza consistentemente em
+// qualquer plataforma. No hover, o fundo ganha um tint de perigo e o ×
+// fica vermelho vivo para sinalizar que a ação é destrutiva (remover o
+// filtro).
 
 pub fn removable_chip(ui: &mut Ui, label: &str, cfg: &AppConfig) -> Response {
-    let font = FontId::proportional(size_caption(cfg));
+    let label_font = FontId::proportional(size_caption(cfg));
+    // Phosphor lives in the dedicated `Icons` family (see install_fonts).
+    let icon_font = FontId::new(
+        icon_size_caption(cfg),
+        egui::FontFamily::Name("Icons".into()),
+    );
     let text_color = Color32::WHITE;
 
-    let galley = ui
+    let label_galley = ui
         .painter()
-        .layout_no_wrap(label.to_string(), font.clone(), text_color);
+        .layout_no_wrap(label.to_string(), label_font, text_color);
+    let icon_galley = ui.painter().layout_no_wrap(
+        phosphor::X.to_string(),
+        icon_font.clone(),
+        Color32::WHITE,
+    );
 
-    let pad_x = 10.0;
-    let gap = 6.0;
-    let icon_size: f32 = 9.0;
-    let height = CHIP_MIN_HEIGHT.max(galley.size().y + 6.0);
-    let width = pad_x + galley.size().x + gap + icon_size + pad_x;
+    let pad_x = CHIP_INNER_MX as f32;
+    let gap = SPACE_S;
+    let height =
+        CHIP_MIN_HEIGHT.max(label_galley.size().y + 2.0 * CHIP_INNER_MY as f32);
+    let width = pad_x + label_galley.size().x + gap + icon_galley.size().x + pad_x;
 
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(width, height), Sense::click());
@@ -122,32 +153,24 @@ pub fn removable_chip(ui: &mut Ui, label: &str, cfg: &AppConfig) -> Response {
     );
 
     // Label
-    let label_y = rect.center().y - galley.size().y / 2.0;
-    let label_pos = egui::pos2(rect.left() + pad_x, label_y);
-    ui.painter().galley(label_pos, galley, text_color);
+    let label_y = rect.center().y - label_galley.size().y / 2.0;
+    ui.painter()
+        .galley(egui::pos2(rect.left() + pad_x, label_y), label_galley, text_color);
 
-    // × icon (desenhado com duas linhas cruzadas)
-    let icon_center = egui::pos2(rect.right() - pad_x - icon_size / 2.0, rect.center().y);
-    let arm = icon_size * 0.5;
+    // Icon — re-layout in the hover-aware colour.
     let icon_color = if hovered {
         ACCENT_DANGER
     } else {
         Color32::from_gray(170)
     };
-    let stroke = Stroke::new(1.6, icon_color);
-    ui.painter().line_segment(
-        [
-            icon_center + egui::vec2(-arm, -arm),
-            icon_center + egui::vec2(arm, arm),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [
-            icon_center + egui::vec2(-arm, arm),
-            icon_center + egui::vec2(arm, -arm),
-        ],
-        stroke,
+    let icon_galley_colored =
+        ui.painter()
+            .layout_no_wrap(phosphor::X.to_string(), icon_font, icon_color);
+    let icon_y = rect.center().y - icon_galley_colored.size().y / 2.0;
+    ui.painter().galley(
+        egui::pos2(rect.right() - pad_x - icon_galley_colored.size().x, icon_y),
+        icon_galley_colored,
+        icon_color,
     );
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -555,10 +578,14 @@ pub fn labeled_value(ui: &mut Ui, label: &str, value: &str) {
 // ── Icon button ──────────────────────────────────────────────────────
 //
 // Small chromeless button suited for header affordances (back, reload,
-// pick folder, rename…). `glyph` is typically a single emoji.
+// pick folder, rename…). Pass a phosphor glyph from `widgets::phosphor`
+// (e.g. `phosphor::ARROW_CLOCKWISE`); the helper wraps it via
+// `icon_text` so it renders through the dedicated `Icons` font family
+// registered in `app::install_fonts`.
 
 pub fn icon_button(ui: &mut Ui, glyph: &str, hover: &str) -> Response {
-    ui.small_button(glyph).on_hover_text(hover)
+    ui.add(egui::Button::new(icon_text(glyph)).small())
+        .on_hover_text(hover)
 }
 
 // ── Copy-to-clipboard glyph ─────────────────────────────────────────

@@ -99,10 +99,64 @@ pub const CARD_INNER_MY: i8 = 10;
 pub const CHIP_INNER_MX: i8 = 8;
 pub const CHIP_INNER_MY: i8 = 3;
 
-// ── Top / status bar heights ─────────────────────────────────────────
+/// Library list rows align horizontally with cards but use compressed
+/// vertical padding so a virtualized list of dozens of rows stays scannable.
+pub const ROW_INNER_MX: i8 = CARD_INNER_MX;
+pub const ROW_INNER_MY: i8 = CARD_INNER_MY / 2;
 
-pub const TOPBAR_HEIGHT: f32 = 54.0;
-pub const STATUSBAR_HEIGHT: f32 = 28.0;
+// ── Control sizing ────────────────────────────────────────────────────
+//
+// Three steps for buttons / inputs / transport controls. Keep these in
+// sync with `CHIP_MIN_HEIGHT` so a chip and a small button share a
+// baseline.
+pub const CONTROL_HEIGHT_S: f32 = CHIP_MIN_HEIGHT;  // 22
+pub const CONTROL_HEIGHT_M: f32 = 28.0;             // search inputs, toolbar buttons
+pub const CONTROL_HEIGHT_L: f32 = 36.0;             // transport / play-pause
+
+// ── Library entry row geometry ───────────────────────────────────────
+//
+// Frame chrome height around the row's body text. Add to a row's text
+// height to compute the total slot height.
+pub const FRAME_CHROME_V: f32 = 14.0;
+
+/// Width of the leading checkbox column in library entry rows. Sized
+/// for comfortable click target + visual margin.
+pub const CHECKBOX_COL_W: f32 = 22.0;
+
+/// Right-side metadata zone width (length, race chips, win/loss badge).
+/// Hardcoded so the zone aligns vertically across rows of varying middle
+/// content.
+pub const ROW_RIGHT_ZONE_W: f32 = 110.0;
+
+// ── Top / status bar heights ─────────────────────────────────────────
+//
+// Heights derive from typography so the chrome scales with the user's
+// `font_size` slider. Without this, tall fonts clip against fixed bars.
+
+/// Topbar fits a title-sized line plus generous breathing room.
+pub fn topbar_height(cfg: &AppConfig) -> f32 {
+    size_title(cfg) + 2.0 * SPACE_L
+}
+
+/// Statusbar fits a body-sized line with tight padding.
+pub fn statusbar_height(cfg: &AppConfig) -> f32 {
+    size_body(cfg) + 2.0 * SPACE_S
+}
+
+// ── Iconography — phosphor glyphs sized against the type scale ───────
+//
+// Phosphor renders inline as font glyphs. The 1.1× factor compensates
+// for the optical weight difference between glyphs and surrounding text.
+
+pub fn icon_size_caption(cfg: &AppConfig) -> f32 {
+    size_caption(cfg) * 1.1
+}
+pub fn icon_size_body(cfg: &AppConfig) -> f32 {
+    size_body(cfg) * 1.1
+}
+pub fn icon_size_title(cfg: &AppConfig) -> f32 {
+    size_title(cfg) * 1.1
+}
 
 // ── Insights tab — responsive masonry grid ───────────────────────────
 

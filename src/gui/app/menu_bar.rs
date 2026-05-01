@@ -6,6 +6,7 @@
 use egui::Ui;
 
 use crate::locale::t;
+use crate::widgets::{icon_text, phosphor};
 
 use super::state::{AppState, Screen};
 
@@ -14,7 +15,7 @@ impl AppState {
         let lang = self.config.language;
         let ctx = ui.ctx().clone();
         let resp = ui
-            .menu_button("\u{2630}", |ui| {
+            .menu_button(icon_text(phosphor::LIST), |ui| {
                 if ui.button(t("menu.file.open", lang)).clicked() {
                     ui.close();
                     #[cfg(not(target_arch = "wasm32"))]

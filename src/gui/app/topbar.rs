@@ -15,9 +15,9 @@ use crate::locale::{t, tf, Language};
 use crate::replay_state::{build_matchup, fmt_time, format_date_short, LoadedReplay};
 use crate::tabs::Tab;
 use crate::tokens::{
-    size_body, size_caption, size_subtitle, SPACE_M, SPACE_S, SPACE_XS, TOPBAR_HEIGHT,
+    size_body, size_caption, size_subtitle, topbar_height, SPACE_M, SPACE_S, SPACE_XS,
 };
-use crate::widgets::{icon_button, labeled_value, race_badge, you_chip_label, NameDensity};
+use crate::widgets::{icon_button, labeled_value, phosphor, race_badge, you_chip_label, NameDensity};
 
 use super::state::{AppState, Screen};
 
@@ -73,8 +73,12 @@ impl AppState {
                     ui.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
-                            if icon_button(ui, "↻", t("library.reload_tooltip", lang))
-                                .clicked()
+                            if icon_button(
+                                ui,
+                                phosphor::ARROW_CLOCKWISE,
+                                t("library.reload_tooltip", lang),
+                            )
+                            .clicked()
                             {
                                 reload_clicked = true;
                             }
@@ -103,7 +107,7 @@ impl AppState {
                 )
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.set_min_height(TOPBAR_HEIGHT - (SPACE_S as f32) * 2.0);
+                        ui.set_min_height(topbar_height(&self.config) - (SPACE_S as f32) * 2.0);
 
                         // ☰ first — global app menu.
                         self.show_menu_button(ui);
@@ -167,10 +171,11 @@ fn analysis_topbar_row(
 
     {
         // ── Back + map summary (whole secondary line is the popover trigger) ──
-        // `📚` is the same glyph the menu uses for "view library", so the
-        // affordance reads consistently. A bare `←` glyph is missing from
-        // egui's default fallback fonts and renders as ☐ on Windows.
-        if icon_button(ui, "📚", t("topbar.back_tooltip", lang)).clicked() {
+        // Phosphor `ARROW_LEFT` resolves through the icon font registered
+        // in `install_fonts`, so the back affordance renders consistently
+        // across Windows/Linux/wasm without depending on egui's default
+        // fallback chain (which ships ☐ for `←` on Windows).
+        if icon_button(ui, phosphor::ARROW_LEFT, t("topbar.back_tooltip", lang)).clicked() {
             *back_clicked = true;
         }
         ui.add_space(SPACE_S);
