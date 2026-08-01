@@ -77,6 +77,13 @@ mod cache;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "gui/library/mod.rs"]
 mod library;
+// Servidor HTTP do overlay de transmissão. Nativo-only: wasm não tem
+// socket pra bindar nem config dir de onde ler os templates. Nada fora
+// deste gate nomeia um tipo daqui — os campos novos de `AppConfig` são
+// primitivos de propósito, para que nenhum stub wasm seja necessário.
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "gui/overlay/mod.rs"]
+mod overlay;
 // Wasm stub: only `DateRange` is referenced in non-cfg-gated code
 // (config.rs's `AppConfig::library_date_range`). Other library types
 // stay native-only — call sites that touch them are cfg-gated.

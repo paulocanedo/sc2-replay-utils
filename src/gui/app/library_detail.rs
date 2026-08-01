@@ -255,7 +255,7 @@ fn detail_card_filled(
                 RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
             );
             if ui.add_sized([half, 28.0], reveal).clicked() {
-                reveal_in_file_manager(path);
+                crate::utils::reveal_in_file_manager(path);
             }
         }
 
@@ -580,31 +580,4 @@ fn relative_path_display(path: &std::path::Path, base: Option<&std::path::Path>)
         }
     }
     path.display().to_string()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn reveal_in_file_manager(path: &std::path::Path) {
-    use std::process::Command;
-    #[cfg(target_os = "windows")]
-    {
-        // `explorer.exe /select,<path>` exige que `<path>` esteja entre aspas
-        // para nomes com espaços, mas o auto-quoting do `Command::arg` envolveria
-        // a string inteira (`"/select,..."`) — formato que o explorer não
-        // interpreta. Usamos `raw_arg` para montar a linha de comando manualmente.
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", path.display()))
-            .spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = Command::new("open").arg("-R").arg(path).spawn();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // xdg-open não tem "selecionar"; abrir o diretório-pai.
-        if let Some(parent) = path.parent() {
-            let _ = Command::new("xdg-open").arg(parent).spawn();
-        }
-    }
 }

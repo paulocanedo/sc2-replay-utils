@@ -31,6 +31,40 @@ pub fn today_str() -> String {
     }
 }
 
+/// Timestamp local completo `YYYY-MM-DDTHH:MM:SS`, no mesmo formato dos
+/// `datetime` dos replays. Mesma estratégia de `today_str`: `GetLocalTime`
+/// no Windows, UTC derivado do epoch nas outras plataformas.
+pub fn now_local_str() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use std::mem::MaybeUninit;
+        unsafe {
+            let mut st = MaybeUninit::<winapi_local::SYSTEMTIME>::uninit();
+            winapi_local::GetLocalTime(st.as_mut_ptr());
+            let st = st.assume_init();
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+                st.w_year, st.w_month, st.w_day, st.w_hour, st.w_minute, st.w_second
+            )
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let (y, m, d) = civil_from_days((now / 86400) as i64);
+        let rem = now % 86400;
+        format!(
+            "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}",
+            rem / 3600,
+            (rem % 3600) / 60,
+            rem % 60
+        )
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod winapi_local {
     #[repr(C)]

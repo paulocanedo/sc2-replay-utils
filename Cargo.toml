@@ -72,6 +72,28 @@ dunce  = "1"
 # mimalloc neutraliza essa diferença e ainda é cross-platform.
 mimalloc = { version = "0.1", default-features = false }
 
+# ── OBS stream overlay ──
+#
+# Todas nativas-only: wasm não tem socket pra bindar nem config dir de
+# onde ler os templates.
+#
+#   - `tiny_http` é um servidor HTTP/1.1 bloqueante sobre std threads.
+#     Casa com o modelo do app (não há runtime async em lugar nenhum do
+#     crate); axum/hyper trariam o tokio inteiro pra servir 5 rotas
+#     locais. Nenhuma feature de TLS é default e não queremos nenhuma —
+#     o servidor só escuta em 127.0.0.1.
+#   - `minijinja` renderiza o template Jinja2 editável pelo usuário.
+#     Mantemos as features default (`builtins`, `debug`, `macros`,
+#     `multi_template`) — `multi_template` é o que habilita
+#     `{% extends %}`/`{% include %}` nos templates do usuário e `debug`
+#     é o que faz o erro carregar linha + trecho da fonte pra página de
+#     erro. `loader` NÃO é default e é obrigatório pro `path_loader`.
+#   - `serde_json` já era build-dependency (o build.rs lê as BalanceData
+#     do s2protocol); promover a runtime não adiciona nada ao lockfile.
+tiny_http  = "0.12"
+minijinja  = { version = "2", features = ["loader"] }
+serde_json = "1"
+
 # Linux native uses Wayland/X11 backends. Cargo merges feature lists from
 # both this section and `[dependencies]` for the same crate, so the Linux
 # build ends up with `default_fonts + glow + persistence + wayland + x11`.

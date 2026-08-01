@@ -9,7 +9,9 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use egui::Context;
@@ -176,6 +178,29 @@ pub struct AppState {
     /// órfão quando `load_in_flight` é substituído (drop do Receiver).
     #[cfg(not(target_arch = "wasm32"))]
     pub load_generation: u64,
+    /// Ponte UI ↔ servidor do overlay. Vive no `AppState` e **sobrevive
+    /// aos handles**: trocar de porta derruba o servidor mas não perde o
+    /// snapshot já publicado.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay_state: Arc<crate::overlay::OverlayState>,
+    /// Servidor em execução. `None` quando a feature está desligada ou
+    /// quando o bind falhou (nesse caso `overlay_error` explica).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay: Option<crate::overlay::OverlayHandle>,
+    /// Última falha ao subir o servidor. Persiste além do TTL do toast
+    /// porque é o que a linha de status das configurações mostra.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay_error: Option<String>,
+    /// Há um snapshot de overlay a republicar. Mesma idiom do
+    /// `stats_dirty` da biblioteca — a projeção é O(entries) e só roda
+    /// em evento, nunca por frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay_dirty: bool,
+    /// `library.scanning` do frame anterior. Durante um scan grande o
+    /// `poll()` retorna `true` quase todo frame; publicamos na borda de
+    /// descida em vez de a cada resultado parcial.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay_scanning_prev: bool,
 }
 
 impl AppState {
@@ -242,11 +267,23 @@ impl AppState {
             load_in_flight: None,
             #[cfg(not(target_arch = "wasm32"))]
             load_generation: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay_state: crate::overlay::OverlayState::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay_error: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay_dirty: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay_scanning_prev: false,
         };
         #[cfg(not(target_arch = "wasm32"))]
         {
             me.restart_watcher();
             me.refresh_library();
+            // Sem toast de sucesso no boot — só erros interessam aqui.
+            me.apply_overlay_config(/* announce */ false);
             if me.config.auto_load_latest {
                 me.pending_load_latest = true;
             }
@@ -456,6 +493,15 @@ impl AppState {
     /// Shared "I have a `LoadedReplay`, plug it into the UI" path. Used
     /// by both `load_path` (native) and the wasm upload flow.
     fn adopt_loaded(&mut self, r: LoadedReplay) {
+        // Hoje isto é efetivamente um no-op: `ReplayLibrary::ingest_parsed`
+        // não tem call site, então carregar um replay pelo diálogo não toca
+        // a biblioteca — quem alimenta o overlay é o parse de header que o
+        // watcher dispara em paralelo (hook em `app/mod.rs`). A linha existe
+        // para o overlay acompanhar de graça caso aquele caminho seja ligado.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.overlay_dirty = true;
+        }
         self.loaded = Some(r);
         self.load_error = None;
         self.timeline_tab_loop = 0;
