@@ -156,6 +156,7 @@ impl eframe::App for AppState {
             let outcome = ui_settings::show(
                 &ctx,
                 &mut dummy_open,
+                &mut self.settings_tab,
                 &mut self.config,
                 &mut self.nickname_input,
                 self.library.nickname_frequencies().unwrap_or(&[]),
@@ -290,6 +291,7 @@ impl eframe::App for AppState {
             let outcome = ui_settings::show(
                 &ctx,
                 &mut self.show_settings,
+                &mut self.settings_tab,
                 &mut self.config,
                 &mut self.nickname_input,
                 self.library.nickname_frequencies().unwrap_or(&[]),
