@@ -20,6 +20,7 @@ use crate::replay_state::format_date_short;
 use crate::tokens::{
     size_body, size_caption, RADIUS_BUTTON, SPACE_M, SPACE_S, SPACE_XS,
 };
+use crate::widgets::{icon_text, phosphor};
 
 use super::state::AppState;
 
@@ -235,15 +236,41 @@ fn detail_card_filled(
         .wrap(),
     );
     ui.add_space(SPACE_XS);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let btn = egui::Button::new(
-            RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
-        );
-        if ui.add_sized([ui.available_width(), 28.0], btn).clicked() {
-            reveal_in_file_manager(path);
+    ui.horizontal(|ui| {
+        let item_spacing = ui.spacing().item_spacing.x;
+        // Em wasm o botão de reveal não existe — `Copy path` ocupa a
+        // largura inteira nesse caso.
+        #[cfg(not(target_arch = "wasm32"))]
+        let half = ((ui.available_width() - item_spacing) / 2.0).max(0.0);
+        #[cfg(target_arch = "wasm32")]
+        let half = {
+            let _ = item_spacing;
+            ui.available_width()
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let reveal = crate::widgets::reveal_in_explorer_button_widget(
+                ui,
+                RichText::new(t("library.detail.show_in_explorer", lang)).size(size_body(config)),
+            );
+            if ui.add_sized([half, 28.0], reveal).clicked() {
+                crate::utils::reveal_in_file_manager(path);
+            }
         }
-    }
+
+        let copy = crate::widgets::copy_labeled_button_widget(
+            ui,
+            RichText::new(t("library.detail.copy_path", lang)).size(size_body(config)),
+        );
+        if ui
+            .add_sized([half, 28.0], copy)
+            .on_hover_text(t("library.detail.copy_path_tooltip", lang))
+            .clicked()
+        {
+            ui.ctx().copy_text(path.display().to_string());
+        }
+    });
 }
 
 /// Estado vazio — convida o usuário a clicar numa entry e explica o
@@ -256,7 +283,7 @@ fn detail_card_empty(ui: &mut egui::Ui, lang: Language, config: &crate::config::
         egui::Layout::top_down(egui::Align::Center),
         |ui| {
             ui.add_space(avail_h * 0.25);
-            ui.label(RichText::new("📋").size(40.0));
+            ui.label(icon_text(phosphor::CLIPBOARD).size(40.0));
             ui.add_space(SPACE_M);
             ui.label(
                 RichText::new(t("library.detail.empty.title", lang))
@@ -553,31 +580,4 @@ fn relative_path_display(path: &std::path::Path, base: Option<&std::path::Path>)
         }
     }
     path.display().to_string()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn reveal_in_file_manager(path: &std::path::Path) {
-    use std::process::Command;
-    #[cfg(target_os = "windows")]
-    {
-        // `explorer.exe /select,<path>` exige que `<path>` esteja entre aspas
-        // para nomes com espaços, mas o auto-quoting do `Command::arg` envolveria
-        // a string inteira (`"/select,..."`) — formato que o explorer não
-        // interpreta. Usamos `raw_arg` para montar a linha de comando manualmente.
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", path.display()))
-            .spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = Command::new("open").arg("-R").arg(path).spawn();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // xdg-open não tem "selecionar"; abrir o diretório-pai.
-        if let Some(parent) = path.parent() {
-            let _ = Command::new("xdg-open").arg(parent).spawn();
-        }
-    }
 }

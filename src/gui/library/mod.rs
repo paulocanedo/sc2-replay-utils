@@ -10,6 +10,7 @@
 //   - `date`      — utilitários de data usados pelo filtro `DateRange`.
 //   - `entry_row` — render de uma entrada (três zonas) + helpers de metadados.
 //   - `stats`     — agregados derivados (winrate, MMR trend, matchups).
+//   - `overlay_snapshot` — projeção para o overlay de transmissão (OBS).
 //   - `hero`      — KPI strip clicável no topo do painel central.
 //   - `sidebar`   — painel lateral de filtros + seção de insights.
 //   - `ui`        — compositor do painel central (hero + lista virtualizada).
@@ -18,6 +19,7 @@ pub mod date;
 mod entry_row;
 pub mod filter;
 mod hero;
+pub mod overlay_snapshot;
 pub mod save_template;
 pub mod scanner;
 mod sidebar;

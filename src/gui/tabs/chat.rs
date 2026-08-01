@@ -14,7 +14,7 @@ use crate::config::AppConfig;
 use crate::locale::{t, tf};
 use crate::replay_state::{fmt_time, LoadedReplay};
 use crate::tokens::{SPACE_M, SPACE_XXL};
-use crate::widgets::you_chip_label;
+use crate::widgets::{icon_text, phosphor, you_chip_label};
 
 pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
     let lang = config.language;
@@ -92,7 +92,7 @@ pub fn show(ui: &mut Ui, loaded: &LoadedReplay, config: &AppConfig) {
 fn placeholder(ui: &mut Ui, msg: &str) {
     ui.add_space(SPACE_XXL);
     ui.vertical_centered(|ui| {
-        ui.label(RichText::new("📜").size(48.0));
+        ui.label(icon_text(phosphor::CHAT_CIRCLE).size(48.0));
         ui.add_space(SPACE_M);
         ui.label(RichText::new(msg).italics());
     });

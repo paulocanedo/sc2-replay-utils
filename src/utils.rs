@@ -85,6 +85,59 @@ pub fn list_replays_recursive(base: &Path) -> Vec<PathBuf> {
     out
 }
 
+// ── Integração com o gerenciador de arquivos do SO ───────────────────────────
+
+/// Abre o gerenciador de arquivos do SO com `path` selecionado.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn reveal_in_file_manager(path: &Path) {
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    {
+        // `explorer.exe /select,<path>` exige que `<path>` esteja entre aspas
+        // para nomes com espaços, mas o auto-quoting do `Command::arg` envolveria
+        // a string inteira (`"/select,..."`) — formato que o explorer não
+        // interpreta. Usamos `raw_arg` para montar a linha de comando manualmente.
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // xdg-open não tem "selecionar"; abrir o diretório-pai.
+        if let Some(parent) = path.parent() {
+            let _ = Command::new("xdg-open").arg(parent).spawn();
+        }
+    }
+}
+
+/// Abre `dir` no gerenciador de arquivos do SO.
+///
+/// Diferente de [`reveal_in_file_manager`], aqui não há `/select,` — então
+/// o auto-quoting normal do `Command::arg` está correto e o truque do
+/// `raw_arg` não é necessário. O `explorer.exe` sai com código 1 mesmo em
+/// sucesso; nunca cheque o status dele.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn open_directory(dir: &Path) {
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("explorer").arg(dir).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg(dir).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(dir).spawn();
+    }
+}
+
 // ── Descoberta de replay mais recente ────────────────────────────────────────
 
 /// Retorna o diretório padrão de replays do StarCraft II, se existir.

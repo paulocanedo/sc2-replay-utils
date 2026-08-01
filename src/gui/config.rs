@@ -80,6 +80,20 @@ pub struct AppConfig {
         default = "default_insight_worker_minutes"
     )]
     pub insight_worker_minutes: u32,
+    /// Liga o servidor HTTP do overlay de transmissão (fonte Navegador do
+    /// OBS). Escuta apenas em `127.0.0.1` — nunca alcançável pela rede.
+    /// Default desligado para que nenhuma instalação existente ganhe um
+    /// socket ouvindo só por atualizar o app.
+    pub overlay_enabled: bool,
+    /// Porta TCP do overlay. Mude apenas em caso de conflito: o OBS guarda
+    /// a URL completa na fonte, então trocar a porta exige atualizar a
+    /// fonte lá também (por isso o app nunca escolhe outra porta sozinho).
+    #[serde(default = "default_overlay_port")]
+    pub overlay_port: u16,
+}
+
+fn default_overlay_port() -> u16 {
+    8722
 }
 
 fn default_insight_worker_minutes() -> u32 {
@@ -104,6 +118,8 @@ impl Default for AppConfig {
             library_date_range: None,
             library_race: None,
             insight_worker_minutes: default_insight_worker_minutes(),
+            overlay_enabled: false,
+            overlay_port: default_overlay_port(),
         }
     }
 }

@@ -1,0 +1,108 @@
+<!doctype html>
+<!--
+  ────────────────────────────────────────────────────────────────────────
+  sc2-replay-utils — OBS stream overlay
+  ────────────────────────────────────────────────────────────────────────
+
+  This file is YOURS to edit. It is rendered by the app on every page load
+  using the Jinja2 syntax (https://docs.rsjinja.org / Jinja2 docs apply).
+  Save the file and reload the page — no need to restart the app.
+
+  To go back to this original version: Settings → Stream overlay →
+  "Restore default template". Your current files are kept as .bak.
+
+  Every variable available to you is listed at /_overlay/data.json —
+  open it in a browser to see the live values.
+
+    revision                  number, bumped on every data update
+    generated_at              "YYYY-MM-DDTHH:MM:SS"
+    nicknames_configured      false until you add your nickname in Settings
+    session.date              "YYYY-MM-DD"
+    session.games             decided games today
+    session.wins / .losses
+    session.winrate           0.0–1.0, or none
+    session.winrate_pct       0–100, or none
+    session.mmr_latest        MMR in today's most recent game, or none
+    session.mmr_delta         MMR gained/lost today, or none
+    session.by_race           always 4 entries (Zerg, Terran, Protoss,
+                              Random), each { race, race_letter, games,
+                              wins, losses, winrate_pct } — today's record
+                              by OPPONENT race
+    last_game                 the most recent parsed replay, or none
+    last_game.map / .matchup / .result / .duration_label
+    last_game.date / .time / .is_today
+    last_game.me / .opponent  { name, race, race_letter, mmr, result }
+    last_game.players         both players in replay order
+    recent_games              up to 10 games, newest first, same shape as
+                              last_game (last_game IS recent_games[0])
+
+  Note the scope split: `session` is today only, while `last_game` and
+  `recent_games` span the whole library — so the overlay still shows
+  something before your first game of the day.
+
+  Anything you drop in this folder is served over localhost: images,
+  fonts, extra .css, extra .html layouts (one per OBS source). This app
+  ships two layouts — this compact bar at / and a taller panel at
+  /stats-dashboard.html. The /_overlay/ URL prefix is reserved.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SC2 Overlay</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="overlay">
+      {% if not nicknames_configured %}
+      <div class="hint">Add your nickname in Settings to track wins and MMR.</div>
+      {% endif %}
+
+      <div class="session">
+        <span class="label">TODAY</span>
+        <span class="score">
+          <span class="wins">{{ session.wins }}</span
+          ><span class="dash">–</span
+          ><span class="losses">{{ session.losses }}</span>
+        </span>
+        {% if session.winrate_pct is not none %}
+        <span class="winrate">{{ session.winrate_pct }}%</span>
+        {% endif %} {% if session.mmr_latest is not none %}
+        <span class="mmr">{{ session.mmr_latest }}</span>
+        {% if session.mmr_delta %}
+        <span class="delta {{ 'up' if session.mmr_delta > 0 else 'down' }}">
+          {{ '+' if session.mmr_delta > 0 else '' }}{{ session.mmr_delta }}
+        </span>
+        {% endif %} {% endif %}
+      </div>
+
+      {% if last_game %}
+      <div class="last-game {{ last_game.result | lower }}">
+        <span class="label">{{ 'LAST' if last_game.is_today else 'PREVIOUS' }}</span>
+        {% if last_game.matchup %}
+        <span class="matchup">{{ last_game.matchup }}</span>
+        {% endif %}
+        <span class="map">{{ last_game.map }}</span>
+        <span class="duration">{{ last_game.duration_label }}</span>
+        {% if last_game.result %}
+        <span class="result">{{ last_game.result | upper }}</span>
+        {% endif %} {% if last_game.opponent %}
+        <span class="opponent">
+          vs {{ last_game.opponent.name }}
+          <span class="race">{{ last_game.opponent.race_letter }}</span>
+        </span>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="idle">Waiting for your first game…</div>
+      {% endif %}
+    </div>
+
+    <!-- Live reload. Keep both lines: the first tells the script which
+         revision this page was rendered with, so an update landing while
+         the page loads is not missed. -->
+    <script>
+      window.__overlayRev = {{ revision }};
+    </script>
+    <script src="/_overlay/live.js"></script>
+  </body>
+</html>

@@ -70,7 +70,15 @@ src/
     │   ├── filter.rs       # OutcomeFilter, DateRange, SortOrder, LibraryFilter
     │   ├── scanner.rs      # ReplayLibrary + directory scanner + parser thread pool
     │   ├── date.rs         # Date utilities for DateRange filtering
+    │   ├── overlay_snapshot.rs # Projection of entries → OverlayData (OBS overlay)
     │   └── ui.rs           # show(), entry_row, chip, LibraryAction, keep_alive
+    ├── overlay/            # OBS stream overlay — embedded HTTP server (native-only)
+    │   ├── mod.rs          # Plumbing — OverlayHandle, start(), submodule decls
+    │   ├── data.rs         # OverlayData + Serialize mirror structs (template context)
+    │   ├── shared.rs       # OverlayState — Mutex<Arc>, revision, long-poll condvar
+    │   ├── server.rs       # tiny_http bind + worker pool + routes + live.js
+    │   ├── render.rs       # minijinja Environment per request + error page
+    │   └── assets.rs       # Template dir bootstrap, path-traversal guard, MIME map
     ├── config.rs           # YAML-based persistent config
     ├── cache.rs            # Metadata cache (bincode serialization)
     ├── replay_state.rs     # LoadedReplay state and UI formatting
@@ -87,7 +95,8 @@ src/
 - **Single-pass parser:** All events (tracker, game, message) are processed in one pass over the MPQ archive. This avoids multiple reads and keeps parsing fast.
 - **Semantic event vocabulary:** Raw s2protocol events (UnitInit/Born/Done/Died/TypeChange) are translated to `EntityEvent` enums (ProductionStarted, ProductionFinished, Died, etc.) in `tracker.rs`.
 - **`ReplayTimeline`** is the central data structure — all extractors (build order, army value, etc.) consume it.
-- **Module injection via `#[path]`:** `gui.rs` uses `#[path = "../module.rs"]` to declare domain modules from the binary entry point, since there's no `lib.rs`.
+- **Module injection via `#[path]`:** `src/lib.rs` declares the GUI-tree modules with `#[path = "gui/<name>.rs"]`, so they are addressed as `crate::<name>` (flat) rather than `crate::gui::<name>`. Native-only modules (`library`, `watcher`, `cache`, `overlay`) are gated with `#[cfg(not(target_arch = "wasm32"))]` there.
+- **OBS overlay is event-driven:** the snapshot is rebuilt and published only when something changes (library scan edge, new replay, nickname change) — never per frame and never on a timer. The HTTP threads read an `Arc` snapshot; the UI thread never blocks on them.
 
 ### Build Script (`build.rs`)
 
@@ -144,4 +153,6 @@ Common scopes: `build_order`, `timeline`, `charts`, `replay`, `gui`, `library`, 
 - **`.gitignore` blocks `*.yaml`** — use `.yml` for any committed YAML files (e.g., GitHub workflows).
 - **Edition 2024** — requires Rust 1.85+. CI uses `stable` toolchain.
 - **Linux builds need `libgtk-3-dev`** — required by the `rfd` crate for native file dialogs.
-- **No `lib.rs`** — all modules are declared in `src/bin/gui.rs` via `#[path]`. This is intentional to keep the project as a single binary.
+- **`src/main.rs` is a thin entry point** — it only builds `AppState` for native/wasm. All module declarations live in `src/lib.rs`.
+- **The extra bins don't build for wasm** — `src/bin/profile_replay.rs` uses `mimalloc` and `src/bin/debug_addons.rs` uses the native-only `profile` module, both ungated. Check the web build with `cargo check --lib --target wasm32-unknown-unknown`, not a bare `cargo check --target`.
+- **The overlay server binds `127.0.0.1` only** — never `0.0.0.0`. Loopback is what keeps the overlay off the LAN *and* keeps the Windows Firewall prompt from appearing.

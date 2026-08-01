@@ -1,0 +1,153 @@
+/*
+  sc2-replay-utils — default overlay stylesheet.
+
+  Edit freely; reload the page to see changes. Restore the original from
+  Settings → Stream overlay → "Restore default template".
+
+  The transparent body background is what makes the OBS Browser source
+  composite over your gameplay instead of painting a black rectangle.
+*/
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+  font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+  font-size: 20px;
+  color: #f2f4f7;
+  /* Overlays sit on top of a bright, busy game. A hard shadow keeps text
+     readable over both a white mineral patch and a dark map corner. */
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+  -webkit-font-smoothing: antialiased;
+}
+
+.overlay {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+}
+
+.session,
+.last-game,
+.idle,
+.hint {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(12, 14, 18, 0.72);
+  border-left: 3px solid #4c8dff;
+  white-space: nowrap;
+}
+
+.label {
+  font-size: 0.6em;
+  letter-spacing: 0.18em;
+  color: #8d97a8;
+  text-shadow: none;
+}
+
+.score {
+  font-size: 1.5em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.wins {
+  color: #8cc86e;
+}
+
+.losses {
+  color: #e0616b;
+}
+
+.dash {
+  color: #6b7482;
+  margin: 0 4px;
+}
+
+.winrate {
+  font-weight: 600;
+  color: #cdd4e0;
+}
+
+.mmr {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.delta {
+  font-size: 0.8em;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.delta.up {
+  color: #8cc86e;
+}
+
+.delta.down {
+  color: #e0616b;
+}
+
+.last-game {
+  font-size: 0.85em;
+  border-left-color: #6b7482;
+}
+
+.last-game.win {
+  border-left-color: #8cc86e;
+}
+
+.last-game.loss {
+  border-left-color: #e0616b;
+}
+
+.matchup {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.map {
+  color: #cdd4e0;
+}
+
+.duration,
+.opponent {
+  color: #8d97a8;
+}
+
+.race {
+  font-weight: 700;
+  color: #cdd4e0;
+}
+
+.result {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.last-game.win .result {
+  color: #8cc86e;
+}
+
+.last-game.loss .result {
+  color: #e0616b;
+}
+
+.idle,
+.hint {
+  font-size: 0.8em;
+  color: #8d97a8;
+  border-left-color: #6b7482;
+}
+
+.hint {
+  border-left-color: #e8b23a;
+  color: #e8b23a;
+}

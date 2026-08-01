@@ -36,12 +36,15 @@
 //   - `status_bar` — status bar inferior persistente.
 //   - `central`    — roteamento do painel central + `LibraryAction`.
 //   - `modals`     — janelas modais (language prompt, about).
+//   - `overlay`    — ponte com o servidor do overlay de transmissão (OBS).
 
 mod central;
 #[cfg(not(target_arch = "wasm32"))]
 mod library_detail;
 mod menu_bar;
 mod modals;
+#[cfg(not(target_arch = "wasm32"))]
+mod overlay;
 mod state;
 mod status_bar;
 mod topbar;
@@ -111,13 +114,29 @@ impl eframe::App for AppState {
             // Drena progresso da carga em andamento (replay em background).
             self.poll_load(&ctx);
             // Drena resultados do worker da biblioteca.
-            if self.library.poll(self.config.auto_classify_on_scan) {
+            let library_changed = self.library.poll(self.config.auto_classify_on_scan);
+            if library_changed {
                 ctx.request_repaint();
             }
             // Recompute derived library stats if entries, nicknames, or
             // the active filter changed.
             self.library
                 .ensure_stats(&self.config, &self.library_filter);
+
+            // Overlay: hook principal de atualização. Cobre resultados de
+            // scan, replays que o watcher ingeriu e terminaram o parse de
+            // header, e o pool de enriquecimento.
+            //
+            // Durante um scan grande o `poll()` retorna `true` quase todo
+            // frame e a projeção é O(entries) — por isso segurar até a borda
+            // de descida de `scanning` em vez de publicar cada parcial. Essa
+            // borda é também o que dispensa qualquer timer periódico.
+            let scanning = self.library.scanning;
+            if (library_changed && !scanning) || (self.overlay_scanning_prev && !scanning) {
+                self.overlay_dirty = true;
+            }
+            self.overlay_scanning_prev = scanning;
+            self.publish_overlay_if_dirty();
         }
         // Web: drain any replay bytes uploaded via the browser file picker.
         #[cfg(target_arch = "wasm32")]
@@ -141,9 +160,13 @@ impl eframe::App for AppState {
                 &mut self.nickname_input,
                 self.library.nickname_frequencies().unwrap_or(&[]),
                 /* force_initial */ true,
+                &Default::default(),
             );
             if outcome.saved {
                 self.config.settings_confirmed = true;
+                // Os nicknames podem ter mudado, e eles reescrevem
+                // `me`/`opponent`/matchup/winrate de toda entry.
+                self.overlay_dirty = true;
                 match self.config.save() {
                     Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
                     Err(e) => {
@@ -263,6 +286,7 @@ impl eframe::App for AppState {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let prev_effective_dir = self.config.effective_working_dir();
+            let overlay_status = self.overlay_ui_status();
             let outcome = ui_settings::show(
                 &ctx,
                 &mut self.show_settings,
@@ -270,6 +294,7 @@ impl eframe::App for AppState {
                 &mut self.nickname_input,
                 self.library.nickname_frequencies().unwrap_or(&[]),
                 /* force_initial */ false,
+                &overlay_status,
             );
             if outcome.saved {
                 match self.config.save() {
@@ -281,11 +306,43 @@ impl eframe::App for AppState {
                 if self.config.effective_working_dir() != prev_effective_dir {
                     self.refresh_library();
                 }
+                // Republica incondicionalmente. Comparar com um snapshot
+                // dos nicknames tirado neste frame não funciona: o usuário
+                // adiciona o nick num frame e aperta Salvar em outro, então
+                // "antes" e "depois" já chegam iguais aqui. Salvar é uma
+                // ação rara e a projeção é O(entries) — não há o que ganhar
+                // sendo esperto.
+                self.overlay_dirty = true;
+                // Comparado contra o servidor que está rodando, não contra
+                // um snapshot deste frame — ver `overlay_matches_config`.
+                if !self.overlay_matches_config() {
+                    self.apply_overlay_config(/* announce */ true);
+                }
+                self.publish_overlay_if_dirty();
             } else if outcome.reset_defaults {
                 apply_style(&ctx, &self.config);
                 if self.config.effective_working_dir() != prev_effective_dir {
                     self.refresh_library();
                 }
+                // O reset limpa os nicknames E desliga o overlay.
+                self.overlay_dirty = true;
+                if !self.overlay_matches_config() {
+                    self.apply_overlay_config(/* announce */ false);
+                }
+                self.publish_overlay_if_dirty();
+            }
+            if outcome.overlay_apply
+                || outcome.overlay_open_folder
+                || outcome.overlay_restore_defaults
+            {
+                self.handle_overlay_actions(
+                    outcome.overlay_apply,
+                    outcome.overlay_open_folder,
+                    outcome.overlay_restore_defaults,
+                );
+                // A linha de status foi montada antes do `show` deste
+                // frame; sem isto ela só atualizaria no próximo input.
+                ctx.request_repaint();
             }
             if outcome.classify_now {
                 self.library.start_classification();
@@ -343,6 +400,18 @@ impl eframe::App for AppState {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         self.library.save_cache();
         let _ = self.config.save();
+    }
+
+    /// Derruba o servidor do overlay no fechamento. O `Drop` do
+    /// `OverlayHandle` faz o mesmo trabalho — isto só garante que ele
+    /// aconteça enquanto o processo ainda está vivo, em vez de depender da
+    /// ordem de destruição no fim do `main`.
+    ///
+    /// Note que `save` acima **não** serve para isto: o eframe o chama
+    /// periodicamente (auto-save), não só na saída.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.overlay = None;
     }
 }
 
@@ -440,9 +509,27 @@ fn apply_dark_palette(v: &mut egui::Visuals) {
     v.slider_trailing_fill = true;
 }
 
-/// Registers Inter (UI) and JetBrains Mono (monospace) as the primary
-/// fonts, keeping egui's default fallbacks for glyphs Inter/JB Mono
-/// don't cover (CJK, emoji). Called once from `AppState::new`.
+/// Registers Inter (UI), JetBrains Mono (monospace) and Phosphor (icons).
+///
+/// **Phosphor lives in its own family**, not as a fallback for the text
+/// families. Two reasons forced this design:
+///
+/// 1. Inter and Phosphor both claim glyphs across the Private Use Area
+///    (Inter for stylistic alternates, Phosphor for icons). Whoever
+///    shows up first wins, so the other's PUA glyphs render as garbage.
+///
+/// 2. Phosphor's TTF cmap claims `space`, `hyphen` and **every lowercase
+///    a–z** (with empty/blank glyphs, presumably from the build pipeline
+///    used by the upstream font generator). If Phosphor sits in front of
+///    Inter, every lowercase letter renders blank — "Library" collapses
+///    to "L" because uppercase L falls through to Inter while the rest
+///    is silently consumed by Phosphor.
+///
+/// The fix is to expose Phosphor only through a custom
+/// `FontFamily::Name("Icons")` family. Call sites that want an icon
+/// resolve through `widgets::icon_text(glyph)` (a `RichText` helper that
+/// sets `.family(...)`), so Phosphor never participates in normal text
+/// shaping.
 pub fn install_fonts(ctx: &Context) {
     const INTER: &[u8] =
         include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
@@ -458,15 +545,24 @@ pub fn install_fonts(ctx: &Context) {
         "JetBrainsMono".to_owned(),
         Arc::new(FontData::from_static(JETBRAINS_MONO)),
     );
+    fonts.font_data.insert(
+        "phosphor".to_owned(),
+        Arc::new(egui_phosphor::Variant::Regular.font_data()),
+    );
 
-    // Prepend our fonts to each family so Inter/JB Mono render first,
-    // with egui's defaults (Ubuntu-Light, Hack, Noto Emoji) as fallback.
+    // Inter / JB Mono first, egui's defaults stay as fallback for CJK
+    // and emoji in user-supplied content (chat messages).
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
         prop.insert(0, "Inter".to_owned());
     }
     if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
         mono.insert(0, "JetBrainsMono".to_owned());
     }
+
+    // Custom family for Phosphor icons. Use via `widgets::icon_text`.
+    fonts
+        .families
+        .insert(FontFamily::Name("Icons".into()), vec!["phosphor".to_owned()]);
 
     ctx.set_fonts(fonts);
 }
