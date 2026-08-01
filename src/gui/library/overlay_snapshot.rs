@@ -34,25 +34,50 @@ const TRACKED_RACES: [&str; 4] = ["Zerg", "Terran", "Protoss", "Random"];
 ///
 /// Recebe slice (e não `&ReplayLibrary`) para ser testável do mesmo jeito
 /// que `compute_library_stats`.
+///
+/// **O recorte é sempre ladder 1v1, sem opção de configuração.** É a
+/// única leitura que faz sentido no ar: o placar do dia, o delta de MMR e
+/// o recorde por raça são grandezas de ladder — um custom com um amigo ou
+/// um treino contra IA os corromperia sem que o streamer percebesse. O
+/// filtro "somente ladder" da biblioteca é ortogonal a isto: mexer nele
+/// não muda uma linha do que o overlay publica.
+///
+/// O filtro acontece **uma vez**, aqui: os helpers recebem a fatia já
+/// restrita. Espalhá-lo pelos quatro pontos de consumo abaixo seria pedir
+/// que a próxima estatística nascesse esquecendo dele.
 pub fn build(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> OverlayData {
-    let recent_games = build_recent_games(entries, config, today);
+    let ladder: Vec<&LibraryEntry> = entries.iter().filter(|e| is_ladder_1v1(e)).collect();
+    let recent_games = build_recent_games(&ladder, config, today);
     OverlayData {
         // Preenchida por `OverlayState::publish` — aqui ainda não sabemos
         // qual será.
         revision: 0,
         generated_at: now_local_str(),
         nicknames_configured: !config.user_nicknames.is_empty(),
-        session: build_session(entries, config, today),
+        session: build_session(&ladder, config, today),
         last_game: recent_games.first().cloned(),
         recent_games,
     }
 }
 
-fn build_session(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> SessionStats {
+/// Partida de matchmaking com exatamente dois jogadores.
+///
+/// O check de 1v1 é redundante hoje — `MetaState::Parsed` já exige dois
+/// jogadores e qualquer outra contagem vira `Unsupported` no parse rápido
+/// — mas é ele que dá o nome à regra, e sai barato.
+fn is_ladder_1v1(entry: &LibraryEntry) -> bool {
+    match &entry.meta {
+        MetaState::Parsed(m) => m.is_ladder && m.players.len() == 2,
+        _ => false,
+    }
+}
+
+fn build_session(entries: &[&LibraryEntry], config: &AppConfig, today: &str) -> SessionStats {
     // Reusa a projeção existente sobre um iterador filtrado por hoje: a
     // assinatura de `compute_library_stats` já aceita `IntoIterator`, então
     // a classificação win/loss não é duplicada aqui.
-    let stats = compute_library_stats(entries.iter().filter(|e| is_today(e, today)), config);
+    let stats =
+        compute_library_stats(entries.iter().copied().filter(|e| is_today(e, today)), config);
 
     // `LibraryStats::mmr_trend_delta` NÃO serve aqui: é uma janela de 7
     // jogos, que aplicada só a hoje daria `None` em praticamente toda
@@ -61,6 +86,7 @@ fn build_session(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> S
     // `mmr_trend_delta`; há um teste de regressão logo abaixo.
     let mut mmr_points: Vec<(&str, i32)> = entries
         .iter()
+        .copied()
         .filter_map(|e| parsed_today(e, today))
         .filter_map(|m| Some((m.datetime.as_str(), find_user_player(m, config)?.mmr?)))
         .collect();
@@ -90,9 +116,9 @@ fn build_session(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> S
 /// Percorre as entries uma vez acumulando num array de tamanho fixo em vez
 /// de um `HashMap` — são quatro raças e a ordem de saída é fixa de qualquer
 /// jeito.
-fn build_by_race(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> Vec<RaceRecord> {
+fn build_by_race(entries: &[&LibraryEntry], config: &AppConfig, today: &str) -> Vec<RaceRecord> {
     let mut tally = [(0usize, 0usize); TRACKED_RACES.len()];
-    for meta in entries.iter().filter_map(|e| parsed_today(e, today)) {
+    for meta in entries.iter().copied().filter_map(|e| parsed_today(e, today)) {
         let Some(me) = find_user_player(meta, config) else {
             continue;
         };
@@ -139,9 +165,10 @@ fn build_by_race(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> V
 /// Ordena por `datetime` em vez de confiar na ordem do vec: `entries` só
 /// fica ordenado por mtime depois que o scan termina, e `ingest_pending`
 /// insere no índice 0 uma entry ainda sem metadata.
-fn build_recent_games(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> Vec<Game> {
+fn build_recent_games(entries: &[&LibraryEntry], config: &AppConfig, today: &str) -> Vec<Game> {
     let mut parsed: Vec<&ParsedMeta> = entries
         .iter()
+        .copied()
         .filter_map(|e| match &e.meta {
             MetaState::Parsed(m) => Some(m),
             _ => None,
@@ -254,6 +281,7 @@ mod tests {
                 game_loops: duration * 22,
                 version: None,
                 cache_handles: Vec::new(),
+                is_ladder: true,
                 players: vec![
                     PlayerMeta {
                         name: user_name.into(),
@@ -390,6 +418,57 @@ mod tests {
         // Sem usuário identificado, o matchup cai na ordem do replay.
         assert_eq!(g.matchup, "ZvT");
         assert_eq!(g.players.len(), 2);
+    }
+
+    /// `entry` devolve ladder; esta marca o replay como custom/vs-IA.
+    fn custom(e: LibraryEntry) -> LibraryEntry {
+        let mut e = e;
+        if let MetaState::Parsed(m) = &mut e.meta {
+            m.is_ladder = false;
+        }
+        e
+    }
+
+    #[test]
+    fn custom_games_never_reach_the_overlay() {
+        // REGRESSÃO: o recorte de ladder 1v1 é fixo. Um custom com um amigo
+        // ou um treino contra IA não pode entrar no placar do dia, nem no
+        // recorde por raça, nem na faixa de forma — e muito menos virar o
+        // `last_game` que ocupa o centro do overlay.
+        let mut entries = session_today();
+        entries.push(custom(entry(
+            "2026-07-31T23:00:00", "Custom", "Kerrigan", "Zerg", Some(4142), "Loss", "Protoss", 900,
+        )));
+        let data = build(&entries, &cfg("Kerrigan"), TODAY);
+        assert_eq!(data.session.games, 3, "continua 2W-1L de ladder");
+        assert_eq!(data.session.losses, 1);
+        assert_eq!(data.session.by_race[2].games, 1, "a derrota vs Protoss é a de ladder");
+        assert_eq!(data.recent_games.len(), 3);
+        assert_eq!(data.last_game.unwrap().map, "Gamma", "e não o custom das 23h");
+    }
+
+    #[test]
+    fn a_library_of_only_custom_games_yields_the_empty_state() {
+        let entries: Vec<LibraryEntry> = session_today().into_iter().map(custom).collect();
+        let data = build(&entries, &cfg("Kerrigan"), TODAY);
+        assert_eq!(data.session.games, 0);
+        assert!(data.last_game.is_none());
+        assert!(data.recent_games.is_empty());
+        // A grade de raças continua completa — o template não ramifica.
+        assert_eq!(data.session.by_race.len(), 4);
+    }
+
+    #[test]
+    fn custom_games_do_not_move_the_mmr_delta() {
+        // O custom tem MMR gravado no replay; se ele entrasse no cálculo, o
+        // saldo do dia sairia errado mesmo com o placar certo.
+        let mut entries = session_today();
+        entries.push(custom(entry(
+            "2026-07-31T23:00:00", "Custom", "Kerrigan", "Zerg", Some(9999), "Win", "Protoss", 900,
+        )));
+        let s = build(&entries, &cfg("Kerrigan"), TODAY).session;
+        assert_eq!(s.mmr_latest, Some(4142));
+        assert_eq!(s.mmr_delta, Some(42));
     }
 
     #[test]

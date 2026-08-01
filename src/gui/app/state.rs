@@ -26,6 +26,7 @@ use crate::map_image::MapImage;
 use crate::map_image;
 use crate::replay_state::LoadedReplay;
 use crate::tabs::{self, Tab};
+use crate::ui_settings::SettingsTab;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::watcher::ReplayWatcher;
 
@@ -63,6 +64,10 @@ pub struct AppState {
     pub active_tab: Tab,
     pub screen: Screen,
     pub show_settings: bool,
+    /// Aba ativa da janela de configurações. Vive aqui (e não em
+    /// `egui::Memory`) para que reabrir a janela volte para onde o
+    /// usuário estava na sessão.
+    pub settings_tab: SettingsTab,
     pub nickname_input: String,
     #[cfg(not(target_arch = "wasm32"))]
     pub watcher: Option<ReplayWatcher>,
@@ -225,6 +230,7 @@ impl AppState {
             #[cfg(target_arch = "wasm32")]
             screen: Screen::Analysis,
             show_settings: false,
+            settings_tab: SettingsTab::default(),
             nickname_input: String::new(),
             #[cfg(not(target_arch = "wasm32"))]
             watcher: None,

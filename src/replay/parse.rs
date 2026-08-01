@@ -177,6 +177,15 @@ pub fn parse_replay_from_bytes_with_progress(
         })
         .unwrap_or((0, 0));
 
+    // Ladder = matchmaking. `amm` é o bit que distingue; `competitive`
+    // (ranqueada) anda junto nas amostras, mas é mais estreito — usar só
+    // `amm` mantém unranked no mesmo balde, que é como o jogador fala de
+    // "ladder". Sem `init_data` não dá para saber: `false`.
+    let is_ladder = init_data
+        .as_ref()
+        .map(|id| id.sync_lobby_state.game_description.game_options.amm)
+        .unwrap_or(false);
+
     let mut timeline = ReplayTimeline {
         file,
         map,
@@ -187,6 +196,7 @@ pub fn parse_replay_from_bytes_with_progress(
         base_build,
         version,
         max_time_seconds,
+        is_ladder,
         players,
         chat: Vec::new(),
         cache_handles,

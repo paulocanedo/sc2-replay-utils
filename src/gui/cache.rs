@@ -45,7 +45,20 @@ use crate::library::{MetaState, OpeningLabel, ParsedMeta, PlayerMeta};
 // - 5→6: `opening` virou enum (`Pending`/`Classified`/`Unclassifiable`).
 // - 6→7: cache reorganizado em duas camadas (path fingerprint + content
 //   hash) para sobreviver a path/mtime drift.
-const CACHE_VERSION: u32 = 7;
+// - 7→8: adicionado `is_ladder` (filtro "somente ladder" + recorte do
+//   overlay). A biblioteca inteira é re-escaneada (parse de header,
+//   rápido) e os rótulos de abertura voltam a `Pending`.
+//
+// Atenção ao alcance real do gate de versão: `version` mora *dentro* do
+// `DiskCache`, e bitcode não é auto-descritivo, então um arquivo antigo
+// falha no `deserialize` do struct inteiro antes de qualquer comparação.
+// Ou seja, para mudanças de layout (campo novo, tipo trocado) quem
+// descarta o cache é o erro de decode, não o `if disk.version != …`; o
+// caminho abaixo só é exercitado por mudanças de *semântica* com layout
+// idêntico. O resultado é o mesmo — cache vazio, rescan — mas o stderr
+// diz "falha ao decodificar" em vez de "versão incompatível". Bump o
+// número mesmo assim: é o registro de que o formato mudou.
+const CACHE_VERSION: u32 = 8;
 const CACHE_FILE: &str = "library_meta.bin";
 
 /// 32 bytes do BLAKE3 do conteúdo do replay. Pequeno o suficiente para
@@ -107,6 +120,7 @@ struct CachedParsedMeta {
     game_loops: u32,
     version: Option<String>,
     cache_handles: Vec<String>,
+    is_ladder: bool,
     players: Vec<CachedPlayerMeta>,
 }
 
@@ -163,6 +177,7 @@ fn to_cached_meta(meta: &ParsedMeta) -> CachedParsedMeta {
         game_loops: meta.game_loops,
         version: meta.version.clone(),
         cache_handles: meta.cache_handles.clone(),
+        is_ladder: meta.is_ladder,
         players: meta
             .players
             .iter()
@@ -185,6 +200,7 @@ fn from_cached_meta(c: CachedParsedMeta) -> ParsedMeta {
         game_loops: c.game_loops,
         version: c.version,
         cache_handles: c.cache_handles,
+        is_ladder: c.is_ladder,
         players: c
             .players
             .into_iter()

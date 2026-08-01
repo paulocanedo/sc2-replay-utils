@@ -23,6 +23,7 @@ pub(super) fn mk_timeline(players: Vec<PlayerTimeline>, game_loops: u32) -> Repl
         base_build: 0,
         version: String::new(),
         max_time_seconds: 0,
+        is_ladder: true,
         players,
         chat: Vec::new(),
         cache_handles: Vec::new(),

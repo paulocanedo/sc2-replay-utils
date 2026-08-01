@@ -23,6 +23,38 @@ fn timeline_loads() {
 }
 
 #[test]
+fn is_ladder_separates_matchmaking_from_custom_games() {
+    // Os dois replays são `EMelee`, 2 jogadores, mapa da Blizzard,
+    // `battle_net = true` — indistinguíveis por qualquer outro campo.
+    // `game_options.amm` é o único bit que os separa, e é dele que sai o
+    // filtro "somente ladder" e o recorte do overlay de transmissão.
+    assert!(
+        parse_replay(&ladder_replay(), 0)
+            .expect("parse ladder")
+            .is_ladder,
+        "winter_madness_69 é uma partida de matchmaking",
+    );
+    assert!(
+        !load().is_ladder,
+        "replay1 é um custom — não pode contar como ladder",
+    );
+}
+
+#[test]
+fn is_ladder_survives_the_metadata_only_fast_path() {
+    // A biblioteca só chama `parse_replay(path, 1)`; se `is_ladder`
+    // dependesse de algo decodificado depois do early return, todo replay
+    // sumiria do overlay.
+    assert!(parse_replay(&ladder_replay(), 1).expect("fast path").is_ladder);
+}
+
+/// Partida de ladder 1v1 (`game_options.amm == true`), contraparte do
+/// `example_replay()` custom.
+fn ladder_replay() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/winter_madness_69.SC2Replay")
+}
+
+#[test]
 fn metadata_only_fast_path_skips_events() {
     let t = parse_replay(&example_replay(), 1).expect("parse_replay fast");
     assert_eq!(t.players.len(), 2);

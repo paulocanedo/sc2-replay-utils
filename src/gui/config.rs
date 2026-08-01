@@ -71,6 +71,11 @@ pub struct AppConfig {
     /// Filtro de raça do usuário na biblioteca (salvo entre sessões).
     /// `None` = todas as raças. Valores válidos: `'T'`, `'P'`, `'Z'`.
     pub library_race: Option<char>,
+    /// Filtro "somente ladder" da biblioteca (salvo entre sessões).
+    /// Default `false` — quem já usa o app continua vendo customs e
+    /// partidas contra IA até optar por escondê-las. Não afeta o
+    /// overlay, que é sempre restrito a ladder 1v1.
+    pub library_ladder_only: bool,
     /// Minuto do jogo usado pelo card de potencial de workers da aba
     /// Insights. Persistido pra permitir ajuste fino editando o YAML
     /// direto — não há UI intencionalmente, pra desencorajar mudanças
@@ -117,6 +122,7 @@ impl Default for AppConfig {
             settings_confirmed: false,
             library_date_range: None,
             library_race: None,
+            library_ladder_only: false,
             insight_worker_minutes: default_insight_worker_minutes(),
             overlay_enabled: false,
             overlay_port: default_overlay_port(),

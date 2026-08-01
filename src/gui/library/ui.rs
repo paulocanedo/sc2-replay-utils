@@ -27,12 +27,14 @@ pub enum LibraryAction {
     ClearSelection,
     Refresh,
     PickWorkingDir(PathBuf),
-    /// Persiste filtros que sobrevivem entre sessões (date range + race).
-    /// Sempre carrega o snapshot completo, pra não perder uma mudança quando
-    /// duas acontecem no mesmo frame (ex.: botão "limpar tudo").
+    /// Persiste filtros que sobrevivem entre sessões (date range, race e
+    /// somente-ladder). Sempre carrega o snapshot completo, pra não perder
+    /// uma mudança quando duas acontecem no mesmo frame (ex.: botão
+    /// "limpar tudo").
     SaveLibraryFilters {
         date_range: DateRange,
         race: Option<char>,
+        ladder_only: bool,
     },
     /// Alterna a marcação de uma entrada na seleção múltipla (checkbox
     /// na coluna de seleção).
@@ -81,10 +83,13 @@ pub fn show_hero(
                 filter.opening = None;
                 let prev_range = filter.date_range;
                 filter.date_range = DateRange::All;
-                if prev_range != DateRange::All || prev_race.is_some() {
+                let prev_ladder = filter.ladder_only;
+                filter.ladder_only = false;
+                if prev_range != DateRange::All || prev_race.is_some() || prev_ladder {
                     action = LibraryAction::SaveLibraryFilters {
                         date_range: DateRange::All,
                         race: None,
+                        ladder_only: false,
                     };
                 }
             }
@@ -218,6 +223,7 @@ pub fn show(
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
         || filter.date_range != DateRange::All
+        || filter.ladder_only
         || filter.opponent_name.is_some()
         || filter.matchup_code.is_some()
         || filter.map_name.is_some()

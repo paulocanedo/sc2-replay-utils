@@ -12,7 +12,7 @@ use crate::colors::{
 use crate::config::AppConfig;
 use crate::locale::t;
 use crate::tokens::{SPACE_M, SPACE_S, SPACE_XS, size_caption};
-use crate::widgets::chip;
+use crate::widgets::{chip, toggle_chip_bool};
 
 use super::filter::{DateRange, LibraryFilter, OutcomeFilter, SortOrder};
 use super::stats::LibraryStats;
@@ -58,11 +58,33 @@ pub fn show(
                 action = LibraryAction::SaveLibraryFilters {
                     date_range: filter.date_range,
                     race: filter.race,
+                    ladder_only: filter.ladder_only,
                 };
             }
             if !has_nicknames {
                 resp.on_hover_text(t("library.filter.nicknames_race_tooltip", lang));
             }
+        }
+    });
+
+    ui.add_space(SPACE_M);
+
+    section_header(ui, t("library.sidebar.game_type", lang), config);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_S;
+        let resp = toggle_chip_bool(
+            ui,
+            t("library.filter.ladder_only", lang),
+            &mut filter.ladder_only,
+            None,
+        )
+        .on_hover_text(t("library.filter.ladder_only.tooltip", lang));
+        if resp.clicked() {
+            action = LibraryAction::SaveLibraryFilters {
+                date_range: filter.date_range,
+                race: filter.race,
+                ladder_only: filter.ladder_only,
+            };
         }
     });
 
@@ -143,6 +165,7 @@ pub fn show(
         action = LibraryAction::SaveLibraryFilters {
             date_range: filter.date_range,
             race: filter.race,
+            ladder_only: filter.ladder_only,
         };
     }
 
@@ -195,6 +218,7 @@ pub fn show(
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
         || filter.date_range != DateRange::All
+        || filter.ladder_only
         || filter.opponent_name.is_some()
         || filter.matchup_code.is_some()
         || filter.map_name.is_some()
@@ -211,10 +235,13 @@ pub fn show(
             filter.opening = None;
             let prev_range = filter.date_range;
             filter.date_range = DateRange::All;
-            if prev_range != DateRange::All || prev_race.is_some() {
+            let prev_ladder = filter.ladder_only;
+            filter.ladder_only = false;
+            if prev_range != DateRange::All || prev_race.is_some() || prev_ladder {
                 action = LibraryAction::SaveLibraryFilters {
                     date_range: DateRange::All,
                     race: None,
+                    ladder_only: false,
                 };
             }
         }

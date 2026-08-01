@@ -86,7 +86,7 @@ src/
     ├── watcher.rs          # File watcher (notify crate) for auto-loading
     ├── locale.rs           # Localization system (en, pt-BR)
     ├── salt.rs             # Color generation for player identification
-    ├── ui_settings.rs      # Theme and UI preferences
+    ├── ui_settings.rs      # Settings window — tabs: General/Nicknames/Overlay/Interface
     └── colors.rs           # Color palette constants
 ```
 
