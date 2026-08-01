@@ -21,6 +21,11 @@ pub struct ParsedMeta {
     /// detalhes sem reparsear o replay inteiro. Vazio quando o cache
     /// veio de versões antigas do app.
     pub cache_handles: Vec<String>,
+    /// `true` quando a partida saiu do matchmaking (ladder). Espelha
+    /// `ReplayTimeline::is_ladder` — ver lá para o critério e para o que
+    /// `false` cobre. Alimenta o filtro "somente ladder" da biblioteca e
+    /// o recorte fixo do overlay de transmissão.
+    pub is_ladder: bool,
     pub players: Vec<PlayerMeta>,
 }
 
@@ -40,6 +45,7 @@ impl ParsedMeta {
             game_loops: timeline.game_loops,
             version: Some(timeline.version.clone()),
             cache_handles: timeline.cache_handles.clone(),
+            is_ladder: timeline.is_ladder,
             players: timeline
                 .players
                 .iter()

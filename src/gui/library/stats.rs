@@ -204,6 +204,7 @@ mod tests {
                 game_loops: 10000,
                 version: None,
                 cache_handles: Vec::new(),
+                is_ladder: true,
                 players: vec![
                     PlayerMeta {
                         name: user_name.into(),

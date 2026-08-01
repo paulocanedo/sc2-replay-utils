@@ -449,6 +449,16 @@ fn overlay_section(
     let lang = config.language;
     ui.small(t("settings.overlay.desc", lang));
     ui.add_space(SPACE_S);
+    // O recorte de ladder 1v1 é fixo (ver `library::overlay_snapshot::build`).
+    // Não há checkbox aqui de propósito — o texto existe justamente para que
+    // a ausência da opção seja uma decisão explicada, e não um bug aparente
+    // ("liguei 'somente ladder' na biblioteca e o overlay não mudou").
+    ui.small(
+        egui::RichText::new(t("settings.overlay.ladder_note", lang))
+            .italics()
+            .color(crate::colors::LABEL_SOFT),
+    );
+    ui.add_space(SPACE_S);
     ui.checkbox(&mut config.overlay_enabled, t("settings.overlay.enable", lang));
 
     ui.add_enabled_ui(config.overlay_enabled, |ui| {

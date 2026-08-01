@@ -40,6 +40,11 @@ pub struct LibraryFilter {
     pub race: Option<char>,
     pub outcome: OutcomeFilter,
     pub date_range: DateRange,
+    /// Quando `true`, só passam partidas de matchmaking
+    /// (`ParsedMeta::is_ladder`) — customs, arcade e vs-IA somem da
+    /// lista e das estatísticas do hero. Persistido em
+    /// `AppConfig::library_ladder_only`.
+    pub ladder_only: bool,
     pub sort: SortOrder,
     pub sort_ascending: bool,
     /// Filtros de "relacionados" acionados via menu de contexto em
@@ -59,6 +64,7 @@ impl Default for LibraryFilter {
             race: None,
             outcome: OutcomeFilter::All,
             date_range: DateRange::default(),
+            ladder_only: false,
             sort: SortOrder::Date,
             sort_ascending: false,
             opponent_name: None,
@@ -79,6 +85,7 @@ impl LibraryFilter {
         Self {
             date_range: config.library_date_range.unwrap_or_default(),
             race: config.library_race,
+            ladder_only: config.library_ladder_only,
             ..Self::default()
         }
     }
@@ -119,6 +126,7 @@ pub struct StatsFilterKey {
     pub race: Option<char>,
     pub outcome: OutcomeFilter,
     pub date_range: DateRange,
+    pub ladder_only: bool,
     pub opponent_name: Option<String>,
     pub matchup_code: Option<String>,
     pub map_name: Option<String>,
@@ -132,6 +140,7 @@ impl From<&LibraryFilter> for StatsFilterKey {
             race: f.race,
             outcome: f.outcome,
             date_range: f.date_range,
+            ladder_only: f.ladder_only,
             opponent_name: f.opponent_name.clone(),
             matchup_code: f.matchup_code.clone(),
             map_name: f.map_name.clone(),
@@ -158,6 +167,7 @@ pub fn matches_filter(
         || filter.race.is_some()
         || filter.outcome != OutcomeFilter::All
         || filter.date_range != DateRange::All
+        || filter.ladder_only
         || filter.opponent_name.is_some()
         || filter.matchup_code.is_some()
         || filter.map_name.is_some()
@@ -165,6 +175,9 @@ pub fn matches_filter(
 
     match &entry.meta {
         MetaState::Parsed(meta) => {
+            if filter.ladder_only && !meta.is_ladder {
+                return false;
+            }
             if search_active {
                 let name_match = meta
                     .players
@@ -276,6 +289,7 @@ mod tests {
                 game_loops: 10_000,
                 version: None,
                 cache_handles: Vec::new(),
+                is_ladder: true,
                 players: vec![
                     PlayerMeta {
                         name: user_name.into(),
@@ -347,6 +361,70 @@ mod tests {
         let loss = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Loss", "Zerg");
         assert!(matches_filter(&win, &f, &cfg, "2026-04-20"));
         assert!(!matches_filter(&loss, &f, &cfg, "2026-04-20"));
+    }
+
+    /// `make_parsed` devolve ladder; esta variante marca o replay como
+    /// custom/vs-IA (`amm == false` no lobby).
+    fn make_custom(datetime: &str, user_result: &str) -> LibraryEntry {
+        let mut e = make_parsed("M", datetime, "me", "Terran", user_result, "Zerg");
+        if let MetaState::Parsed(meta) = &mut e.meta {
+            meta.is_ladder = false;
+        }
+        e
+    }
+
+    #[test]
+    fn ladder_only_drops_custom_games() {
+        let cfg = cfg_with("me");
+        let f = LibraryFilter {
+            ladder_only: true,
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        let ladder = make_parsed("M", "2026-04-10T10:00:00", "me", "Terran", "Win", "Zerg");
+        assert!(matches_filter(&ladder, &f, &cfg, "2026-04-20"));
+        assert!(!matches_filter(
+            &make_custom("2026-04-10T10:00:00", "Win"),
+            &f,
+            &cfg,
+            "2026-04-20"
+        ));
+    }
+
+    #[test]
+    fn ladder_only_off_keeps_everything() {
+        let cfg = cfg_with("me");
+        let f = LibraryFilter {
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(matches_filter(
+            &make_custom("2026-04-10T10:00:00", "Win"),
+            &f,
+            &cfg,
+            "2026-04-20"
+        ));
+    }
+
+    #[test]
+    fn ladder_only_counts_as_an_active_filter() {
+        // Pending precisa sumir quando só o filtro de ladder está ligado —
+        // senão a lista mostraria entradas que ninguém sabe se são ladder.
+        let cfg = cfg_with("me");
+        let f = LibraryFilter {
+            ladder_only: true,
+            date_range: DateRange::All,
+            ..LibraryFilter::default()
+        };
+        assert!(!matches_filter(&make_pending(), &f, &cfg, "2026-04-20"));
+    }
+
+    #[test]
+    fn stats_filter_key_diverges_on_ladder_only() {
+        let base = LibraryFilter::default();
+        let mut ladder = base.clone();
+        ladder.ladder_only = true;
+        assert_ne!(StatsFilterKey::from(&base), StatsFilterKey::from(&ladder));
     }
 
     #[test]

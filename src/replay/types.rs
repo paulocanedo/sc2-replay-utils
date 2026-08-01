@@ -427,6 +427,17 @@ pub struct ReplayTimeline {
     pub version: String,
     /// Limite de coleta de eventos em segundos. 0 indica sem limite.
     pub max_time_seconds: u32,
+    /// `true` quando a partida veio do matchmaking do Battle.net —
+    /// ranqueada ou não. Deriva de `game_options.amm` ("Automated Match
+    /// Making") no `init_data`, que é o único bit que separa uma partida
+    /// de ladder de um custom/vs-IA: os dois casos aparecem como
+    /// `EMelee` com dois jogadores e mapa da Blizzard.
+    ///
+    /// `false` também cobre "não deu para saber" — replays sem
+    /// `init_data` (muito antigos ou corrompidos). Isso é deliberado:
+    /// um filtro "somente ladder" deve errar para o lado de esconder o
+    /// duvidoso, não de contaminar as estatísticas.
+    pub is_ladder: bool,
     pub players: Vec<PlayerTimeline>,
     pub chat: Vec<ChatEntry>,
     /// `m_cacheHandles` do replay — cada string é um handle de 80 chars

@@ -903,6 +903,7 @@ fn parse_meta(path: &Path) -> ParseOutcome {
         game_loops: data.game_loops,
         version: Some(data.version),
         cache_handles: data.cache_handles,
+        is_ladder: data.is_ladder,
         players: data
             .players
             .into_iter()
