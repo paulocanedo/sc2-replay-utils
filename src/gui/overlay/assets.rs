@@ -13,6 +13,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+pub const DEFAULT_README: &str = include_str!("../../../data/overlay/README.md");
 pub const DEFAULT_INDEX_HTML: &str = include_str!("../../../data/overlay/index.html");
 pub const DEFAULT_STYLE_CSS: &str = include_str!("../../../data/overlay/style.css");
 pub const DEFAULT_DASHBOARD_HTML: &str =
@@ -25,7 +26,15 @@ pub const DEFAULT_DASHBOARD_CSS: &str =
 /// Os nomes usam `/` como separador; `ensure_dir` cria os subdiretórios.
 /// Os SVGs de raça são os mesmos que a UI nativa usa (`assets/race/`), para
 /// o overlay e o app falarem a mesma língua visual.
+///
+/// O `README.md` vem primeiro de propósito: é a primeira coisa que o usuário
+/// vê ao abrir a pasta, e é ele que documenta o contrato de dados sem exigir
+/// que ninguém leia o Rust. Entra no `restore_defaults` como os demais —
+/// senão um README editado (ou de uma versão antiga) sobreviveria a um
+/// "restaurar padrões" e passaria a descrever um template que não existe
+/// mais.
 const DEFAULTS: &[(&str, &str)] = &[
+    ("README.md", DEFAULT_README),
     ("index.html", DEFAULT_INDEX_HTML),
     ("style.css", DEFAULT_STYLE_CSS),
     ("stats-dashboard.html", DEFAULT_DASHBOARD_HTML),
@@ -274,6 +283,10 @@ pub fn content_type(path: &Path) -> &'static str {
         "ogg" => "audio/ogg",
         "wav" => "audio/wav",
         "txt" => "text/plain; charset=utf-8",
+        // `text/markdown` seria mais correto, mas o browser baixa em vez de
+        // exibir. O único .md aqui é o README de customização, e o ponto dele
+        // é ser lido — inclusive em `http://127.0.0.1:<porta>/README.md`.
+        "md" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -417,6 +430,8 @@ mod tests {
         assert_eq!(content_type(Path::new("a.PNG")), "image/png");
         assert_eq!(content_type(Path::new("a.woff2")), "font/woff2");
         assert_eq!(content_type(Path::new("a.css")), "text/css; charset=utf-8");
+        // O README de customização precisa abrir no browser, não baixar.
+        assert_eq!(content_type(Path::new("README.md")), "text/plain; charset=utf-8");
         assert_eq!(content_type(Path::new("noext")), "application/octet-stream");
         assert_eq!(content_type(Path::new("a.zzz")), "application/octet-stream");
     }
