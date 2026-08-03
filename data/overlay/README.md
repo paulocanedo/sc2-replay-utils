@@ -19,6 +19,10 @@ these files with any text editor, save, refresh the page — done.
 
    Sizing generously is free: the empty area is transparent, while a source
    that is too small clips the layout.
+
+   Settings → Stream overlay lists every view it finds here — including the
+   ones you write — each with a button to copy its URL or open it in your
+   browser.
 3. Open this folder (Settings → **Open template folder**) and edit. Where to
    go depends on what you want to change:
    - **a colour** → `tokens.css`, and every overlay follows

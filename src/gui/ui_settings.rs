@@ -37,6 +37,10 @@ pub struct SettingsOutcome {
     /// Reescrever `index.html`/`style.css` com os originais embutidos
     /// (guardando `.bak`). Também age na hora.
     pub overlay_restore_defaults: bool,
+    /// Revarrer a pasta de templates atrás de views. Existe porque o
+    /// usuário pode criar um `.html` com a janela aberta, e varrer o disco
+    /// a cada frame para cobrir isso seria caro à toa.
+    pub overlay_refresh_views: bool,
 }
 
 /// Estado do servidor do overlay, na forma que esta janela consegue
@@ -51,6 +55,13 @@ pub struct OverlayUiStatus {
     pub bound_port: u16,
     pub url: String,
     pub error: Option<String>,
+    /// Rotas das views encontradas na pasta de templates (`/`,
+    /// `/stats-dashboard.html`, e o que o usuário tiver criado).
+    ///
+    /// Vem pronta do parent porque listar é I/O de disco: esta janela é
+    /// redesenhada a cada frame e não pode varrer a pasta em nenhum deles.
+    /// O parent atualiza em evento — ver `AppState::refresh_overlay_views`.
+    pub views: Vec<String>,
 }
 
 /// Abas da janela de configurações.
@@ -486,18 +497,9 @@ fn overlay_section(
             });
             ui.small(t("settings.overlay.port.desc", lang));
 
-            let url = format!("http://127.0.0.1:{}/", config.overlay_port);
-            ui.horizontal(|ui| {
-                ui.monospace(&url);
-                if crate::widgets::copy_icon_button(
-                    ui,
-                    t("settings.overlay.copy_url.tooltip", lang),
-                )
-                .clicked()
-                {
-                    ui.ctx().copy_text(url.clone());
-                }
-            });
+            ui.add_space(SPACE_M);
+            overlay_views(ui, config, status, outcome);
+            ui.add_space(SPACE_M);
 
             ui.horizontal(|ui| {
                 if ui
@@ -576,6 +578,76 @@ fn overlay_section(
             outcome.overlay_apply = true;
         }
     });
+}
+
+/// Listagem das views disponíveis, cada uma com copiar-URL e abrir-no-
+/// navegador.
+///
+/// A lista vem de `status.views`, que o parent varre do disco em evento —
+/// aqui não há I/O. Um `.html` novo aparece quando a janela reabre, quando
+/// se volta para esta aba, ou no botão de recarregar ao lado do título.
+///
+/// O botão de abrir usa `open_url`, que o eframe entrega ao navegador
+/// padrão do sistema (o mesmo caminho dos links da janela "Sobre"). Ele fica
+/// desabilitado com o servidor parado: abrir a URL nesse estado daria uma
+/// página de erro de conexão, e o usuário culparia o overlay. Copiar
+/// continua valendo — é para colar no OBS, que só vai buscar depois.
+#[cfg(not(target_arch = "wasm32"))]
+fn overlay_views(
+    ui: &mut egui::Ui,
+    config: &AppConfig,
+    status: &OverlayUiStatus,
+    outcome: &mut SettingsOutcome,
+) {
+    let lang = config.language;
+    ui.horizontal(|ui| {
+        ui.strong(t("settings.overlay.views", lang));
+        if ui
+            .small_button("⟲")
+            .on_hover_text(t("settings.overlay.views.refresh", lang))
+            .clicked()
+        {
+            outcome.overlay_refresh_views = true;
+        }
+    });
+    ui.small(t("settings.overlay.views.desc", lang));
+    ui.add_space(SPACE_XS);
+
+    if status.views.is_empty() {
+        ui.small(t("settings.overlay.views.empty", lang));
+        return;
+    }
+
+    // A porta do servidor **em execução** manda: com a porta trocada e o
+    // servidor ainda no ar, a URL do config apontaria para um socket que
+    // não existe.
+    let port = if status.running {
+        status.bound_port
+    } else {
+        config.overlay_port
+    };
+    for view in &status.views {
+        let url = format!("http://127.0.0.1:{port}{view}");
+        ui.horizontal(|ui| {
+            if crate::widgets::copy_icon_button(ui, t("settings.overlay.copy_url.tooltip", lang))
+                .clicked()
+            {
+                ui.ctx().copy_text(url.clone());
+            }
+            if ui
+                .add_enabled(
+                    status.running,
+                    egui::Button::new(t("settings.overlay.views.open", lang)),
+                )
+                .on_hover_text(t("settings.overlay.views.open.tooltip", lang))
+                .on_disabled_hover_text(t("settings.overlay.views.open.stopped", lang))
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+            ui.monospace(view);
+        });
+    }
 }
 
 /// Seletor de qual nickname o overlay trata como "eu".

@@ -180,6 +180,48 @@ pub fn restore_defaults() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Arquivos `.html` da raiz que **não** são views: o esqueleto renderiza
+/// uma página vazia e as macros renderizam nada. Listá-los como se fossem
+/// overlays só renderia fonte do OBS em branco.
+const NON_VIEW_TEMPLATES: &[&str] = &["base.html", "macros.html"];
+
+/// Rotas das views disponíveis, em ordem de exibição: `/` primeiro, o resto
+/// alfabético.
+///
+/// "View" aqui é o que faz sentido colar numa fonte Navegador do OBS: todo
+/// `.html` na **raiz** da pasta, incluindo os que o usuário criou. As peças
+/// em `partials/` ficam de fora de propósito — elas renderizam sozinhas
+/// (e o README explica como usá-las assim), mas oito linhas de blocos
+/// soltos enterrariam as três views de verdade.
+///
+/// Toca no disco: chame em evento (janela abrindo, aba trocando), nunca por
+/// frame.
+pub fn list_views(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut views: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| {
+            name.to_ascii_lowercase().ends_with(".html")
+                && !NON_VIEW_TEMPLATES.contains(&name.as_str())
+        })
+        .map(|name| {
+            if name == INDEX_TEMPLATE {
+                // A rota canônica do index é a raiz — é a URL que o botão
+                // "Copiar URL" sempre deu e que o usuário já tem no OBS.
+                "/".to_string()
+            } else {
+                format!("/{name}")
+            }
+        })
+        .collect();
+    views.sort();
+    views
+}
+
 /// `true` quando a rota deve ser renderizada como template em vez de
 /// servida como arquivo. Só `.html` — CSS/JS/imagens saem verbatim.
 pub fn is_template(url_path: &str) -> bool {
@@ -518,6 +560,43 @@ mod tests {
         assert_eq!(content_type(Path::new("README.md")), "text/plain; charset=utf-8");
         assert_eq!(content_type(Path::new("noext")), "application/octet-stream");
         assert_eq!(content_type(Path::new("a.zzz")), "application/octet-stream");
+    }
+
+    #[test]
+    fn lists_the_pages_and_not_the_plumbing() {
+        let dir = std::env::temp_dir().join("sc2ru-overlay-views");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("partials")).unwrap();
+        for name in [
+            "index.html",
+            "stats-dashboard.html",
+            "live-players.html",
+            "base.html",
+            "macros.html",
+            "style.css",
+            "README.md",
+        ] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        fs::write(dir.join("partials").join("form-strip.html"), "x").unwrap();
+        // Página que o usuário criou: precisa aparecer sem o app saber dela.
+        fs::write(dir.join("mine.html"), "x").unwrap();
+
+        assert_eq!(
+            list_views(&dir),
+            [
+                "/",
+                "/live-players.html",
+                "/mine.html",
+                "/stats-dashboard.html"
+            ]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn listing_a_folder_that_is_not_there_is_empty_and_not_a_panic() {
+        assert!(list_views(Path::new("no/such/dir")).is_empty());
     }
 
     #[test]

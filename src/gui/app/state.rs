@@ -206,6 +206,16 @@ pub struct AppState {
     /// descida em vez de a cada resultado parcial.
     #[cfg(not(target_arch = "wasm32"))]
     pub overlay_scanning_prev: bool,
+    /// Rotas das views da pasta de templates, para a listagem nas
+    /// configurações.
+    ///
+    /// Cache derivado do disco, atualizado em evento (janela de
+    /// configurações abrindo, aba de overlay sendo selecionada, servidor
+    /// subindo, botão de recarregar) — ver
+    /// [`AppState::refresh_overlay_views`]. A janela é redesenhada a cada
+    /// frame e não pode varrer a pasta em nenhum deles.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub overlay_views: Vec<String>,
 }
 
 impl AppState {
@@ -283,6 +293,11 @@ impl AppState {
             overlay_dirty: false,
             #[cfg(not(target_arch = "wasm32"))]
             overlay_scanning_prev: false,
+            // Fica vazia até a primeira varredura: no start a pasta pode
+            // nem existir (ela nasce com o servidor), e listar do disco no
+            // construtor atrasaria a abertura da janela por nada.
+            #[cfg(not(target_arch = "wasm32"))]
+            overlay_views: Vec::new(),
         };
         #[cfg(not(target_arch = "wasm32"))]
         {

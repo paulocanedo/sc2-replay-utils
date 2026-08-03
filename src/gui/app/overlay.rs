@@ -65,6 +65,9 @@ impl AppState {
                 self.overlay = Some(handle);
                 self.overlay_dirty = true;
                 self.publish_overlay_if_dirty();
+                // O `start` roda `ensure_dir`: é o primeiro momento em que a
+                // pasta certamente existe e tem as views padrão.
+                self.refresh_overlay_views();
             }
             Err(e) => {
                 self.set_toast(tf("toast.overlay_error", lang, &[("err", &e)]));
@@ -99,21 +102,46 @@ impl AppState {
 
     /// Estado do servidor no formato que `ui_settings` entende (um struct
     /// plano, sem tipos de `crate::overlay` — aquele módulo compila em wasm).
+    ///
+    /// Chamado a cada frame com a janela de configurações aberta, então só
+    /// clona o que já está em memória — a lista de views vem do cache, e
+    /// não do disco.
     pub(super) fn overlay_ui_status(&self) -> OverlayUiStatus {
+        let views = self.overlay_views.clone();
         match self.overlay.as_ref() {
             Some(h) => OverlayUiStatus {
                 running: true,
                 bound_port: h.bound_port,
                 url: h.url(),
                 error: None,
+                views,
             },
             None => OverlayUiStatus {
                 running: false,
                 bound_port: 0,
                 url: String::new(),
                 error: self.overlay_error.clone(),
+                views,
             },
         }
+    }
+
+    /// Revarre a pasta de templates atrás de views.
+    ///
+    /// Chamado em evento — nunca por frame. Os pontos são: a janela de
+    /// configurações abrindo, a aba de overlay sendo selecionada, o servidor
+    /// subindo (o `ensure_dir` acabou de criar a pasta) e o botão de
+    /// recarregar da própria listagem, que cobre o caso de criar um `.html`
+    /// com a janela aberta.
+    ///
+    /// Sem a pasta (feature nunca usada) a varredura devolve vazio, e a
+    /// listagem mostra a dica de restaurar os padrões. Não criamos o
+    /// diretório aqui de propósito: quem nunca liga o overlay não deve
+    /// ganhar uma pasta órfã só por abrir as configurações.
+    pub(super) fn refresh_overlay_views(&mut self) {
+        self.overlay_views = crate::overlay::assets::overlay_dir()
+            .map(|dir| crate::overlay::assets::list_views(&dir))
+            .unwrap_or_default();
     }
 
     /// Botões da seção de overlay que agem na hora, sem depender de Salvar.
@@ -126,8 +154,12 @@ impl AppState {
         apply: bool,
         open_folder: bool,
         restore_defaults: bool,
+        refresh_views: bool,
     ) {
         let lang = self.config.language;
+        if refresh_views {
+            self.refresh_overlay_views();
+        }
         if apply {
             self.apply_overlay_config(/* announce */ true);
             if let Err(e) = self.config.save() {
@@ -143,6 +175,9 @@ impl AppState {
         if restore_defaults {
             match crate::overlay::assets::restore_defaults() {
                 Ok(_) => {
+                    // Restaurar traz de volta views que o usuário tinha
+                    // apagado; a listagem precisa refletir isso na hora.
+                    self.refresh_overlay_views();
                     self.set_toast(t("toast.overlay_defaults_restored", lang).to_string())
                 }
                 Err(e) => self.set_toast(tf("toast.overlay_error", lang, &[("err", &e)])),
