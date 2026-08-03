@@ -169,6 +169,8 @@ mod tests {
             assets::DEFAULT_DASHBOARD_CSS,
         )
         .unwrap();
+        fs::write(dir.join("live-players.html"), assets::DEFAULT_LIVE_HTML).unwrap();
+        fs::write(dir.join("live-players.css"), assets::DEFAULT_LIVE_CSS).unwrap();
         dir
     }
 
@@ -286,6 +288,37 @@ mod tests {
         // Sem `by_race` no default, a grade some — mas a faixa continua
         // com os 10 slots, que é o que segura a largura do painel.
         assert_eq!(html.matches("result-block empty").count(), 10);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_template_renders_the_players_on_screen() {
+        let dir = default_dir("live-in-game");
+        let html = render(&dir, "live-players.html", &assets::fixture());
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("Kerrigan"));
+        assert!(html.contains("Raynor"));
+        assert!(html.contains("/race/zerg.svg"));
+        assert!(html.contains("/race/terran.svg"));
+        // Um "VS" só, entre os dois — `loop.last` segurando o separador.
+        assert_eq!(html.matches(r#"class="vs""#).count(), 1);
+        assert!(!html.contains("Not in a game"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_template_separates_out_of_game_from_sc2_closed() {
+        let dir = default_dir("live-idle");
+        // SC2 aberto, mas em menu.
+        let mut data = OverlayData::default();
+        data.live.connected = true;
+        let html = render(&dir, "live-players.html", &data);
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("Not in a game"), "{html}");
+
+        // SC2 fechado: o default, que é também o estado do primeiro frame.
+        let html = render(&dir, "live-players.html", &OverlayData::default());
+        assert!(html.contains("StarCraft II is not running"), "{html}");
         let _ = fs::remove_dir_all(&dir);
     }
 

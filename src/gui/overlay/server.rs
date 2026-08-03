@@ -22,6 +22,7 @@ use std::time::Duration;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
 use super::assets;
+use super::live::LivePoller;
 use super::render;
 use super::shared::OverlayState;
 
@@ -70,6 +71,10 @@ pub struct OverlayHandle {
     state: Arc<OverlayState>,
     workers: Vec<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
+    /// Poll do cliente do SC2. Amarrado ao servidor de propósito: ele existe
+    /// só para alimentar o overlay, e um poll de rede rodando com o overlay
+    /// desligado seria trabalho que ninguém lê. O `Drop` dele para a thread.
+    _live: LivePoller,
     pub bound_port: u16,
     pub dir: PathBuf,
 }
@@ -152,11 +157,14 @@ pub fn start(port: u16, state: Arc<OverlayState>) -> Result<OverlayHandle, Strin
         workers.push(handle);
     }
 
+    let _live = LivePoller::start(Arc::clone(&state));
+
     Ok(OverlayHandle {
         server,
         state,
         workers,
         shutdown,
+        _live,
         bound_port,
         dir,
     })

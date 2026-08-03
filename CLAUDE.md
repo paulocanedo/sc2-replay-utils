@@ -78,6 +78,7 @@ src/
     │   ├── shared.rs       # OverlayState — Mutex<Arc>, revision, long-poll condvar
     │   ├── server.rs       # tiny_http bind + worker pool + routes + live.js
     │   ├── render.rs       # minijinja Environment per request + error page
+    │   ├── live.rs         # Polls the SC2 client API (127.0.0.1:6119) for who is playing now
     │   └── assets.rs       # Template dir bootstrap, path-traversal guard, MIME map
     ├── config.rs           # YAML-based persistent config
     ├── cache.rs            # Metadata cache (bincode serialization)
@@ -97,6 +98,7 @@ src/
 - **`ReplayTimeline`** is the central data structure — all extractors (build order, army value, etc.) consume it.
 - **Module injection via `#[path]`:** `src/lib.rs` declares the GUI-tree modules with `#[path = "gui/<name>.rs"]`, so they are addressed as `crate::<name>` (flat) rather than `crate::gui::<name>`. Native-only modules (`library`, `watcher`, `cache`, `overlay`) are gated with `#[cfg(not(target_arch = "wasm32"))]` there.
 - **OBS overlay is event-driven:** the snapshot is rebuilt and published only when something changes (library scan edge, new replay, nickname change) — never per frame and never on a timer. The HTTP threads read an `Arc` snapshot; the UI thread never blocks on them.
+- **The overlay snapshot has two producers:** the UI thread owns everything derived from the library, and the `overlay-sc2-poll` thread owns `OverlayData::live` (who is playing right now, read from the SC2 client API). Both go through `OverlayState::store`, which preserves the half that isn't theirs. The poller does not go through the UI thread on purpose — egui does not repaint a minimized window, which is exactly how a streamer runs the app.
 
 ### Build Script (`build.rs`)
 

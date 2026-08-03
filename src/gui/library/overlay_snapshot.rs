@@ -74,6 +74,10 @@ pub fn build(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> Overl
         session: build_session(&ladder, config, today),
         last_game: recent_games.first().cloned(),
         recent_games,
+        // Não é nosso: quem preenche é a thread do poller, via
+        // `OverlayState::publish_live`. O `publish` preserva o valor que já
+        // estava publicado, então o que sai daqui é descartado.
+        live: Default::default(),
     }
 }
 

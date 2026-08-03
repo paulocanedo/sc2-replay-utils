@@ -15,6 +15,7 @@ these files with any text editor, save, refresh the page — done.
 2. In OBS: Sources → **+** → **Browser** → paste the URL.
    - Compact bar at `/` — suggested size **700 x 200**.
    - Stats panel at `/stats-dashboard.html` — suggested size **340 x 620**.
+   - Live players at `/live-players.html` — suggested size **760 x 150**.
 
    Sizing generously is free: the empty area is transparent, while a source
    that is too small clips the layout.
@@ -36,6 +37,8 @@ files back and keeps yours as `.bak`.
 | `style.css` | Styles for the compact bar. |
 | `stats-dashboard.html` | The taller panel, served at `/stats-dashboard.html`. |
 | `stats-dashboard.css` | Styles for the panel. |
+| `live-players.html` | Who is playing right now, served at `/live-players.html`. |
+| `live-players.css` | Styles for that bar. |
 | `race/*.svg` | Race icons (the same ones the app itself uses). |
 | `README.md` | This file. |
 
@@ -113,6 +116,7 @@ to look for.
 - `last_game` — the most recent game, or `none`. Same shape as an item of
   `recent_games`; it *is* `recent_games[0]`.
 - `recent_games` — up to **10** games, newest first.
+- `live` — who is playing *right now*. See below.
 
 ### `session` — today only
 
@@ -146,6 +150,34 @@ to look for.
   when no nickname is configured.
 - `players` — both players in replay order, regardless of nicknames. Use this
   when you want the raw scoreboard.
+
+### `live` — the game on screen right now
+
+Everything else on this page comes from your replay folder, so it can only
+describe games that already **finished**. `live` is the exception: every
+couple of seconds the app asks the StarCraft II client itself who is on
+screen.
+
+- `live.connected` — `false` when StarCraft II is not running (or is still
+  starting up). Everything else in `live` is empty then.
+- `live.in_game` — `true` when a **1v1 between two humans** is on screen.
+- `live.players` — those two players, in the order the client reports them,
+  each with `name`, `race` and `race_letter`. Empty unless `live.in_game`.
+
+`live.in_game` is deliberately narrow, matching the cut the rest of the
+overlay uses: games against the AI, FFA, 2v2 and replay playback all read as
+*not in a game*. One difference you should know about: the client does not
+say whether a match is ladder, so a custom 1v1 against a friend does count
+here, while it would never reach `session` or `recent_games`.
+
+There is no result, no clock and no match state — those come from the replay
+once the game is over, which is the source that can be trusted. Note also
+that `live.players` are the names as the client reports them, unrelated to
+the **Nickname on stream** setting below; `me`/`opponent` exist only on
+finished games.
+
+The page updates by itself: a match starting bumps the revision, which is
+what the live-reload script watches.
 
 ### Two things worth knowing
 

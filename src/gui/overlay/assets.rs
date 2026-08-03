@@ -20,6 +20,8 @@ pub const DEFAULT_DASHBOARD_HTML: &str =
     include_str!("../../../data/overlay/stats-dashboard.html");
 pub const DEFAULT_DASHBOARD_CSS: &str =
     include_str!("../../../data/overlay/stats-dashboard.css");
+pub const DEFAULT_LIVE_HTML: &str = include_str!("../../../data/overlay/live-players.html");
+pub const DEFAULT_LIVE_CSS: &str = include_str!("../../../data/overlay/live-players.css");
 
 /// Arquivos escritos no bootstrap e reescritos pelo "restaurar padrões".
 ///
@@ -39,6 +41,8 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("style.css", DEFAULT_STYLE_CSS),
     ("stats-dashboard.html", DEFAULT_DASHBOARD_HTML),
     ("stats-dashboard.css", DEFAULT_DASHBOARD_CSS),
+    ("live-players.html", DEFAULT_LIVE_HTML),
+    ("live-players.css", DEFAULT_LIVE_CSS),
     ("race/terran.svg", include_str!("../../../assets/race/terran.svg")),
     ("race/protoss.svg", include_str!("../../../assets/race/protoss.svg")),
     ("race/zerg.svg", include_str!("../../../assets/race/zerg.svg")),
@@ -294,7 +298,17 @@ pub fn content_type(path: &Path) -> &'static str {
 /// Fixture usada nos testes de render do template padrão.
 #[cfg(test)]
 pub fn fixture() -> super::data::OverlayData {
-    use super::data::{Game, OverlayData, OverlayPlayer, RaceRecord, SessionStats};
+    use super::data::{
+        Game, LiveGame, LivePlayer, OverlayData, OverlayPlayer, RaceRecord, SessionStats,
+    };
+
+    fn live(name: &str, race: &str, letter: &str) -> LivePlayer {
+        LivePlayer {
+            name: name.into(),
+            race: race.into(),
+            race_letter: letter.into(),
+        }
+    }
 
     fn race(race: &str, letter: &str, wins: usize, losses: usize) -> RaceRecord {
         let games = wins + losses;
@@ -359,6 +373,16 @@ pub fn fixture() -> super::data::OverlayData {
         },
         last_game: Some(last.clone()),
         recent_games: vec![last],
+        // Partida em andamento, para os testes de render exercitarem o
+        // caminho "em jogo" do template ao vivo.
+        live: LiveGame {
+            connected: true,
+            in_game: true,
+            players: vec![
+                live("Kerrigan", "Zerg", "Z"),
+                live("Raynor", "Terran", "T"),
+            ],
+        },
     }
 }
 

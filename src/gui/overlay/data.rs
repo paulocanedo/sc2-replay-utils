@@ -49,6 +49,42 @@ pub struct OverlayData {
     /// e uma faixa de resultados vazia toda manhã seria inútil. Cada
     /// entrada carrega `is_today` para o template distinguir.
     pub recent_games: Vec<Game>,
+    /// Quem está jogando **agora**, lido do cliente do SC2 (ver
+    /// [`crate::overlay::live`]). É o único campo que não vem da biblioteca:
+    /// os outros descrevem partidas que já terminaram e viraram replay.
+    pub live: LiveGame,
+}
+
+/// Recorte do cliente do SC2 no instante do último poll.
+///
+/// Deliberadamente raso: nome e raça de quem está na tela, mais dois
+/// booleanos para o template escolher a mensagem. Sem placar, sem tempo de
+/// jogo, sem estado de partida — o que precisa disso vem do replay depois.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+pub struct LiveGame {
+    /// `true` quando o último poll falou com o cliente. `false` = SC2
+    /// fechado, ainda carregando, ou API indisponível.
+    pub connected: bool,
+    /// `true` quando há um **1v1 entre dois humanos** na tela de jogo.
+    ///
+    /// Vale para custom 1v1 também: a API do cliente não diz se a partida é
+    /// de ladder. Fora isso o recorte é o mesmo do resto do overlay — vs IA,
+    /// FFA, 2v2 e replay não contam, e o template mostra "fora de jogo".
+    pub in_game: bool,
+    /// Os dois jogadores, na ordem em que o cliente os devolve. Vazio quando
+    /// `in_game` é `false`.
+    pub players: Vec<LivePlayer>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct LivePlayer {
+    pub name: String,
+    /// Raça por extenso (`"Terran"`), normalizada a partir das abreviações
+    /// do cliente (`"Terr"`, `"Prot"`, `"Zerg"`, `"random"`) para casar com
+    /// `OverlayPlayer.race` e com os nomes dos SVGs em `race/`.
+    pub race: String,
+    /// Inicial da raça (`"T"`, `"P"`, `"Z"`, `"R"`).
+    pub race_letter: String,
 }
 
 /// Placar da sessão de hoje.
