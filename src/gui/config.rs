@@ -95,6 +95,19 @@ pub struct AppConfig {
     /// fonte lá também (por isso o app nunca escolhe outra porta sozinho).
     #[serde(default = "default_overlay_port")]
     pub overlay_port: u16,
+    /// Qual dos `user_nicknames` o overlay trata como "eu". `None` (default)
+    /// = todos, que é o comportamento de sempre.
+    ///
+    /// Existe para quem tem mais de uma conta e transmite em uma só: sem
+    /// isso, uma partida da outra conta entraria no placar do dia, no saldo
+    /// de MMR e no recorde por raça ao vivo. A UI só oferece nicks que já
+    /// estão em `user_nicknames`; um valor órfão (nick removido depois, ou
+    /// YAML editado à mão) cai de volta em "todos" via
+    /// [`AppConfig::overlay_nickname_effective`] em vez de zerar o overlay.
+    ///
+    /// Vale só para o overlay — a biblioteca continua reconhecendo todos os
+    /// nicknames do usuário.
+    pub overlay_nickname: Option<String>,
 }
 
 fn default_overlay_port() -> u16 {
@@ -126,6 +139,7 @@ impl Default for AppConfig {
             insight_worker_minutes: default_insight_worker_minutes(),
             overlay_enabled: false,
             overlay_port: default_overlay_port(),
+            overlay_nickname: None,
         }
     }
 }
@@ -215,5 +229,78 @@ impl AppConfig {
         self.user_nicknames
             .iter()
             .any(|n| n.eq_ignore_ascii_case(name))
+    }
+
+    /// Nickname escolhido para o overlay, **desde que ainda exista** na lista
+    /// de nicknames. `None` = sem restrição (usar todos).
+    ///
+    /// O casamento é case-insensitive e o valor devolvido é o da lista, não
+    /// o que está salvo em `overlay_nickname`: a grafia exibida acompanha o
+    /// que o usuário cadastrou em Apelidos.
+    ///
+    /// A revalidação acontece aqui, e não só na UI, porque `config.yaml` é
+    /// editável à mão e um nick órfão não pode significar "nenhuma partida é
+    /// minha" — o overlay ficaria vazio sem nada na tela explicando por quê.
+    pub fn overlay_nickname_effective(&self) -> Option<&str> {
+        let chosen = self.overlay_nickname.as_deref()?;
+        self.user_nicknames
+            .iter()
+            .find(|n| n.eq_ignore_ascii_case(chosen))
+            .map(|n| n.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(nicks: &[&str], chosen: Option<&str>) -> AppConfig {
+        AppConfig {
+            user_nicknames: nicks.iter().map(|n| n.to_string()).collect(),
+            overlay_nickname: chosen.map(|n| n.to_string()),
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn no_choice_means_no_restriction() {
+        assert_eq!(cfg(&["Kerrigan", "Alt"], None).overlay_nickname_effective(), None);
+    }
+
+    #[test]
+    fn a_chosen_nickname_resolves_to_the_spelling_from_the_list() {
+        let c = cfg(&["Kerrigan", "Alt"], Some("kerrigan"));
+        assert_eq!(c.overlay_nickname_effective(), Some("Kerrigan"));
+    }
+
+    /// Config gravado por uma versão anterior do app: o campo não existe no
+    /// YAML. Precisa carregar como "sem restrição" em vez de falhar o parse
+    /// inteiro e derrubar o usuário para o `Default` (perdendo pasta,
+    /// nicknames e idioma de uma vez).
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn an_older_config_without_the_field_still_loads() {
+        let yaml = "user_nicknames:\n  - Kerrigan\noverlay_enabled: true\noverlay_port: 8722\n";
+        let c: AppConfig = serde_yml::from_str(yaml).expect("config antigo deve carregar");
+        assert_eq!(c.overlay_nickname, None);
+        assert_eq!(c.user_nicknames, vec!["Kerrigan".to_string()]);
+        assert!(c.overlay_enabled);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_choice_survives_a_save_load_round_trip() {
+        let saved = serde_yml::to_string(&cfg(&["Kerrigan", "Smurf"], Some("Smurf"))).unwrap();
+        let back: AppConfig = serde_yml::from_str(&saved).unwrap();
+        assert_eq!(back.overlay_nickname.as_deref(), Some("Smurf"));
+    }
+
+    #[test]
+    fn an_orphaned_choice_falls_back_to_all_nicknames() {
+        // Nick removido da lista depois de escolhido, ou YAML editado à mão.
+        // Precisa virar "todos" — nunca "nenhum", que deixaria o overlay
+        // vazio sem explicação.
+        assert_eq!(cfg(&["Kerrigan"], Some("Removed")).overlay_nickname_effective(), None);
+        assert_eq!(cfg(&[], Some("Kerrigan")).overlay_nickname_effective(), None);
     }
 }

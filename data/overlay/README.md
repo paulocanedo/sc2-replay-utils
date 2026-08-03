@@ -158,6 +158,12 @@ practice game would quietly corrupt them on stream.
 That is deliberate — before your first game of the day the overlay still has
 something to show, and `is_today` lets you tell the cases apart.
 
+One more, if you play on several accounts: Settings → Stream overlay →
+**Nickname on stream** picks which of your nicknames counts as you here.
+With one selected, the other accounts drop out of the overlay entirely —
+score, MMR and history alike. Left on *All nicknames*, every account you have
+registered counts, which is the default.
+
 ---
 
 ## Adding your own layout

@@ -344,7 +344,17 @@ fn nicknames_tab(
         });
     }
     if let Some(i) = to_remove {
-        config.user_nicknames.remove(i);
+        let removed = config.user_nicknames.remove(i);
+        // O overlay aponta para um nick desta lista. Se ele saiu, a escolha
+        // volta para "todos" aqui mesmo, em vez de sobreviver como um valor
+        // órfão que o usuário nunca mais vê na aba Overlay.
+        if config
+            .overlay_nickname
+            .as_deref()
+            .is_some_and(|n| n.eq_ignore_ascii_case(&removed))
+        {
+            config.overlay_nickname = None;
+        }
     }
 
     ui.add_space(SPACE_S);
@@ -463,6 +473,9 @@ fn overlay_section(
 
     ui.add_enabled_ui(config.overlay_enabled, |ui| {
         ui.indent("overlay_opts", |ui| {
+            overlay_nickname_row(ui, config);
+            ui.add_space(SPACE_M);
+
             ui.horizontal(|ui| {
                 ui.label(t("settings.overlay.port.label", lang));
                 ui.add(
@@ -563,6 +576,58 @@ fn overlay_section(
             outcome.overlay_apply = true;
         }
     });
+}
+
+/// Seletor de qual nickname o overlay trata como "eu".
+///
+/// As opções são exatamente os nicknames já cadastrados na aba Apelidos —
+/// nunca um campo de texto livre. Um nick digitado aqui que não batesse com
+/// nenhum jogador deixaria o overlay permanentemente vazio, e o usuário não
+/// teria como saber que o culpado foi um typo.
+///
+/// Sem nenhum nickname cadastrado o combo fica desabilitado, e a linha de
+/// baixo aponta para a aba que resolve.
+///
+/// A escolha é aplicada **depois** do `show_ui`: o corpo do combo já está
+/// iterando `config.user_nicknames`, e escrever no config lá dentro seria
+/// mutar o que está sendo lido.
+#[cfg(not(target_arch = "wasm32"))]
+fn overlay_nickname_row(ui: &mut egui::Ui, config: &mut AppConfig) {
+    let lang = config.language;
+    let all_label = t("settings.overlay.nickname.all", lang);
+    // O `effective` (e não o campo cru) é o que garante que um nick removido
+    // da lista apareça aqui como "todos", igual ao que o overlay publica.
+    let selected = config.overlay_nickname_effective().map(str::to_string);
+    let mut choice: Option<Option<String>> = None;
+
+    ui.horizontal(|ui| {
+        ui.label(t("settings.overlay.nickname.label", lang));
+        ui.add_enabled_ui(!config.user_nicknames.is_empty(), |ui| {
+            egui::ComboBox::from_id_salt("overlay_nickname")
+                .selected_text(selected.clone().unwrap_or_else(|| all_label.to_string()))
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(selected.is_none(), all_label).clicked() {
+                        choice = Some(None);
+                    }
+                    for nick in &config.user_nicknames {
+                        let active = selected.as_deref() == Some(nick.as_str());
+                        if ui.selectable_label(active, nick).clicked() {
+                            choice = Some(Some(nick.clone()));
+                        }
+                    }
+                });
+        });
+    });
+    if let Some(next) = choice {
+        config.overlay_nickname = next;
+    }
+
+    let key = if config.user_nicknames.is_empty() {
+        "settings.overlay.nickname.empty"
+    } else {
+        "settings.overlay.nickname.desc"
+    };
+    ui.small(t(key, lang));
 }
 
 /// Linha especial do diretório de trabalho. Mostra o caminho efetivo
