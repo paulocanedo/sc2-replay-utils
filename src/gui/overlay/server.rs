@@ -424,10 +424,23 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("__overlayRev"));
 
-        // Asset estático: o `ensure_dir` do start escreveu o style.css padrão.
-        let (status, body) = get(port, "/style.css", "127.0.0.1");
+        // Asset estático: o `ensure_dir` do start escreveu o CSS padrão.
+        //
+        // O assert é sobre o que o *servidor* faz — status e content-type —
+        // e não sobre o conteúdo do arquivo: este teste roda contra a pasta
+        // real do usuário, que ele tem todo o direito de ter editado. A
+        // versão anterior procurava uma regra específica dentro do
+        // `style.css` e continuou passando quando essa regra mudou de
+        // arquivo, porque a máquina de quem rodou o teste ainda tinha a cópia
+        // antiga; só a CI, com a pasta limpa, teria acusado.
+        let (status, _) = get(port, "/style.css", "127.0.0.1");
         assert_eq!(status, 200);
-        assert!(body.contains("background: transparent"));
+        // Subdiretório: estático (SVG) e template (peça renderizada sozinha,
+        // que é o que permite apontar uma fonte do OBS direto para ela).
+        let (status, _) = get(port, "/race/zerg.svg", "127.0.0.1");
+        assert_eq!(status, 200);
+        let (status, _) = get(port, "/partials/live-versus.html", "127.0.0.1");
+        assert_eq!(status, 200);
 
         // Deixa um long-poll parkado e então desmonta. Se o `Drop` não
         // soltasse os waiters antes do `join`, o fechamento do app ficaria

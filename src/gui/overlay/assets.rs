@@ -13,41 +13,101 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-pub const DEFAULT_README: &str = include_str!("../../../data/overlay/README.md");
-pub const DEFAULT_INDEX_HTML: &str = include_str!("../../../data/overlay/index.html");
-pub const DEFAULT_STYLE_CSS: &str = include_str!("../../../data/overlay/style.css");
-pub const DEFAULT_DASHBOARD_HTML: &str =
-    include_str!("../../../data/overlay/stats-dashboard.html");
-pub const DEFAULT_DASHBOARD_CSS: &str =
-    include_str!("../../../data/overlay/stats-dashboard.css");
-pub const DEFAULT_LIVE_HTML: &str = include_str!("../../../data/overlay/live-players.html");
-pub const DEFAULT_LIVE_CSS: &str = include_str!("../../../data/overlay/live-players.css");
-
-/// Arquivos escritos no bootstrap e reescritos pelo "restaurar padrões".
+/// Arquivos escritos no bootstrap e reescritos pelo "restaurar padrões" —
+/// e também a cópia de segurança consultada pelo loader do
+/// [`render`](super::render) quando o arquivo some do disco.
 ///
-/// Os nomes usam `/` como separador; `ensure_dir` cria os subdiretórios.
+/// Os nomes usam `/` como separador (é o que o minijinja espera em nome de
+/// template, inclusive no Windows); `ensure_dir` cria os subdiretórios.
+///
+/// A ordem é a de leitura: o README primeiro, depois o esqueleto e as
+/// macros, as peças, as páginas que montam as peças e por fim os assets.
 /// Os SVGs de raça são os mesmos que a UI nativa usa (`assets/race/`), para
 /// o overlay e o app falarem a mesma língua visual.
 ///
-/// O `README.md` vem primeiro de propósito: é a primeira coisa que o usuário
-/// vê ao abrir a pasta, e é ele que documenta o contrato de dados sem exigir
-/// que ninguém leia o Rust. Entra no `restore_defaults` como os demais —
-/// senão um README editado (ou de uma versão antiga) sobreviveria a um
-/// "restaurar padrões" e passaria a descrever um template que não existe
-/// mais.
-const DEFAULTS: &[(&str, &str)] = &[
-    ("README.md", DEFAULT_README),
-    ("index.html", DEFAULT_INDEX_HTML),
-    ("style.css", DEFAULT_STYLE_CSS),
-    ("stats-dashboard.html", DEFAULT_DASHBOARD_HTML),
-    ("stats-dashboard.css", DEFAULT_DASHBOARD_CSS),
-    ("live-players.html", DEFAULT_LIVE_HTML),
-    ("live-players.css", DEFAULT_LIVE_CSS),
+/// Tudo aqui entra no "restaurar padrões", inclusive o README — senão uma
+/// cópia antiga sobreviveria descrevendo templates que não existem mais.
+pub const DEFAULTS: &[(&str, &str)] = &[
+    ("README.md", include_str!("../../../data/overlay/README.md")),
+    // Esqueleto e helpers.
+    ("base.html", include_str!("../../../data/overlay/base.html")),
+    ("macros.html", include_str!("../../../data/overlay/macros.html")),
+    // Peças.
+    (
+        "partials/nickname-hint.html",
+        include_str!("../../../data/overlay/partials/nickname-hint.html"),
+    ),
+    (
+        "partials/session-inline.html",
+        include_str!("../../../data/overlay/partials/session-inline.html"),
+    ),
+    (
+        "partials/session-card.html",
+        include_str!("../../../data/overlay/partials/session-card.html"),
+    ),
+    (
+        "partials/last-game-inline.html",
+        include_str!("../../../data/overlay/partials/last-game-inline.html"),
+    ),
+    (
+        "partials/last-game-card.html",
+        include_str!("../../../data/overlay/partials/last-game-card.html"),
+    ),
+    (
+        "partials/form-strip.html",
+        include_str!("../../../data/overlay/partials/form-strip.html"),
+    ),
+    (
+        "partials/race-grid.html",
+        include_str!("../../../data/overlay/partials/race-grid.html"),
+    ),
+    (
+        "partials/live-versus.html",
+        include_str!("../../../data/overlay/partials/live-versus.html"),
+    ),
+    // Páginas.
+    ("index.html", include_str!("../../../data/overlay/index.html")),
+    (
+        "stats-dashboard.html",
+        include_str!("../../../data/overlay/stats-dashboard.html"),
+    ),
+    (
+        "live-players.html",
+        include_str!("../../../data/overlay/live-players.html"),
+    ),
+    // Estilos: tokens e componentes valem para toda página, inclusive as
+    // que o usuário escrever; os outros três são só o arranjo de cada uma.
+    ("tokens.css", include_str!("../../../data/overlay/tokens.css")),
+    (
+        "components.css",
+        include_str!("../../../data/overlay/components.css"),
+    ),
+    ("style.css", include_str!("../../../data/overlay/style.css")),
+    (
+        "stats-dashboard.css",
+        include_str!("../../../data/overlay/stats-dashboard.css"),
+    ),
+    (
+        "live-players.css",
+        include_str!("../../../data/overlay/live-players.css"),
+    ),
     ("race/terran.svg", include_str!("../../../assets/race/terran.svg")),
     ("race/protoss.svg", include_str!("../../../assets/race/protoss.svg")),
     ("race/zerg.svg", include_str!("../../../assets/race/zerg.svg")),
     ("race/random.svg", include_str!("../../../assets/race/random.svg")),
 ];
+
+/// Cópia embutida de um arquivo padrão, pelo nome que o template usa.
+///
+/// É o que permite ao render se recuperar de um arquivo apagado: com a
+/// página quebrada em peças pequenas, perder uma delas passou a ser fácil
+/// demais para virar tela em branco no meio da transmissão.
+pub fn embedded(name: &str) -> Option<&'static str> {
+    DEFAULTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, contents)| *contents)
+}
 
 /// Template servido em `/` quando o usuário não tem um `index.html`.
 pub const INDEX_TEMPLATE: &str = "index.html";

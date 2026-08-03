@@ -1,195 +1,52 @@
-<!doctype html>
-<!--
+{#
   ────────────────────────────────────────────────────────────────────────
-  sc2-replay-utils — stats dashboard overlay
+  sc2-replay-utils — stats dashboard, served at /stats-dashboard.html
   ────────────────────────────────────────────────────────────────────────
 
-  A taller, panel-style overlay for a corner of your stream. Reachable at
-  /stats-dashboard.html — add it as a second OBS Browser source alongside
-  (or instead of) the compact bar at /.
+  A taller, panel-style overlay for a corner of your stream. Add it as a
+  second OBS Browser source alongside (or instead of) the compact bar at /.
 
   Suggested OBS Browser source size: 340 x 620.
 
-  This file is YOURS to edit. Save and reload the page — no app restart
-  needed. Restore the original from Settings → Stream overlay → "Restore
-  default template".
+  Like index.html this is an assembly — sections here, pieces in
+  partials/, styling in tokens.css + components.css. Drop a section by
+  deleting its <section> block; reorder by moving them.
 
-  Full customization guide: README.md, right next to this file (also at
-  /README.md in the browser).
+  Full guide: README.md, right next to this file.
+#}
+{% extends "base.html" %}
 
-  Every variable available to you is listed at /_overlay/data.json.
-  Beyond what the compact bar uses, this page reads:
+{% block title %}SC2 Stats Dashboard{% endblock %}
 
-    session.by_race       always 4 entries (Zerg, Terran, Protoss, Random),
-                          each { race, race_letter, games, wins, losses,
-                          winrate_pct } — today's record by OPPONENT race
-    recent_games          up to 10 games, newest first, same shape as
-                          last_game; each has is_today
+{% block styles %}
+<link rel="stylesheet" href="/stats-dashboard.css" />
+{% endblock %}
 
-  Any file you drop in this folder is served over localhost. The /_overlay/
-  URL prefix is reserved by the app.
--->
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>SC2 Stats Dashboard</title>
-    <link rel="stylesheet" href="/stats-dashboard.css" />
-  </head>
-  <body>
-    <div class="panel">
-      <header class="panel-header">
-        <h1>SC2 Battle Stats</h1>
-        <span class="live" title="Updated {{ generated_at }}"></span>
-      </header>
+{% block content %}
+<div class="panel">
+  <header class="panel-header">
+    <h1>SC2 Battle Stats</h1>
+    <span class="live" title="Updated {{ generated_at }}"></span>
+  </header>
 
-      {% if not nicknames_configured %}
-      <div class="hint">Add your nickname in Settings to track wins and MMR.</div>
-      {% endif %}
+  {% include "partials/nickname-hint.html" %}
+  {% include "partials/form-strip.html" %}
 
-      <!-- Recent form: newest on the left. Always 10 slots so the strip
-           keeps its width while your history fills in. `result` is used
-           as a CSS class and can be win / loss / undecided (A.I. games and
-           disconnects report the last one) — all three are styled. -->
-      <div class="results-strip">
-        {% for game in recent_games %}
-        <span
-          class="result-block {{ game.result | lower }}"
-          title="{{ game.matchup }} · {{ game.map }} · {{ game.date }} {{ game.time }}"
-        ></span>
-        {% endfor %}
-        <!-- Parênteses obrigatórios: em Jinja o filtro `|` tem precedência
-             MENOR que a aritmética, então `10 - recent_games | length`
-             seria lido como `(10 - recent_games) | length`. -->
-        {% for _ in range(10 - (recent_games | length)) %}
-        <span class="result-block empty"></span>
-        {% endfor %}
-      </div>
+  <section class="section">
+    <h2>Today</h2>
+    {% include "partials/session-card.html" %}
+  </section>
 
-      <section class="section">
-        <h2>Today</h2>
-        <div class="overview">
-          <!-- Win-rate donut. r=15.9155 makes the circumference exactly
-               100, so stroke-dasharray can be read as a percentage. -->
-          <div class="donut">
-            <svg viewBox="0 0 36 36">
-              <circle
-                cx="18"
-                cy="18"
-                r="15.9155"
-                fill="none"
-                stroke="rgba(255,255,255,.10)"
-                stroke-width="3"
-              />
-              <circle
-                cx="18"
-                cy="18"
-                r="15.9155"
-                fill="none"
-                class="donut-value"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-dasharray="{{ session.winrate_pct or 0 }} 100"
-                transform="rotate(-90 18 18)"
-              />
-              <text x="18" y="18" dy=".35em" text-anchor="middle" class="donut-text">
-                {% if session.winrate_pct is not none %}{{ session.winrate_pct }}%{% else %}—{% endif %}
-              </text>
-            </svg>
-          </div>
+  <section class="section">
+    <h2>By opponent race</h2>
+    {% include "partials/race-grid.html" %}
+  </section>
 
-          <ul class="tally">
-            <li>
-              <span class="dot win"></span><span class="k">Wins</span>
-              <span class="v win">{{ session.wins }}</span>
-            </li>
-            <li>
-              <span class="dot loss"></span><span class="k">Losses</span>
-              <span class="v loss">{{ session.losses }}</span>
-            </li>
-            <li>
-              <span class="dot neutral"></span><span class="k">Games</span>
-              <span class="v">{{ session.games }}</span>
-            </li>
-            {% if session.mmr_latest is not none %}
-            <li>
-              <span class="dot mmr"></span><span class="k">MMR</span>
-              <span class="v"
-                >{{ session.mmr_latest }}{% if session.mmr_delta %}
-                <small class="delta {{ 'up' if session.mmr_delta > 0 else 'down' }}"
-                  >{{ '+' if session.mmr_delta > 0 else '' }}{{ session.mmr_delta }}</small
-                >{% endif %}</span
-              >
-            </li>
-            {% endif %}
-          </ul>
-        </div>
-      </section>
+  <section class="section">
+    <h2>Last game</h2>
+    {% include "partials/last-game-card.html" %}
+  </section>
 
-      <section class="section">
-        <h2>By opponent race</h2>
-        <div class="races">
-          {% for r in session.by_race %}
-          <div class="race {{ r.race_letter | lower }}{{ ' idle' if r.games == 0 else '' }}">
-            <img
-              class="race-icon"
-              src="/race/{{ r.race | lower }}.svg"
-              alt="{{ r.race }}"
-            />
-            <div class="race-body">
-              <span class="race-name">{{ r.race }}</span>
-              <span class="race-record">
-                <span class="win">{{ r.wins }}</span>–<span class="loss">{{ r.losses }}</span>
-              </span>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="section">
-        <h2>Last game</h2>
-        {% if last_game %}
-        <div class="last-game {{ last_game.result | lower }}">
-          <div class="last-head">
-            {% if last_game.opponent %}
-            <img
-              class="race-icon"
-              src="/race/{{ last_game.opponent.race | lower }}.svg"
-              alt="{{ last_game.opponent.race }}"
-            />
-            <span class="opp-name">{{ last_game.opponent.name }}</span>
-            {% if last_game.opponent.mmr is not none %}
-            <span class="opp-mmr">{{ last_game.opponent.mmr }}</span>
-            {% endif %} {% else %}
-            <span class="opp-name">{{ last_game.players | map(attribute='name') | join(' vs ') }}</span>
-            {% endif %}
-            <span class="verdict">{{ last_game.result | upper }}</span>
-          </div>
-          <div class="last-meta">
-            {% if last_game.matchup %}<span class="matchup">{{ last_game.matchup }}</span>{% endif %}
-            <span class="map">{{ last_game.map }}</span>
-            <span class="sep">·</span>
-            <span>{{ last_game.duration_label }}</span>
-            <span class="sep">·</span>
-            <span>{% if last_game.is_today %}{{ last_game.time }}{% else %}{{ last_game.date }}{% endif %}</span>
-          </div>
-        </div>
-        {% else %}
-        <div class="no-game">No games recorded yet</div>
-        {% endif %}
-      </section>
-
-      <footer class="panel-footer">
-        Updated {{ generated_at | replace('T', ' ') }}
-      </footer>
-    </div>
-
-    <!-- Live reload. Keep both lines: the first tells the script which
-         revision this page was rendered with, so an update landing while
-         the page loads is not missed. -->
-    <script>
-      window.__overlayRev = {{ revision }};
-    </script>
-    <script src="/_overlay/live.js"></script>
-  </body>
-</html>
+  <footer class="panel-footer">Updated {{ generated_at | replace('T', ' ') }}</footer>
+</div>
+{% endblock %}

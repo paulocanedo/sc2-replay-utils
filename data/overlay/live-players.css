@@ -1,111 +1,25 @@
 /*
-  sc2-replay-utils — live players stylesheet.
+  sc2-replay-utils — layout of the live players bar.
 
-  Same visual language as style.css and stats-dashboard.css: dark
-  translucent cards, hard text shadow so names stay readable over
-  gameplay, race colours from the app's own palette. Edit freely; reload
-  the page to see changes.
+  The page is a single piece (partials/live-versus.html), which styles
+  itself in components.css — so all that is left here is how big it is and
+  where it sits.
 
   Suggested OBS Browser source size: 760 x 150.
 */
 
-:root {
-  --text: #f2f4f7;
-  --muted: #8d97a8;
-  --dim: #6b7482;
-  --panel: rgba(12, 14, 18, 0.72);
-  --terran: #4c8dff;
-  --protoss: #e8b23a;
-  --zerg: #b06ad6;
-  --random: #8d97a8;
-}
-
-* {
-  box-sizing: border-box;
-}
-
 body {
-  margin: 0;
-  background: transparent;
-  font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+  /* Bigger than the other overlays on purpose: two names and two icons
+     have to be legible from across the room. Every piece is sized in
+     `em`, so this one number is the whole scale. */
   font-size: 28px;
-  color: var(--text);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
-  -webkit-font-smoothing: antialiased;
 }
 
-.versus {
-  display: inline-flex;
-  align-items: stretch;
-  gap: 10px;
+.stage {
   padding: 14px 18px;
 }
 
-.player {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 18px;
-  border-radius: 10px;
-  background: var(--panel);
-  /* The race colour rides on the border, not the text: a name over
-     gameplay needs maximum contrast, and coloured text loses it. */
-  border-bottom: 3px solid var(--dim);
-  white-space: nowrap;
-}
-
-.player.terran {
-  border-bottom-color: var(--terran);
-}
-
-.player.protoss {
-  border-bottom-color: var(--protoss);
-}
-
-.player.zerg {
-  border-bottom-color: var(--zerg);
-}
-
-.player.random {
-  border-bottom-color: var(--random);
-}
-
-.race-icon {
-  width: 1.15em;
-  height: 1.15em;
-  flex: 0 0 1.15em;
-  /* The SVGs carry their own race colours — same as the dashboard. Only
-     the shadow is added, so they hold up over a bright minimap. */
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.8));
-}
-
-.name {
-  font-weight: 600;
-  /* A long name cannot be allowed to push the layout past the OBS source
-     width — it fades out instead. */
-  max-width: 9em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.vs {
-  display: flex;
-  align-items: center;
-  font-size: 0.6em;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--muted);
-  text-shadow: none;
-}
-
-.idle {
-  display: inline-flex;
-  margin: 14px 18px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  background: var(--panel);
-  border-left: 3px solid var(--dim);
-  font-size: 0.6em;
-  color: var(--muted);
-  white-space: nowrap;
-}
+/* Anchor it to the right instead of the left:
+     .stage { text-align: right; }
+   Both the versus bar and the out-of-game card are inline-flex, so they
+   follow the text alignment. */

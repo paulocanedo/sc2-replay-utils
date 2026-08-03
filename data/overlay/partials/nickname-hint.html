@@ -1,0 +1,10 @@
+{#
+  Shown until you register a nickname in Settings → Nicknames.
+
+  Without one the app cannot tell which player is you, so the score, the
+  win rate and the MMR would all sit at zero with no explanation. Renders
+  nothing once a nickname is configured — safe to include unconditionally.
+#}
+{% if not nicknames_configured %}
+<div class="hint">Add your nickname in Settings to track wins and MMR.</div>
+{% endif %}

@@ -1,67 +1,28 @@
-<!doctype html>
-<!--
+{#
   ────────────────────────────────────────────────────────────────────────
-  sc2-replay-utils — who is playing right now
+  sc2-replay-utils — who is playing right now, at /live-players.html
   ────────────────────────────────────────────────────────────────────────
 
   A name-vs-name bar fed by the StarCraft II client itself, not by your
-  replay folder: it fills in the moment a match starts, and empties when
-  you leave it. Served at /live-players.html — add it as its own OBS
-  Browser source.
+  replay folder: it fills in the moment a match starts and empties when
+  you leave it. Add it as its own OBS Browser source.
 
   Suggested OBS Browser source size: 760 x 150.
 
-  This file is YOURS to edit. Save and reload the page — no app restart
-  needed. Restore the original from Settings → Stream overlay → "Restore
-  default template". Full guide: README.md, right next to this file.
+  The whole page is one piece — partials/live-versus.html, which is also
+  where the details are documented. Include it in any other layout to put
+  the same bar there.
 
-  The variables it uses (all under `live`, see /_overlay/data.json):
+  Full guide: README.md, right next to this file.
+#}
+{% extends "base.html" %}
 
-    live.connected     false when StarCraft II is not running
-    live.in_game       true when a 1v1 between two humans is on screen
-    live.players       the two players, in client order, each with
-                       { name, race, race_letter }
+{% block title %}SC2 Live Players{% endblock %}
 
-  live.in_game is deliberately narrow: games against the AI, FFA, 2v2 and
-  replays all read as "not in a game", the same cut the rest of the
-  overlay uses. The client API cannot tell ladder from custom, so a 1v1
-  against a friend does count here.
+{% block styles %}
+<link rel="stylesheet" href="/live-players.css" />
+{% endblock %}
 
-  Everything else in the overlay (session score, MMR, history) comes from
-  parsed replays and is unrelated to this page — mix them freely.
--->
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>SC2 Live Players</title>
-    <link rel="stylesheet" href="/live-players.css" />
-  </head>
-  <body>
-    {% if live.in_game %}
-    <div class="versus">
-      {% for p in live.players %}
-      <!-- The race name doubles as the icon filename and the CSS class:
-           Terran / Protoss / Zerg / Random, lowercased. -->
-      <div class="player {{ p.race | lower }}">
-        <img class="race-icon" src="/race/{{ p.race | lower }}.svg" alt="{{ p.race }}" />
-        <span class="name">{{ p.name }}</span>
-      </div>
-      {% if not loop.last %}
-      <div class="vs">VS</div>
-      {% endif %} {% endfor %}
-    </div>
-    {% else %}
-    <div class="idle">
-      {% if live.connected %}Not in a game{% else %}StarCraft II is not running{% endif %}
-    </div>
-    {% endif %}
-
-    <!-- Live reload. Keep both lines: the first tells the script which
-         revision this page was rendered with, so a match starting while
-         the page loads is not missed. -->
-    <script>
-      window.__overlayRev = {{ revision }};
-    </script>
-    <script src="/_overlay/live.js"></script>
-  </body>
-</html>
+{% block content %}
+<div class="stage">{% include "partials/live-versus.html" %}</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{#
+  Today's record split by OPPONENT race, as a 2x2 grid.
+
+  `session.by_race` always has the same four entries in the same order
+  (Zerg, Terran, Protoss, Random), even at zero — so the grid keeps its
+  shape all evening instead of popping into existence race by race. Ones
+  you haven't faced today recede rather than disappear.
+#}
+{% import "macros.html" as m %}
+<div class="races">
+  {% for r in session.by_race %}
+  <div class="race {{ r.race_letter | lower }}{{ ' idle-race' if r.games == 0 else '' }}">
+    {{ m.race_icon(r.race) }}
+    <div class="race-body">
+      <span class="race-name">{{ r.race }}</span>
+      <span class="race-record">
+        <span class="win">{{ r.wins }}</span>–<span class="loss">{{ r.losses }}</span>
+      </span>
+    </div>
+  </div>
+  {% endfor %}
+</div>

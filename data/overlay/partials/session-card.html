@@ -1,0 +1,66 @@
+{#
+  Today's score as a panel: win-rate donut next to a wins/losses/games/MMR
+  tally. The one-line version is partials/session-inline.html.
+
+  Meant to sit inside a panel that already has a background — it draws no
+  slab of its own.
+
+  Reads the same fields as session-inline, plus session.games.
+#}
+{% import "macros.html" as m %}
+<div class="session-card">
+  {# r=15.9155 makes the circumference exactly 100, so stroke-dasharray
+     can be read as a percentage. #}
+  <div class="donut">
+    <svg viewBox="0 0 36 36">
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        stroke="rgba(255,255,255,.10)"
+        stroke-width="3"
+      />
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        class="donut-value"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-dasharray="{{ session.winrate_pct or 0 }} 100"
+        transform="rotate(-90 18 18)"
+      />
+      <text x="18" y="18" dy=".35em" text-anchor="middle" class="donut-text">
+        {% if session.winrate_pct is not none %}{{ session.winrate_pct }}%{% else %}—{% endif %}
+      </text>
+    </svg>
+  </div>
+
+  <ul class="tally">
+    <li>
+      <span class="dot win"></span><span class="k">Wins</span>
+      <span class="v win">{{ session.wins }}</span>
+    </li>
+    <li>
+      <span class="dot loss"></span><span class="k">Losses</span>
+      <span class="v loss">{{ session.losses }}</span>
+    </li>
+    <li>
+      <span class="dot neutral"></span><span class="k">Games</span>
+      <span class="v">{{ session.games }}</span>
+    </li>
+    {% if session.mmr_latest is not none %}
+    <li>
+      <span class="dot mmr"></span><span class="k">MMR</span>
+      <span class="v"
+        >{{ session.mmr_latest }}{% if session.mmr_delta %}
+        <small class="delta {{ 'up' if session.mmr_delta > 0 else 'down' }}"
+          >{{ m.signed(session.mmr_delta) }}</small
+        >{% endif %}</span
+      >
+    </li>
+    {% endif %}
+  </ul>
+</div>

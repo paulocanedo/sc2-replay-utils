@@ -19,8 +19,12 @@ these files with any text editor, save, refresh the page — done.
 
    Sizing generously is free: the empty area is transparent, while a source
    that is too small clips the layout.
-3. Open this folder (Settings → **Open template folder**), edit `index.html`
-   or `style.css`, save.
+3. Open this folder (Settings → **Open template folder**) and edit. Where to
+   go depends on what you want to change:
+   - **a colour** → `tokens.css`, and every overlay follows
+   - **how one block looks** → its rule in `components.css`
+   - **which blocks a page shows** → the `{% include %}` lines in that page
+   - **a whole new overlay** → see [Building your own](#building-your-own-overlay)
 4. Refresh the page to see your change (see [Live reload](#live-reload) —
    edits do *not* refresh by themselves).
 
@@ -31,19 +35,84 @@ files back and keeps yours as `.bak`.
 
 ## What is in this folder
 
+Nothing here is a monolith. There are **pieces**, and there are **pages that
+assemble pieces** — so changing one thing means opening one small file.
+
+**Pages** — what you point OBS at. Each is a dozen lines: which pieces, in
+which order.
+
+| File | Served at |
+|---|---|
+| `index.html` | `/` — the compact bar |
+| `stats-dashboard.html` | `/stats-dashboard.html` — the panel |
+| `live-players.html` | `/live-players.html` — who is playing right now |
+
+**Pieces** — one block each, in `partials/`. Drop any of them into any page.
+
+| File | What it shows |
+|---|---|
+| `partials/session-inline.html` | Today's score on one line: `TODAY 3–2 60% 4210 +42` |
+| `partials/session-card.html` | The same numbers as a donut + tally panel |
+| `partials/last-game-inline.html` | The last game on one line |
+| `partials/last-game-card.html` | The last game as a two-line card |
+| `partials/form-strip.html` | Ten blocks of recent form, newest on the left |
+| `partials/race-grid.html` | Today's record by opponent race |
+| `partials/live-versus.html` | The two players currently on screen |
+| `partials/nickname-hint.html` | "Add your nickname" — renders nothing once you have |
+
+Each carries its own empty state, so you never need an `{% if %}` around
+one, and each is a valid page on its own: `/partials/form-strip.html` in an
+OBS source gives you just that strip.
+
+**Skeleton and helpers**
+
 | File | What it is |
 |---|---|
-| `index.html` | The compact bar, served at `/`. A Jinja2 template. |
-| `style.css` | Styles for the compact bar. |
-| `stats-dashboard.html` | The taller panel, served at `/stats-dashboard.html`. |
-| `stats-dashboard.css` | Styles for the panel. |
-| `live-players.html` | Who is playing right now, served at `/live-players.html`. |
-| `live-players.css` | Styles for that bar. |
-| `race/*.svg` | Race icons (the same ones the app itself uses). |
-| `README.md` | This file. |
+| `base.html` | The page skeleton every page extends: `<head>`, the stylesheets, the live-reload pair |
+| `macros.html` | Small snippets — `race_icon(race)`, `signed(number)` |
 
-Anything else you drop here is served too — your logo, a webfont, a sound, a
-second layout. Subfolders work (`img/logo.png` → `/img/logo.png`).
+**Styling** — three layers, so you rarely touch more than one.
+
+| File | What it is |
+|---|---|
+| `tokens.css` | The palette. **Change a colour here and every overlay follows.** |
+| `components.css` | How the pieces look. One block per piece. |
+| `style.css`, `stats-dashboard.css`, `live-players.css` | Just the arrangement of each page — a dozen lines each |
+
+**Assets**: `race/*.svg` (the icons the app itself uses) and this `README.md`.
+Anything else you drop here is served too — your logo, a webfont, a sound.
+Subfolders work (`img/logo.png` → `/img/logo.png`).
+
+---
+
+## Building your own overlay
+
+Save this as `mine.html` in this folder, and it is live at `/mine.html`:
+
+```jinja
+{% extends "base.html" %}
+{% block title %}My overlay{% endblock %}
+{% block content %}
+  {% include "partials/live-versus.html" %}
+  {% include "partials/session-inline.html" %}
+{% endblock %}
+```
+
+That is a complete, styled overlay that reloads itself. Extending
+`base.html` is what gives you the palette, the piece styling and the
+live-reload script without writing a line of either.
+
+The blocks you can fill in:
+
+| Block | What goes in it |
+|---|---|
+| `title` | The browser tab / OBS source title |
+| `styles` | Extra `<link>` or `<style>` for this page only |
+| `body_class` | A class on `<body>`, if your CSS wants one |
+| `content` | The page itself |
+
+Add a `{% block styles %}<style> … </style>{% endblock %}` to restyle a
+piece for your page only, or edit `components.css` to restyle it everywhere.
 
 ---
 
@@ -53,14 +122,21 @@ second layout. Subfolders work (`img/logo.png` → `/img/logo.png`).
   [minijinja](https://docs.rs/minijinja), which speaks the Jinja2 syntax you
   know from Flask/Django/Ansible: `{{ value }}`, `{% if %}`, `{% for %}`,
   `{{ x | upper }}`.
+- **Templates compose**: `{% extends %}` with `{% block %}` for the
+  skeleton, `{% include %}` to drop a piece in, `{% import %}` for macros.
+  Paths are relative to this folder and always use `/`, even on Windows.
 - **Everything else is served verbatim** — CSS, JS, images, fonts, video. No
   templating, no processing.
-- The template is re-read from disk **on every page load**. There is no cache
-  to clear and no restart to do.
+- Every file is re-read from disk **on every page load**. There is no cache
+  to clear and no restart to do, for pages and pieces alike.
 - HTML is auto-escaped. A player named `<script>` cannot break your layout.
 
-`/` maps to `index.html`. If you delete `index.html`, `/` falls back to the
-version built into the app, so the overlay never goes blank.
+`/` maps to `index.html`. **Any** shipped file you delete — a page, the
+skeleton, a piece — falls back to the copy built into the app, so a stray
+delete can never leave you with a blank overlay mid-stream. A *syntax
+error* is not covered by that on purpose: it shows the error page naming
+the file and line, instead of silently serving the default and letting you
+believe your edits are live.
 
 ---
 
@@ -198,28 +274,11 @@ registered counts, which is the default.
 
 ---
 
-## Adding your own layout
+## Starting from scratch instead
 
-Drop a new `.html` file here and it becomes a page. `mylayout.html` is served
-at `/mylayout.html`, rendered with the exact same data. Add it as another OBS
-Browser source and you can run several overlays at once — a bar on top, a
-panel in the corner, a "waiting" screen for your break.
-
-Starting from a copy of `index.html` or `stats-dashboard.html` is the fastest
-route; both are commented.
-
-`{% include %}` and `{% extends %}` work, so shared pieces can live in their
-own file:
-
-```jinja
-{% include "partials/score.html" %}
-```
-
-Paths are relative to this folder and always use `/`, even on Windows. A
-partial is also reachable as a page of its own (`/partials/score.html`) —
-harmless, since only you can reach this server.
-
-A minimal one, complete:
+Extending `base.html` is a convenience, not a requirement. Any `.html` file
+here is a page — `mylayout.html` is served at `/mylayout.html` with the same
+data — so you can also write one top to bottom and share nothing:
 
 ```html
 <!doctype html>
@@ -233,11 +292,20 @@ A minimal one, complete:
   </head>
   <body>
     {{ session.wins }} – {{ session.losses }}
+    <!-- Doing it this way, these two lines are yours to remember. -->
     <script>window.__overlayRev = {{ revision }};</script>
     <script src="/_overlay/live.js"></script>
   </body>
 </html>
 ```
+
+That is the whole trade-off: a standalone page owes nobody anything, but the
+live reload, the palette and the piece styling are then on you. Mixing is
+fine too — extend `base.html` and ignore the pieces, or include one piece
+into a page you wrote yourself.
+
+Run as many as you like at once: a bar on top, a panel in the corner, a
+"waiting" screen for your break — one OBS Browser source each.
 
 ---
 
@@ -287,7 +355,9 @@ The `/_overlay/` prefix belongs to the app. A file you place in an
 
 **A red "OVERLAY TEMPLATE ERROR" page.** Your template has a syntax or
 rendering error. The page names the file and line, and shows the offending
-source. Fix the file and save — the page comes back on its own.
+source — and since pages are assembled from pieces, that file may be a
+partial rather than the page you opened. Fix it and save; the page comes
+back on its own.
 
 **404 not found.** The file is not in this folder, the name does not match
 exactly (case included, on Linux), or it hit one of the naming rules above.
@@ -315,10 +385,14 @@ stores the full URL, so it does not follow the change by itself.
 
 ## Restoring the defaults
 
-Settings → Stream overlay → **Restore default template** rewrites the files
-listed in the table at the top of this page with the versions shipped in the
-app. Any of them you had edited is renamed to `<name>.bak` first, so nothing
-is lost. Files you added yourself are left alone.
+Settings → Stream overlay → **Restore default template** rewrites every file
+listed in [What is in this folder](#what-is-in-this-folder) with the version
+shipped in the app — pages, pieces, skeleton, stylesheets and this README.
+Any of them you had edited is renamed to `<name>.bak` first, so nothing is
+lost, and files you added yourself are left alone.
+
+To undo one bad edit you do not need any of that: delete the file and the
+app serves its built-in copy again on the next reload.
 
 ---
 

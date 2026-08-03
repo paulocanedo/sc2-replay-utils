@@ -1,0 +1,32 @@
+{#
+  Today's score on one line: TODAY 3–2 60% 4210 +42
+
+  For bars and tickers. The panel-shaped version of the same numbers is
+  partials/session-card.html.
+
+  Reads: session.wins, session.losses, session.winrate_pct,
+  session.mmr_latest, session.mmr_delta.
+
+  The optional values really can be missing — `winrate_pct` is none until
+  a game is decided today, and `mmr_latest` is none until one is played,
+  so each is guarded. Printing a missing value would put the word "none"
+  on your stream.
+#}
+{% import "macros.html" as m %}
+<div class="card session-inline">
+  <span class="label">TODAY</span>
+  <span class="score">
+    <span class="wins">{{ session.wins }}</span
+    ><span class="dash">–</span
+    ><span class="losses">{{ session.losses }}</span>
+  </span>
+  {% if session.winrate_pct is not none %}
+  <span class="winrate">{{ session.winrate_pct }}%</span>
+  {% endif %} {% if session.mmr_latest is not none %}
+  <span class="mmr">{{ session.mmr_latest }}</span>
+  {% if session.mmr_delta %}
+  <span class="delta {{ 'up' if session.mmr_delta > 0 else 'down' }}">
+    {{ m.signed(session.mmr_delta) }}
+  </span>
+  {% endif %} {% endif %}
+</div>

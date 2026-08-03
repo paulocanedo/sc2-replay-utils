@@ -1,0 +1,24 @@
+{#
+  Recent form: one block per game, newest on the left.
+
+  Always ten slots, so the strip keeps its width while your history fills
+  in — a strip that grows would shift everything next to it on your
+  stream.
+
+  `result` becomes the block's class: win / loss / undecided. Empty slots
+  get `empty`.
+#}
+<div class="results-strip">
+  {% for game in recent_games %}
+  <span
+    class="result-block {{ game.result | lower }}"
+    title="{{ game.matchup }} · {{ game.map }} · {{ game.date }} {{ game.time }}"
+  ></span>
+  {% endfor %}
+  {# Parentheses required: in Jinja the `|` filter binds LOOSER than
+     arithmetic, so `10 - recent_games | length` would parse as
+     `(10 - recent_games) | length`. #}
+  {% for _ in range(10 - (recent_games | length)) %}
+  <span class="result-block empty"></span>
+  {% endfor %}
+</div>

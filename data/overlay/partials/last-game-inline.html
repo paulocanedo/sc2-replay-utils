@@ -1,0 +1,36 @@
+{#
+  The most recent game on one line:
+
+      LAST  ZvT  Site Delta  12:34  WIN  vs Raynor T
+
+  For bars and tickers; the panel version is partials/last-game-card.html.
+  Both carry their own empty state, so neither needs an {% if %} around it.
+
+  `last_game` spans your whole library, not just today — before your first
+  game of the day it still has something to show, which is why the label
+  reads LAST or PREVIOUS depending on `is_today`.
+
+  `result` is used as a CSS class and has four cases: win, loss, undecided
+  (A.I. games and disconnects report it) and "" when no nickname is
+  configured.
+#}
+{% if last_game %}
+<div class="card last-inline {{ last_game.result | lower }}">
+  <span class="label">{{ 'LAST' if last_game.is_today else 'PREVIOUS' }}</span>
+  {% if last_game.matchup %}
+  <span class="matchup">{{ last_game.matchup }}</span>
+  {% endif %}
+  <span class="map">{{ last_game.map }}</span>
+  <span class="duration">{{ last_game.duration_label }}</span>
+  {% if last_game.result %}
+  <span class="result">{{ last_game.result | upper }}</span>
+  {% endif %} {% if last_game.opponent %}
+  <span class="opponent">
+    vs {{ last_game.opponent.name }}
+    <span class="race-letter">{{ last_game.opponent.race_letter }}</span>
+  </span>
+  {% endif %}
+</div>
+{% else %}
+<div class="card idle">Waiting for your first game…</div>
+{% endif %}
