@@ -61,6 +61,10 @@ impl AppState {
                 ui.separator();
                 if ui.button(t("menu.view.settings", lang)).clicked() {
                     self.show_settings = true;
+                    // A listagem de views do overlay é cache de disco; a
+                    // abertura da janela é o gancho natural para atualizá-la.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.refresh_overlay_views();
                     ui.close();
                 }
 

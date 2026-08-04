@@ -1,0 +1,25 @@
+/*
+  sc2-replay-utils — layout of the live players bar.
+
+  The page is a single piece (partials/live-versus.html), which styles
+  itself in components.css — so all that is left here is how big it is and
+  where it sits.
+
+  Suggested OBS Browser source size: 760 x 150.
+*/
+
+body {
+  /* Bigger than the other overlays on purpose: two names and two icons
+     have to be legible from across the room. Every piece is sized in
+     `em`, so this one number is the whole scale. */
+  font-size: 28px;
+}
+
+.stage {
+  padding: 14px 18px;
+}
+
+/* Anchor it to the right instead of the left:
+     .stage { text-align: right; }
+   Both the versus bar and the out-of-game card are inline-flex, so they
+   follow the text alignment. */

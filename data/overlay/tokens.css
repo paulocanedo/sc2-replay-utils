@@ -1,0 +1,55 @@
+/*
+  sc2-replay-utils — design tokens, loaded by every page.
+
+  Change a value here and every overlay follows: this is the one file to
+  edit to make the overlays match your stream's colours.
+
+  Loaded by base.html before components.css and before the page's own
+  stylesheet, so anything below can be overridden further down the chain.
+*/
+
+:root {
+  /* Result colours. */
+  --win: #8cc86e;
+  --loss: #e0616b;
+
+  /* Text. */
+  --text: #f2f4f7;
+  --muted: #8d97a8;
+  --dim: #6b7482;
+
+  /* Surfaces. */
+  --accent: #4c8dff;
+  --panel: rgba(12, 14, 18, 0.72);
+  --inset: rgba(255, 255, 255, 0.04);
+  --hairline: rgba(255, 255, 255, 0.08);
+
+  /* Races. Also used by .player and .race modifiers in components.css. */
+  --terran: #4c8dff;
+  --protoss: #e8b23a;
+  --zerg: #b06ad6;
+  --random: #8d97a8;
+
+  --radius: 10px;
+  --gap: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  /* This is what makes the OBS Browser source composite over your
+     gameplay instead of painting a black rectangle. Keep it. */
+  background: transparent;
+  font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+  color: var(--text);
+  /* Overlays sit on top of a bright, busy game. A hard shadow keeps text
+     readable over both a white mineral patch and a dark map corner. */
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Each page sets its own base font-size; every component below is sized in
+   `em`, so one number scales a whole overlay. */

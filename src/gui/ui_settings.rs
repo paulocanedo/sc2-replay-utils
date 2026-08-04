@@ -37,6 +37,10 @@ pub struct SettingsOutcome {
     /// Reescrever `index.html`/`style.css` com os originais embutidos
     /// (guardando `.bak`). Também age na hora.
     pub overlay_restore_defaults: bool,
+    /// Revarrer a pasta de templates atrás de views. Existe porque o
+    /// usuário pode criar um `.html` com a janela aberta, e varrer o disco
+    /// a cada frame para cobrir isso seria caro à toa.
+    pub overlay_refresh_views: bool,
 }
 
 /// Estado do servidor do overlay, na forma que esta janela consegue
@@ -51,6 +55,13 @@ pub struct OverlayUiStatus {
     pub bound_port: u16,
     pub url: String,
     pub error: Option<String>,
+    /// Rotas das views encontradas na pasta de templates (`/`,
+    /// `/stats-dashboard.html`, e o que o usuário tiver criado).
+    ///
+    /// Vem pronta do parent porque listar é I/O de disco: esta janela é
+    /// redesenhada a cada frame e não pode varrer a pasta em nenhum deles.
+    /// O parent atualiza em evento — ver `AppState::refresh_overlay_views`.
+    pub views: Vec<String>,
 }
 
 /// Abas da janela de configurações.
@@ -113,10 +124,62 @@ fn window_width(cfg: &AppConfig) -> f32 {
     (cfg.font_size * 40.0).clamp(520.0, 720.0)
 }
 
-/// Altura fixa do corpo. Trocar de aba não deve fazer a janela pular de
-/// tamanho, e o rodapé (Salvar) precisa continuar visível sem rolagem.
-fn body_height(cfg: &AppConfig) -> f32 {
-    (cfg.font_size * 24.0).clamp(300.0, 460.0)
+/// Altura do corpo: um alvo derivado da tipografia, **limitado pelo espaço
+/// que a janela realmente tem**.
+///
+/// O alvo é fixo para que trocar de aba não faça a janela pular de tamanho.
+/// O limite existe porque ele sozinho não bastava: numa janela do app baixa,
+/// ou com a janela de configurações arrastada para perto da borda, o corpo
+/// pedia mais altura do que havia e o egui simplesmente cortava o conteúdo —
+/// o `ScrollArea` achava que cabia tudo (viewport = conteúdo) e nem barra
+/// mostrava. Descontar o que sobra faz a rolagem voltar a ser real.
+///
+/// `available` é o espaço abaixo da barra de abas menos o rodapé; o piso
+/// garante corpo utilizável mesmo numa janela absurdamente baixa.
+///
+/// Função pura para ser testável — a janela em si não dá para instanciar
+/// num teste unitário.
+fn body_height(font_size: f32, available: f32) -> f32 {
+    /// Corpo mínimo absoluto. Abaixo disso a janela deixa de ser utilizável
+    /// de qualquer forma, e insistir num piso maior só empurraria o rodapé
+    /// para fora da tela.
+    const MIN_BODY: f32 = 60.0;
+
+    let target = (font_size * 30.0).clamp(320.0, 560.0);
+    // O piso acompanha a fonte, mas nunca passa do que existe: numa janela
+    // minúscula, um corpo apertado e rolável é melhor que um corpo
+    // "confortável" com o Salvar fora da tela.
+    let floor = (font_size * 8.0).min(target).min(available.max(MIN_BODY));
+    target.min(available).max(floor)
+}
+
+/// Id estável da janela. Explícito porque o default do egui é derivado do
+/// título, que é traduzido — trocar de idioma perderia a posição da janela.
+fn window_id() -> egui::Id {
+    egui::Id::new("settings_window")
+}
+
+/// Id do valor guardado entre frames com a altura do "cromo" da janela.
+fn chrome_height_id() -> egui::Id {
+    egui::Id::new("settings_chrome_height")
+}
+
+/// Tudo que a janela ocupa **além** do corpo: barra de título, abas,
+/// separadores, rodapé e as margens do frame.
+///
+/// Medido, não estimado: `altura da janela no frame anterior − corpo que
+/// pedimos naquele frame`. Somar as partes à mão foi a primeira tentativa e
+/// errava por ~20px (o teste headless mostrou a janela saindo em 427px numa
+/// tela de 400) — margens e espaçamentos do frame não aparecem no `rect` do
+/// bloco medido.
+///
+/// A realimentação é estável porque o cromo não depende da altura do corpo:
+/// converge no segundo frame e fica parado. O fallback do primeiro frame é
+/// deliberadamente generoso; errar para mais só encolhe o corpo por um
+/// frame, errar para menos deixaria a janela passar da tela.
+fn chrome_height(ctx: &Context, font_size: f32) -> f32 {
+    ctx.data(|d| d.get_temp::<f32>(chrome_height_id()))
+        .unwrap_or(font_size * 9.0)
 }
 
 pub fn show(
@@ -146,8 +209,17 @@ pub fn show(
         *tab = SettingsTab::General;
     }
 
+    // Altura do corpo a partir da tela, descontando o cromo medido. É o que
+    // impede a janela de pedir mais do que existe — quando ela pedia, o
+    // egui cortava o conteúdo e o `ScrollArea` nem barra mostrava, porque do
+    // ponto de vista dele cabia tudo.
+    let screen_h = ctx.content_rect().height();
+    let body_h = body_height(config.font_size, screen_h - chrome_height(ctx, config.font_size));
+
     let mut window = Window::new(t("settings.title", lang))
+        .id(window_id())
         .resizable(true)
+        .max_height(screen_h)
         .default_width(window_width(config));
     if force_initial {
         // First-run mode: no X, no click-outside-to-close, centered.
@@ -170,29 +242,43 @@ pub fn show(
         tab_bar(ui, tab, lang, force_initial);
         ui.separator();
 
-        let body_h = body_height(config);
-        ScrollArea::vertical()
-            .id_salt(("settings_body", tab.id()))
-            .max_height(body_h)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_min_height(body_h);
-                match *tab {
-                    SettingsTab::General => general_tab(ui, config, &mut outcome),
-                    SettingsTab::Nicknames => {
-                        nicknames_tab(ui, config, nickname_buf, nickname_suggestions)
+        // Barra de rolagem **sólida**, não a flutuante que o egui usa por
+        // padrão: a flutuante só aparece no hover, então o corpo cortado
+        // parecia bug ("não cabe e não tem barra") mesmo rolando com a roda
+        // do mouse. Sólida ela reserva calha e se anuncia sozinha.
+        //
+        // O escopo evita que o estilo vaze para o rodapé desenhado depois.
+        ui.scope(|ui| {
+            ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+            ScrollArea::vertical()
+                .id_salt(("settings_body", tab.id()))
+                .max_height(body_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.set_min_height(body_h);
+                    match *tab {
+                        SettingsTab::General => general_tab(ui, config, &mut outcome),
+                        SettingsTab::Nicknames => {
+                            nicknames_tab(ui, config, nickname_buf, nickname_suggestions)
+                        }
+                        SettingsTab::Overlay => {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            overlay_section(ui, config, overlay_status, &mut outcome);
+                        }
+                        SettingsTab::Interface => interface_tab(ui, config),
                     }
-                    SettingsTab::Overlay => {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        overlay_section(ui, config, overlay_status, &mut outcome);
-                    }
-                    SettingsTab::Interface => interface_tab(ui, config),
-                }
-            });
+                });
+        });
 
         ui.separator();
         footer(ui, config, force_initial, &mut outcome);
     });
+
+    // Mede o cromo para o próximo frame: o que a janela ocupou menos o
+    // corpo que pedimos. Só depois do `show`, quando o rect já existe.
+    if let Some(rect) = ctx.memory(|m| m.area_rect(window_id())) {
+        ctx.data_mut(|d| d.insert_temp(chrome_height_id(), (rect.height() - body_h).max(0.0)));
+    }
 
     outcome
 }
@@ -344,7 +430,17 @@ fn nicknames_tab(
         });
     }
     if let Some(i) = to_remove {
-        config.user_nicknames.remove(i);
+        let removed = config.user_nicknames.remove(i);
+        // O overlay aponta para um nick desta lista. Se ele saiu, a escolha
+        // volta para "todos" aqui mesmo, em vez de sobreviver como um valor
+        // órfão que o usuário nunca mais vê na aba Overlay.
+        if config
+            .overlay_nickname
+            .as_deref()
+            .is_some_and(|n| n.eq_ignore_ascii_case(&removed))
+        {
+            config.overlay_nickname = None;
+        }
     }
 
     ui.add_space(SPACE_S);
@@ -463,6 +559,9 @@ fn overlay_section(
 
     ui.add_enabled_ui(config.overlay_enabled, |ui| {
         ui.indent("overlay_opts", |ui| {
+            overlay_nickname_row(ui, config);
+            ui.add_space(SPACE_M);
+
             ui.horizontal(|ui| {
                 ui.label(t("settings.overlay.port.label", lang));
                 ui.add(
@@ -473,18 +572,9 @@ fn overlay_section(
             });
             ui.small(t("settings.overlay.port.desc", lang));
 
-            let url = format!("http://127.0.0.1:{}/", config.overlay_port);
-            ui.horizontal(|ui| {
-                ui.monospace(&url);
-                if crate::widgets::copy_icon_button(
-                    ui,
-                    t("settings.overlay.copy_url.tooltip", lang),
-                )
-                .clicked()
-                {
-                    ui.ctx().copy_text(url.clone());
-                }
-            });
+            ui.add_space(SPACE_M);
+            overlay_views(ui, config, status, outcome);
+            ui.add_space(SPACE_M);
 
             ui.horizontal(|ui| {
                 if ui
@@ -565,6 +655,128 @@ fn overlay_section(
     });
 }
 
+/// Listagem das views disponíveis, cada uma com copiar-URL e abrir-no-
+/// navegador.
+///
+/// A lista vem de `status.views`, que o parent varre do disco em evento —
+/// aqui não há I/O. Um `.html` novo aparece quando a janela reabre, quando
+/// se volta para esta aba, ou no botão de recarregar ao lado do título.
+///
+/// O botão de abrir usa `open_url`, que o eframe entrega ao navegador
+/// padrão do sistema (o mesmo caminho dos links da janela "Sobre"). Ele fica
+/// desabilitado com o servidor parado: abrir a URL nesse estado daria uma
+/// página de erro de conexão, e o usuário culparia o overlay. Copiar
+/// continua valendo — é para colar no OBS, que só vai buscar depois.
+#[cfg(not(target_arch = "wasm32"))]
+fn overlay_views(
+    ui: &mut egui::Ui,
+    config: &AppConfig,
+    status: &OverlayUiStatus,
+    outcome: &mut SettingsOutcome,
+) {
+    let lang = config.language;
+    ui.horizontal(|ui| {
+        ui.strong(t("settings.overlay.views", lang));
+        if ui
+            .small_button("⟲")
+            .on_hover_text(t("settings.overlay.views.refresh", lang))
+            .clicked()
+        {
+            outcome.overlay_refresh_views = true;
+        }
+    });
+    ui.small(t("settings.overlay.views.desc", lang));
+    ui.add_space(SPACE_XS);
+
+    if status.views.is_empty() {
+        ui.small(t("settings.overlay.views.empty", lang));
+        return;
+    }
+
+    // A porta do servidor **em execução** manda: com a porta trocada e o
+    // servidor ainda no ar, a URL do config apontaria para um socket que
+    // não existe.
+    let port = if status.running {
+        status.bound_port
+    } else {
+        config.overlay_port
+    };
+    for view in &status.views {
+        let url = format!("http://127.0.0.1:{port}{view}");
+        ui.horizontal(|ui| {
+            if crate::widgets::copy_icon_button(ui, t("settings.overlay.copy_url.tooltip", lang))
+                .clicked()
+            {
+                ui.ctx().copy_text(url.clone());
+            }
+            if ui
+                .add_enabled(
+                    status.running,
+                    egui::Button::new(t("settings.overlay.views.open", lang)),
+                )
+                .on_hover_text(t("settings.overlay.views.open.tooltip", lang))
+                .on_disabled_hover_text(t("settings.overlay.views.open.stopped", lang))
+                .clicked()
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
+            ui.monospace(view);
+        });
+    }
+}
+
+/// Seletor de qual nickname o overlay trata como "eu".
+///
+/// As opções são exatamente os nicknames já cadastrados na aba Apelidos —
+/// nunca um campo de texto livre. Um nick digitado aqui que não batesse com
+/// nenhum jogador deixaria o overlay permanentemente vazio, e o usuário não
+/// teria como saber que o culpado foi um typo.
+///
+/// Sem nenhum nickname cadastrado o combo fica desabilitado, e a linha de
+/// baixo aponta para a aba que resolve.
+///
+/// A escolha é aplicada **depois** do `show_ui`: o corpo do combo já está
+/// iterando `config.user_nicknames`, e escrever no config lá dentro seria
+/// mutar o que está sendo lido.
+#[cfg(not(target_arch = "wasm32"))]
+fn overlay_nickname_row(ui: &mut egui::Ui, config: &mut AppConfig) {
+    let lang = config.language;
+    let all_label = t("settings.overlay.nickname.all", lang);
+    // O `effective` (e não o campo cru) é o que garante que um nick removido
+    // da lista apareça aqui como "todos", igual ao que o overlay publica.
+    let selected = config.overlay_nickname_effective().map(str::to_string);
+    let mut choice: Option<Option<String>> = None;
+
+    ui.horizontal(|ui| {
+        ui.label(t("settings.overlay.nickname.label", lang));
+        ui.add_enabled_ui(!config.user_nicknames.is_empty(), |ui| {
+            egui::ComboBox::from_id_salt("overlay_nickname")
+                .selected_text(selected.clone().unwrap_or_else(|| all_label.to_string()))
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(selected.is_none(), all_label).clicked() {
+                        choice = Some(None);
+                    }
+                    for nick in &config.user_nicknames {
+                        let active = selected.as_deref() == Some(nick.as_str());
+                        if ui.selectable_label(active, nick).clicked() {
+                            choice = Some(Some(nick.clone()));
+                        }
+                    }
+                });
+        });
+    });
+    if let Some(next) = choice {
+        config.overlay_nickname = next;
+    }
+
+    let key = if config.user_nicknames.is_empty() {
+        "settings.overlay.nickname.empty"
+    } else {
+        "settings.overlay.nickname.desc"
+    };
+    ui.small(t(key, lang));
+}
+
 /// Linha especial do diretório de trabalho. Mostra o caminho efetivo
 /// (persistido ou auto-detectado) e oferece um botão "Detectar SC2"
 /// que preenche `working_dir` com o diretório padrão do SC2, para que
@@ -623,4 +835,159 @@ fn working_dir_row(ui: &mut egui::Ui, config: &mut crate::config::AppConfig) {
             config.working_dir = None;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_body_takes_the_typographic_target_when_there_is_room() {
+        assert_eq!(body_height(14.0, 2000.0), 420.0);
+        // Fonte grande pede corpo maior, até o teto.
+        assert_eq!(body_height(28.0, 2000.0), 560.0);
+        // Fonte pequena não encolhe abaixo do piso do alvo.
+        assert_eq!(body_height(8.0, 2000.0), 320.0);
+    }
+
+    #[test]
+    fn the_body_never_asks_for_more_than_the_window_has() {
+        // REGRESSÃO: era este o bug de "não cabe e não tem barra". Pedindo
+        // mais altura do que havia, o `ScrollArea` enxergava viewport igual
+        // ao conteúdo (nada a rolar, nenhuma barra) enquanto a janela cortava
+        // o resto. Limitado ao espaço real, a rolagem volta a existir.
+        assert_eq!(body_height(14.0, 250.0), 250.0);
+        assert_eq!(body_height(14.0, 419.0), 419.0);
+    }
+
+    /// Monta a janela de verdade num viewport curto e confere que ela cabe.
+    ///
+    /// O egui roda headless — é o único jeito de testar o que a correção
+    /// realmente afirma: que `ui.available_height()` dentro da janela é
+    /// limitado pela tela, e não um valor solto que deixaria o corpo pedir
+    /// mais do que existe. A aba de Overlay é a mais alta, e por isso a que
+    /// estourava.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn window_rect_in(screen: egui::Vec2, font_size: f32) -> egui::Rect {
+        let ctx = egui::Context::default();
+        let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, screen);
+        let mut config = AppConfig {
+            font_size,
+            ..AppConfig::default()
+        };
+        let mut tab = SettingsTab::Overlay;
+        let mut open = true;
+        let mut buf = String::new();
+        let status = OverlayUiStatus {
+            running: true,
+            bound_port: 8722,
+            url: "http://127.0.0.1:8722/".into(),
+            error: None,
+            views: vec![
+                "/".into(),
+                "/live-players.html".into(),
+                "/stats-dashboard.html".into(),
+            ],
+        };
+        // Algumas passadas até convergir: o auto-size da janela do egui
+        // reflete o frame anterior, então a medida do cromo leva dois ou
+        // três frames para assentar. A 60 fps isso é invisível; aqui
+        // precisamos rodar à mão. `stable_rect` confere que assentou de
+        // verdade em vez de ficar oscilando.
+        for _ in 0..6 {
+            let input = egui::RawInput {
+                screen_rect: Some(screen_rect),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                show(
+                    ui.ctx(),
+                    &mut open,
+                    &mut tab,
+                    &mut config,
+                    &mut buf,
+                    &[],
+                    false,
+                    &status,
+                );
+            });
+        }
+        let settled = ctx
+            .memory(|m| m.area_rect(window_id()))
+            .expect("a janela existe");
+        // Mais uma passada: o tamanho não pode mudar depois de assentar —
+        // um cromo que se realimenta oscilando faria a janela pulsar na
+        // cara do usuário.
+        let input = egui::RawInput {
+            screen_rect: Some(screen_rect),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            show(
+                ui.ctx(),
+                &mut open,
+                &mut tab,
+                &mut config,
+                &mut buf,
+                &[],
+                false,
+                &status,
+            );
+        });
+        let again = ctx
+            .memory(|m| m.area_rect(window_id()))
+            .expect("a janela existe");
+        assert!(
+            (again.height() - settled.height()).abs() < 0.5,
+            "altura oscilando: {} → {}",
+            settled.height(),
+            again.height()
+        );
+        settled
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn the_window_always_fits_the_viewport() {
+        // REGRESSÃO: a janela saía com 427px numa tela de 400 e o conteúdo
+        // era cortado sem barra de rolagem. A matriz cobre janela do app
+        // baixa e fonte grande ao mesmo tempo, que é onde o cromo cresce
+        // junto com o alvo do corpo.
+        for h in [320.0, 400.0, 520.0, 700.0, 1080.0] {
+            for font in [10.0, 14.0, 20.0, 28.0] {
+                let screen = egui::vec2(700.0, h);
+                let rect = window_rect_in(screen, font);
+                assert!(
+                    rect.height() <= h + 1.0,
+                    "fonte {font} em tela de {h}px: janela {:?}",
+                    rect.size()
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_tall_viewport_keeps_the_window_at_a_sane_size() {
+        // O outro lado: com tela sobrando a janela não vira uma coluna de
+        // 1400px — o alvo tipográfico continua mandando.
+        let rect = window_rect_in(egui::vec2(1600.0, 1400.0), 14.0);
+        assert!(
+            rect.height() < 900.0,
+            "janela grande demais: {:?}",
+            rect.size()
+        );
+    }
+
+    #[test]
+    fn an_absurdly_short_window_still_leaves_a_usable_body() {
+        // Piso: nunca zero, nunca negativo — numa tela minúscula
+        // `available` pode até chegar negativo.
+        assert_eq!(body_height(14.0, 10.0), 60.0);
+        assert_eq!(body_height(14.0, -80.0), 60.0);
+        assert!(body_height(8.0, 0.0) > 0.0);
+        // Com espaço entre o mínimo e o alvo, o piso não infla o corpo além
+        // do que existe — era assim que a janela estourava.
+        assert_eq!(body_height(28.0, 90.0), 90.0);
+    }
 }

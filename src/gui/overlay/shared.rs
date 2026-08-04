@@ -14,12 +14,18 @@
 //! `Arc::clone` (um incremento atômico) e a de escrita é um store — um
 //! `RwLock` não teria o que otimizar aqui e traria mais superfície. É o
 //! padrão do `arc_swap` sem a dependência.
+//!
+//! São **dois** produtores, cada um dono de uma parte do snapshot: a UI
+//! thread publica o que vem da biblioteca (`publish`) e a thread do poller
+//! publica quem está jogando agora (`publish_live`). Nenhum dos dois sabe
+//! reconstruir a parte do outro, então os dois passam pelo mesmo `store`,
+//! que preserva o que não lhe pertence.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use super::data::OverlayData;
+use super::data::{LiveGame, OverlayData};
 
 /// Quantos long-polls podem ficar parkados simultaneamente.
 ///
@@ -64,23 +70,60 @@ impl OverlayState {
         })
     }
 
-    /// Publica um snapshot novo e devolve a revisão resultante.
-    /// **Só a UI thread chama isto.**
+    /// Publica o snapshot vindo da biblioteca. **Só a UI thread chama isto.**
+    ///
+    /// Preserva o `live` que já estava publicado: aquele campo pertence à
+    /// thread do poller, e `overlay_snapshot::build` — que só enxerga
+    /// replays — não teria como reconstruí-lo. Sem isto, cada replay novo
+    /// apagaria da tela quem está jogando agora.
+    pub fn publish(&self, data: OverlayData) -> u64 {
+        self.store(|prev| OverlayData {
+            live: prev.live.clone(),
+            ..data
+        })
+    }
+
+    /// Publica só a parte ao vivo. **Só a thread do poller chama isto.**
+    ///
+    /// O caminho espelha o `publish`: o resto do snapshot é preservado, a
+    /// revisão sobe e os long-polls acordam — é isso que faz a página do OBS
+    /// recarregar quando uma partida começa.
+    pub fn publish_live(&self, live: LiveGame) -> u64 {
+        self.store(|prev| OverlayData {
+            live,
+            ..(**prev).clone()
+        })
+    }
+
+    /// Tronco comum dos dois publishers.
+    ///
+    /// **A construção do valor acontece com o lock na mão**, ao contrário da
+    /// versão que só a UI thread usava. É o preço de ter dois produtores: um
+    /// deles precisa ler o snapshot anterior para preservar o campo que não
+    /// é dele, e ler-modificar-escrever fora do lock perderia a publicação
+    /// do outro numa corrida. A seção crítica passa a ser um clone de algumas
+    /// centenas de bytes, e cada publish é um evento raro (replay novo, ou
+    /// mudança de estado no cliente do SC2) — nunca algo por frame.
     ///
     /// O `revision` é escrito *depois* dos dados, com `Release`; os leitores
     /// carregam com `Acquire`. É essa ordem que torna verdadeira a
     /// afirmação "a revisão mudou ⇒ os dados que você vai ler são pelo
-    /// menos tão novos quanto ela".
-    pub fn publish(&self, mut data: OverlayData) -> u64 {
+    /// menos tão novos quanto ela". Com o lock segurando os dois publishers,
+    /// duas revisões nunca colidem.
+    fn store(&self, build: impl FnOnce(&Arc<OverlayData>) -> OverlayData) -> u64 {
+        // Um handler que deu panic com o lock na mão envenenaria o mutex.
+        // Preferimos seguir publicando (o dado continua íntegro — a única
+        // escrita é uma troca de ponteiro) a deixar o overlay congelado.
+        let mut slot = match self.data.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let rev = self.revision.load(Ordering::Relaxed) + 1;
-        data.revision = rev;
-        // O Arc é construído fora da seção crítica — dentro dela só rola
-        // a troca do ponteiro.
-        let boxed = Arc::new(data);
-        if let Ok(mut slot) = self.data.lock() {
-            *slot = boxed;
-        }
+        let mut next = build(&slot);
+        next.revision = rev;
+        *slot = Arc::new(next);
         self.revision.store(rev, Ordering::Release);
+        drop(slot);
         self.wake_all();
         rev
     }
@@ -179,6 +222,63 @@ mod tests {
         // o template emite como `window.__overlayRev`.
         assert_eq!(data.revision, 1);
         assert_eq!(data.generated_at, "x");
+    }
+
+    fn in_game() -> LiveGame {
+        LiveGame {
+            connected: true,
+            in_game: true,
+            players: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_two_publishers_do_not_overwrite_each_other() {
+        let s = OverlayState::new();
+        s.publish_live(in_game());
+        s.publish(OverlayData {
+            generated_at: "x".into(),
+            ..Default::default()
+        });
+        let (data, rev) = s.snapshot();
+        assert_eq!(rev, 2);
+        assert_eq!(data.generated_at, "x");
+        assert!(
+            data.live.in_game,
+            "um replay novo não pode apagar quem está jogando agora"
+        );
+
+        // E na direção contrária.
+        s.publish_live(LiveGame::default());
+        let (data, _) = s.snapshot();
+        assert_eq!(data.generated_at, "x", "o poller não mexe na biblioteca");
+        assert!(!data.live.in_game);
+    }
+
+    #[test]
+    fn concurrent_publishers_never_collide_on_a_revision() {
+        // As duas threads existem de verdade (UI e poller). Com o `rev` sendo
+        // lido fora do lock, duas publicações simultâneas poderiam carimbar o
+        // mesmo número e o long-poll perderia uma atualização.
+        const N: u64 = 200;
+        let s = OverlayState::new();
+        let s2 = Arc::clone(&s);
+        let t = thread::spawn(move || {
+            for _ in 0..N {
+                s2.publish_live(in_game());
+                s2.publish_live(LiveGame::default());
+            }
+        });
+        for i in 0..N {
+            s.publish(OverlayData {
+                generated_at: i.to_string(),
+                ..Default::default()
+            });
+        }
+        t.join().unwrap();
+        assert_eq!(s.revision(), N * 3, "toda publicação avançou a revisão");
+        let (data, rev) = s.snapshot();
+        assert_eq!(data.revision, rev, "o payload carrega a própria revisão");
     }
 
     #[test]

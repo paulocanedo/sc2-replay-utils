@@ -8,13 +8,13 @@
 //! UI thread (egui)                  threads overlay-http-N (4)
 //! ────────────────                  ──────────────────────────
 //! publish(OverlayData) ──► OverlayState ◄── snapshot / revision / wait_for_change
-//!                          Mutex<Arc<OverlayData>>
-//!                          AtomicU64 revision
-//!                          Condvar (long-poll)
-//!                                              │
-//!                                              ├─ GET /            → render minijinja
-//!                                              ├─ GET /_overlay/revision?since&wait
-//!                                              ├─ GET /_overlay/live.js
+//!                       ▲  Mutex<Arc<OverlayData>>
+//!                       │  AtomicU64 revision
+//!                       │  Condvar (long-poll)
+//!                       │                      │
+//! thread overlay-sc2-poll                      ├─ GET /            → render minijinja
+//! publish_live(LiveGame)                       ├─ GET /_overlay/revision?since&wait
+//! (GET 127.0.0.1:6119)                         ├─ GET /_overlay/live.js
 //!                                              ├─ GET /_overlay/data.json
 //!                                              └─ GET /<arquivo>   → asset estático
 //! ```
@@ -22,10 +22,12 @@
 //! Organização:
 //!   - `data`   — `OverlayData` e structs-espelho `Serialize` (o contexto
 //!                do template; nomes de campo são API pública).
-//!   - `shared` — `OverlayState`, a ponte UI ↔ servidor.
+//!   - `shared` — `OverlayState`, a ponte entre os dois produtores e o
+//!                servidor.
 //!   - `assets` — pasta de templates, guard de path traversal, content-type.
 //!   - `render` — `Environment` do minijinja por request + página de erro.
 //!   - `server` — bind, pool de workers, tabela de rotas, `live.js`.
+//!   - `live`   — poll do cliente do SC2 (quem está jogando agora).
 //!
 //! A projeção que constrói o `OverlayData` **não** mora aqui: ela está em
 //! `crate::library::overlay_snapshot`, porque precisa de helpers
@@ -34,6 +36,7 @@
 
 pub mod assets;
 pub mod data;
+pub mod live;
 pub mod render;
 pub mod server;
 pub mod shared;

@@ -24,37 +24,12 @@ use minijinja::{Environment, Value};
 use super::assets;
 use super::data::OverlayData;
 
-/// Nome interno usado pelo fallback quando o usuário apagou o `index.html`.
-const BUILTIN_INDEX: &str = "__builtin_index";
-
 /// Renderiza `name` a partir de `dir`. **Nunca falha** — erro de template
 /// vira uma página de erro legível.
 pub fn render(dir: &Path, name: &str, data: &OverlayData) -> String {
-    let mut env = environment(dir);
+    let env = environment(dir);
     let ctx = Value::from_serialize(data);
-
-    // O usuário pode ter apagado o index.html. `/` nunca dá 404: caímos no
-    // template embutido, que é o mesmo que o "restaurar padrões" grava.
-    //
-    // O fallback é restrito a `TemplateNotFound` de propósito. Sem esse
-    // filtro, um erro de sintaxe no index.html do usuário também cairia
-    // aqui e serviria o template padrão em silêncio — ele veria o overlay
-    // "funcionando" e nunca saberia que suas edições foram ignoradas.
-    let template = match env.get_template(name) {
-        Ok(t) => Ok(t),
-        Err(e)
-            if name == assets::INDEX_TEMPLATE
-                && e.kind() == minijinja::ErrorKind::TemplateNotFound =>
-        {
-            match env.add_template(BUILTIN_INDEX, assets::DEFAULT_INDEX_HTML) {
-                Ok(()) => env.get_template(BUILTIN_INDEX),
-                Err(_) => Err(e),
-            }
-        }
-        Err(e) => Err(e),
-    };
-
-    match template.and_then(|t| t.render(&ctx)) {
+    match env.get_template(name).and_then(|t| t.render(&ctx)) {
         Ok(html) => html,
         Err(e) => error_page(name, &e),
     }
@@ -62,7 +37,20 @@ pub fn render(dir: &Path, name: &str, data: &OverlayData) -> String {
 
 fn environment(dir: &Path) -> Environment<'static> {
     let mut env = Environment::new();
-    env.set_loader(minijinja::path_loader(dir));
+    // Disco primeiro, cópia embutida depois — para *qualquer* nome, não só
+    // o `index.html`.
+    //
+    // As páginas são montadas a partir de `base.html` e de meia dúzia de
+    // peças em `partials/`; apagar uma delas por engano não pode virar
+    // overlay em branco no meio da transmissão. O fallback vale só para
+    // arquivo **ausente**: um erro de sintaxe continua chegando à página de
+    // erro, senão o usuário veria o padrão funcionando e nunca saberia que
+    // suas edições foram ignoradas.
+    let disk = minijinja::path_loader(dir);
+    env.set_loader(move |name| match disk(name)? {
+        Some(source) => Ok(Some(source)),
+        None => Ok(assets::embedded(name).map(str::to_string)),
+    });
     // Explícito de propósito: nome de jogador vem de arquivo de replay e
     // pode conter `<`. O callback default escolhe por extensão, que é
     // exatamente o que queremos (.html escapa, .txt não).
@@ -152,23 +140,23 @@ mod tests {
     use super::*;
     use std::fs;
 
-    /// Escreve os arquivos padrão num tempdir e devolve o caminho.
+    /// Escreve **todos** os arquivos padrão num tempdir e devolve o caminho.
+    ///
+    /// Percorre `assets::DEFAULTS` em vez de listar os arquivos à mão: com a
+    /// página quebrada em peças, uma lista manual esqueceria a próxima peça
+    /// nova e o teste passaria pelo fallback embutido sem exercitar o que
+    /// está no disco.
     fn default_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("sc2ru-overlay-render-{tag}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("index.html"), assets::DEFAULT_INDEX_HTML).unwrap();
-        fs::write(dir.join("style.css"), assets::DEFAULT_STYLE_CSS).unwrap();
-        fs::write(
-            dir.join("stats-dashboard.html"),
-            assets::DEFAULT_DASHBOARD_HTML,
-        )
-        .unwrap();
-        fs::write(
-            dir.join("stats-dashboard.css"),
-            assets::DEFAULT_DASHBOARD_CSS,
-        )
-        .unwrap();
+        for (name, contents) in assets::DEFAULTS {
+            let path = dir.join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&path, contents).unwrap();
+        }
         dir
     }
 
@@ -286,6 +274,111 @@ mod tests {
         // Sem `by_race` no default, a grade some — mas a faixa continua
         // com os 10 slots, que é o que segura a largura do painel.
         assert_eq!(html.matches("result-block empty").count(), 10);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_template_renders_the_players_on_screen() {
+        let dir = default_dir("live-in-game");
+        let html = render(&dir, "live-players.html", &assets::fixture());
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("Kerrigan"));
+        assert!(html.contains("Raynor"));
+        assert!(html.contains("/race/zerg.svg"));
+        assert!(html.contains("/race/terran.svg"));
+        // Um "VS" só, entre os dois — `loop.last` segurando o separador.
+        assert_eq!(html.matches(r#"class="vs""#).count(), 1);
+        assert!(!html.contains("Not in a game"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn live_template_separates_out_of_game_from_sc2_closed() {
+        let dir = default_dir("live-idle");
+        // SC2 aberto, mas em menu.
+        let mut data = OverlayData::default();
+        data.live.connected = true;
+        let html = render(&dir, "live-players.html", &data);
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("Not in a game"), "{html}");
+
+        // SC2 fechado: o default, que é também o estado do primeiro frame.
+        let html = render(&dir, "live-players.html", &OverlayData::default());
+        assert!(html.contains("StarCraft II is not running"), "{html}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_page_written_by_the_user_gets_skeleton_pieces_and_reload_for_free() {
+        // É a promessa da estrutura: cinco linhas viram um overlay completo.
+        // Se este teste quebrar, o README está mentindo.
+        let dir = default_dir("assembly");
+        fs::write(
+            dir.join("mine.html"),
+            r#"{% extends "base.html" %}
+{% block title %}Mine{% endblock %}
+{% block content %}
+{% include "partials/session-inline.html" %}
+{% include "partials/live-versus.html" %}
+{% endblock %}"#,
+        )
+        .unwrap();
+        let html = render(&dir, "mine.html", &assets::fixture());
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("<title>Mine</title>"));
+        // Estilos das peças, sem o autor ter linkado nada.
+        assert!(html.contains("/tokens.css") && html.contains("/components.css"));
+        // Live reload embutido no esqueleto — o erro clássico de esquecer as
+        // duas linhas deixou de ser possível.
+        assert!(html.contains("window.__overlayRev = 7"));
+        assert!(html.contains("/_overlay/live.js"));
+        // E o conteúdo das duas peças.
+        assert!(html.contains("TODAY"));
+        assert!(html.contains("Kerrigan"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deleted_piece_falls_back_to_the_embedded_copy() {
+        // Uma página montada tem muitos arquivos; perder um por engano não
+        // pode virar tela em branco no meio da transmissão.
+        let dir = default_dir("missing-piece");
+        fs::remove_file(dir.join("partials").join("session-inline.html")).unwrap();
+        fs::remove_file(dir.join("base.html")).unwrap();
+        fs::remove_file(dir.join("macros.html")).unwrap();
+        let html = render(&dir, "index.html", &assets::fixture());
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("TODAY"), "a peça embutida entrou no lugar");
+        assert!(html.contains("window.__overlayRev = 7"), "o esqueleto também");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_piece_renders_on_its_own_as_a_page() {
+        // Cada peça é um template válido sozinha, então dá para apontar uma
+        // fonte do OBS direto para /partials/<nome>.html.
+        let dir = default_dir("piece-alone");
+        let html = render(&dir, "partials/race-grid.html", &assets::fixture());
+        assert!(!html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("/race/terran.svg"));
+        assert!(!html.contains("<html"), "peça não traz esqueleto");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_broken_piece_reports_the_error_with_the_offending_file() {
+        // O fallback embutido vale só para arquivo ausente. Um erro de
+        // sintaxe numa peça precisa apontar a peça — e não a página que a
+        // incluiu, nem o padrão servido em silêncio.
+        let dir = default_dir("broken-piece");
+        fs::write(
+            dir.join("partials").join("session-inline.html"),
+            "<p>{{ session.wins </p>",
+        )
+        .unwrap();
+        let html = render(&dir, "index.html", &assets::fixture());
+        assert!(html.contains("OVERLAY TEMPLATE ERROR"), "{html}");
+        assert!(html.contains("session-inline.html"), "{html}");
         let _ = fs::remove_dir_all(&dir);
     }
 

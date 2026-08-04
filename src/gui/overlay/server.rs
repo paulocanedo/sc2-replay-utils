@@ -22,6 +22,7 @@ use std::time::Duration;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
 use super::assets;
+use super::live::LivePoller;
 use super::render;
 use super::shared::OverlayState;
 
@@ -70,6 +71,10 @@ pub struct OverlayHandle {
     state: Arc<OverlayState>,
     workers: Vec<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
+    /// Poll do cliente do SC2. Amarrado ao servidor de propósito: ele existe
+    /// só para alimentar o overlay, e um poll de rede rodando com o overlay
+    /// desligado seria trabalho que ninguém lê. O `Drop` dele para a thread.
+    _live: LivePoller,
     pub bound_port: u16,
     pub dir: PathBuf,
 }
@@ -152,11 +157,14 @@ pub fn start(port: u16, state: Arc<OverlayState>) -> Result<OverlayHandle, Strin
         workers.push(handle);
     }
 
+    let _live = LivePoller::start(Arc::clone(&state));
+
     Ok(OverlayHandle {
         server,
         state,
         workers,
         shutdown,
+        _live,
         bound_port,
         dir,
     })
@@ -416,10 +424,23 @@ mod tests {
         assert_eq!(status, 200);
         assert!(body.contains("__overlayRev"));
 
-        // Asset estático: o `ensure_dir` do start escreveu o style.css padrão.
-        let (status, body) = get(port, "/style.css", "127.0.0.1");
+        // Asset estático: o `ensure_dir` do start escreveu o CSS padrão.
+        //
+        // O assert é sobre o que o *servidor* faz — status e content-type —
+        // e não sobre o conteúdo do arquivo: este teste roda contra a pasta
+        // real do usuário, que ele tem todo o direito de ter editado. A
+        // versão anterior procurava uma regra específica dentro do
+        // `style.css` e continuou passando quando essa regra mudou de
+        // arquivo, porque a máquina de quem rodou o teste ainda tinha a cópia
+        // antiga; só a CI, com a pasta limpa, teria acusado.
+        let (status, _) = get(port, "/style.css", "127.0.0.1");
         assert_eq!(status, 200);
-        assert!(body.contains("background: transparent"));
+        // Subdiretório: estático (SVG) e template (peça renderizada sozinha,
+        // que é o que permite apontar uma fonte do OBS direto para ela).
+        let (status, _) = get(port, "/race/zerg.svg", "127.0.0.1");
+        assert_eq!(status, 200);
+        let (status, _) = get(port, "/partials/live-versus.html", "127.0.0.1");
+        assert_eq!(status, 200);
 
         // Deixa um long-poll parkado e então desmonta. Se o `Drop` não
         // soltasse os waiters antes do `join`, o fechamento do app ficaria

@@ -1,153 +1,28 @@
 /*
-  sc2-replay-utils — default overlay stylesheet.
+  sc2-replay-utils — layout of the compact bar at /.
 
-  Edit freely; reload the page to see changes. Restore the original from
-  Settings → Stream overlay → "Restore default template".
+  Only the arrangement lives here: the palette is in tokens.css and the
+  pieces style themselves in components.css. That is why this file is
+  short — and why a page you write yourself can be too.
 
-  The transparent body background is what makes the OBS Browser source
-  composite over your gameplay instead of painting a black rectangle.
+  Suggested OBS Browser source size: 700 x 200.
 */
 
-* {
-  box-sizing: border-box;
-}
-
 body {
-  margin: 0;
-  background: transparent;
-  font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+  /* One number scales the whole bar: every piece is sized in `em`. */
   font-size: 20px;
-  color: #f2f4f7;
-  /* Overlays sit on top of a bright, busy game. A hard shadow keeps text
-     readable over both a white mineral patch and a dark map corner. */
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
-  -webkit-font-smoothing: antialiased;
 }
 
+/* A stacked column that shrink-wraps its content, so the transparent area
+   around it stays transparent no matter how wide the OBS source is. */
 .overlay {
   display: inline-flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
+  gap: var(--gap);
   padding: 14px 18px;
 }
 
-.session,
-.last-game,
-.idle,
-.hint {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  background: rgba(12, 14, 18, 0.72);
-  border-left: 3px solid #4c8dff;
-  white-space: nowrap;
-}
-
-.label {
-  font-size: 0.6em;
-  letter-spacing: 0.18em;
-  color: #8d97a8;
-  text-shadow: none;
-}
-
-.score {
-  font-size: 1.5em;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.wins {
-  color: #8cc86e;
-}
-
-.losses {
-  color: #e0616b;
-}
-
-.dash {
-  color: #6b7482;
-  margin: 0 4px;
-}
-
-.winrate {
-  font-weight: 600;
-  color: #cdd4e0;
-}
-
-.mmr {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.delta {
-  font-size: 0.8em;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.delta.up {
-  color: #8cc86e;
-}
-
-.delta.down {
-  color: #e0616b;
-}
-
-.last-game {
-  font-size: 0.85em;
-  border-left-color: #6b7482;
-}
-
-.last-game.win {
-  border-left-color: #8cc86e;
-}
-
-.last-game.loss {
-  border-left-color: #e0616b;
-}
-
-.matchup {
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
-.map {
-  color: #cdd4e0;
-}
-
-.duration,
-.opponent {
-  color: #8d97a8;
-}
-
-.race {
-  font-weight: 700;
-  color: #cdd4e0;
-}
-
-.result {
-  font-weight: 700;
-  letter-spacing: 0.1em;
-}
-
-.last-game.win .result {
-  color: #8cc86e;
-}
-
-.last-game.loss .result {
-  color: #e0616b;
-}
-
-.idle,
-.hint {
-  font-size: 0.8em;
-  color: #8d97a8;
-  border-left-color: #6b7482;
-}
-
-.hint {
-  border-left-color: #e8b23a;
-  color: #e8b23a;
-}
+/* Want it as a single horizontal line instead? Two changes:
+     .overlay { flex-direction: row; align-items: stretch; }
+   and give the source more width than height in OBS. */

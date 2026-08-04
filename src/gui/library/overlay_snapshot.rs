@@ -11,6 +11,8 @@
 //! O(entries) e só é chamada em evento (replay novo, fim de scan, mudança
 //! de nickname), nunca por frame.
 
+use std::borrow::Cow;
+
 use crate::config::AppConfig;
 use crate::overlay::data::{Game, OverlayData, OverlayPlayer, RaceRecord, SessionStats};
 use crate::utils::race_letter;
@@ -45,8 +47,23 @@ const TRACKED_RACES: [&str; 4] = ["Zerg", "Terran", "Protoss", "Random"];
 /// O filtro acontece **uma vez**, aqui: os helpers recebem a fatia já
 /// restrita. Espalhá-lo pelos quatro pontos de consumo abaixo seria pedir
 /// que a próxima estatística nascesse esquecendo dele.
+///
+/// O mesmo vale para `config.overlay_nickname`, aplicado logo abaixo: quando
+/// o usuário elege um nickname para a transmissão, a restrição entra aqui e
+/// só aqui.
 pub fn build(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> OverlayData {
-    let ladder: Vec<&LibraryEntry> = entries.iter().filter(|e| is_ladder_1v1(e)).collect();
+    let narrowed = restrict_to_overlay_nickname(config);
+    let config = narrowed.as_ref();
+    // Com um nickname eleito, o overlay inteiro passa a ser sobre aquela
+    // conta — inclusive o histórico. Deixar as partidas das outras contas na
+    // faixa de forma renderizaria blocos sem resultado, e um jogo do smurf
+    // no `last_game` (o elemento central) apareceria sem placar e sem
+    // oponente, parecendo bug ao vivo.
+    let restricted = config.overlay_nickname_effective().is_some();
+    let ladder: Vec<&LibraryEntry> = entries
+        .iter()
+        .filter(|e| is_ladder_1v1(e) && (!restricted || played_by_user(e, config)))
+        .collect();
     let recent_games = build_recent_games(&ladder, config, today);
     OverlayData {
         // Preenchida por `OverlayState::publish` — aqui ainda não sabemos
@@ -57,6 +74,10 @@ pub fn build(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> Overl
         session: build_session(&ladder, config, today),
         last_game: recent_games.first().cloned(),
         recent_games,
+        // Não é nosso: quem preenche é a thread do poller, via
+        // `OverlayState::publish_live`. O `publish` preserva o valor que já
+        // estava publicado, então o que sai daqui é descartado.
+        live: Default::default(),
     }
 }
 
@@ -68,6 +89,36 @@ pub fn build(entries: &[LibraryEntry], config: &AppConfig, today: &str) -> Overl
 fn is_ladder_1v1(entry: &LibraryEntry) -> bool {
     match &entry.meta {
         MetaState::Parsed(m) => m.is_ladder && m.players.len() == 2,
+        _ => false,
+    }
+}
+
+/// `config` como o overlay o enxerga: com um nickname eleito para a
+/// transmissão, a lista fica reduzida a ele.
+///
+/// Reduzir a lista — em vez de passar o nick escolhido adiante — é o que faz
+/// a restrição valer de graça para `find_user_player`, `matchup_code` e
+/// `compute_library_stats` de uma vez. Todo o resto deste módulo continua
+/// escrito contra "os nicknames do usuário", sem saber que existe escolha.
+///
+/// `Cow` porque a instalação típica não restringe nada e não deve pagar
+/// clone nenhum; o clone do caso restrito custa uma vez por publish, que é
+/// dirigido por evento e não por frame.
+fn restrict_to_overlay_nickname(config: &AppConfig) -> Cow<'_, AppConfig> {
+    match config.overlay_nickname_effective() {
+        Some(nick) => {
+            let mut narrowed = config.clone();
+            narrowed.user_nicknames = vec![nick.to_string()];
+            Cow::Owned(narrowed)
+        }
+        None => Cow::Borrowed(config),
+    }
+}
+
+/// `true` quando um dos nicknames de `config` jogou esta partida.
+fn played_by_user(entry: &LibraryEntry, config: &AppConfig) -> bool {
+    match &entry.meta {
+        MetaState::Parsed(m) => find_user_player(m, config).is_some(),
         _ => false,
     }
 }
@@ -310,6 +361,25 @@ mod tests {
         c
     }
 
+    /// Duas contas cadastradas; `chosen` é o nick eleito para o overlay
+    /// (`None` = sem restrição).
+    fn cfg_two_accounts(chosen: Option<&str>) -> AppConfig {
+        AppConfig {
+            user_nicknames: vec!["Kerrigan".into(), "Smurf".into()],
+            overlay_nickname: chosen.map(|n| n.to_string()),
+            ..AppConfig::default()
+        }
+    }
+
+    /// Sessão de hoje com as duas contas: 2W-1L na principal e 1W no smurf.
+    fn session_two_accounts() -> Vec<LibraryEntry> {
+        let mut entries = session_today();
+        entries.push(entry(
+            "2026-07-31T21:00:00", "Smurf Map", "Smurf", "Zerg", Some(2500), "Win", "Protoss", 333,
+        ));
+        entries
+    }
+
     fn session_today() -> Vec<LibraryEntry> {
         vec![
             entry("2026-07-31T18:00:00", "Alpha", "Kerrigan", "Zerg", Some(4100), "Win", "Terran", 600),
@@ -418,6 +488,90 @@ mod tests {
         // Sem usuário identificado, o matchup cai na ordem do replay.
         assert_eq!(g.matchup, "ZvT");
         assert_eq!(g.players.len(), 2);
+    }
+
+    #[test]
+    fn without_a_chosen_nickname_every_account_counts() {
+        // Linha de base do teste seguinte: sem restrição, o smurf entra no
+        // placar e ocupa o `last_game`.
+        let data = build(&session_two_accounts(), &cfg_two_accounts(None), TODAY);
+        assert_eq!(data.session.games, 4);
+        assert_eq!(data.session.wins, 3);
+        assert_eq!(data.recent_games.len(), 4);
+        assert_eq!(data.last_game.unwrap().map, "Smurf Map");
+    }
+
+    #[test]
+    fn a_chosen_nickname_keeps_the_other_accounts_out_of_the_overlay() {
+        let data = build(
+            &session_two_accounts(),
+            &cfg_two_accounts(Some("Kerrigan")),
+            TODAY,
+        );
+        // Placar do dia: só a conta eleita.
+        assert_eq!(data.session.games, 3);
+        assert_eq!((data.session.wins, data.session.losses), (2, 1));
+        // A vitória do smurf era contra Protoss; o recorde por raça não pode
+        // tê-la absorvido.
+        assert_eq!(data.session.by_race[2].wins, 0);
+        assert_eq!(data.session.by_race[2].losses, 1);
+        // E o histórico também é só dela — senão a partida do smurf viraria
+        // um bloco sem resultado na faixa de forma, e o `last_game` (o
+        // elemento central do overlay) sairia sem placar nem oponente.
+        assert_eq!(data.recent_games.len(), 3);
+        assert!(data.recent_games.iter().all(|g| g.map != "Smurf Map"));
+        let last = data.last_game.unwrap();
+        assert_eq!(last.map, "Gamma");
+        assert_eq!(last.me.unwrap().name, "Kerrigan");
+    }
+
+    #[test]
+    fn the_chosen_nickname_drives_mmr_even_when_the_other_account_played_later() {
+        // REGRESSÃO: o smurf jogou às 21h com 2500 de MMR. Se ele vazasse
+        // para o cálculo, o overlay anunciaria uma queda de ~1600 pontos ao
+        // vivo.
+        let s = build(
+            &session_two_accounts(),
+            &cfg_two_accounts(Some("Kerrigan")),
+            TODAY,
+        )
+        .session;
+        assert_eq!(s.mmr_latest, Some(4142));
+        assert_eq!(s.mmr_delta, Some(42));
+    }
+
+    #[test]
+    fn the_choice_is_case_insensitive() {
+        let data = build(
+            &session_two_accounts(),
+            &cfg_two_accounts(Some("kErRiGaN")),
+            TODAY,
+        );
+        assert_eq!(data.session.games, 3);
+    }
+
+    #[test]
+    fn a_nickname_removed_from_the_list_falls_back_to_all_accounts() {
+        // Config editado à mão, ou nick apagado fora da aba Apelidos. Precisa
+        // se comportar como "sem restrição" — um overlay vazio sem
+        // explicação seria pior que contar demais.
+        let mut config = cfg_two_accounts(Some("Deleted"));
+        config.user_nicknames = vec!["Kerrigan".into(), "Smurf".into()];
+        let data = build(&session_two_accounts(), &config, TODAY);
+        assert_eq!(data.session.games, 4);
+        assert_eq!(data.recent_games.len(), 4);
+    }
+
+    #[test]
+    fn choosing_a_nickname_that_never_played_yields_the_empty_state() {
+        let mut config = cfg_two_accounts(Some("Smurf"));
+        config.user_nicknames.push("Alt".into());
+        config.overlay_nickname = Some("Alt".into());
+        let data = build(&session_today(), &config, TODAY);
+        assert!(data.nicknames_configured, "nickname existe, só não jogou hoje");
+        assert_eq!(data.session.games, 0);
+        assert!(data.last_game.is_none());
+        assert!(data.recent_games.is_empty());
     }
 
     /// `entry` devolve ladder; esta marca o replay como custom/vs-IA.

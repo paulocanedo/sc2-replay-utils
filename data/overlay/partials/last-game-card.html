@@ -1,0 +1,35 @@
+{#
+  The most recent game as a two-line card: opponent (with race icon and
+  MMR) over matchup · map · duration · when.
+
+  For panels; the one-line version is partials/last-game-inline.html.
+  Carries its own empty state.
+
+  Without a nickname configured there is no "opponent" to name — the card
+  falls back to listing both players in replay order.
+#}
+{% import "macros.html" as m %}
+{% if last_game %}
+<div class="last-card {{ last_game.result | lower }}">
+  <div class="last-head">
+    {% if last_game.opponent %} {{ m.race_icon(last_game.opponent.race) }}
+    <span class="opp-name">{{ last_game.opponent.name }}</span>
+    {% if last_game.opponent.mmr is not none %}
+    <span class="opp-mmr">{{ last_game.opponent.mmr }}</span>
+    {% endif %} {% else %}
+    <span class="opp-name">{{ last_game.players | map(attribute='name') | join(' vs ') }}</span>
+    {% endif %}
+    <span class="verdict">{{ last_game.result | upper }}</span>
+  </div>
+  <div class="last-meta">
+    {% if last_game.matchup %}<span class="matchup">{{ last_game.matchup }}</span>{% endif %}
+    <span class="map">{{ last_game.map }}</span>
+    <span class="sep">·</span>
+    <span>{{ last_game.duration_label }}</span>
+    <span class="sep">·</span>
+    <span>{% if last_game.is_today %}{{ last_game.time }}{% else %}{{ last_game.date }}{% endif %}</span>
+  </div>
+</div>
+{% else %}
+<div class="no-game">No games recorded yet</div>
+{% endif %}

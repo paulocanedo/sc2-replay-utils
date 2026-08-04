@@ -1,0 +1,28 @@
+{#
+  ────────────────────────────────────────────────────────────────────────
+  sc2-replay-utils — who is playing right now, at /live-players.html
+  ────────────────────────────────────────────────────────────────────────
+
+  A name-vs-name bar fed by the StarCraft II client itself, not by your
+  replay folder: it fills in the moment a match starts and empties when
+  you leave it. Add it as its own OBS Browser source.
+
+  Suggested OBS Browser source size: 760 x 150.
+
+  The whole page is one piece — partials/live-versus.html, which is also
+  where the details are documented. Include it in any other layout to put
+  the same bar there.
+
+  Full guide: README.md, right next to this file.
+#}
+{% extends "base.html" %}
+
+{% block title %}SC2 Live Players{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="/live-players.css" />
+{% endblock %}
+
+{% block content %}
+<div class="stage">{% include "partials/live-versus.html" %}</div>
+{% endblock %}

@@ -13,28 +13,101 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-pub const DEFAULT_INDEX_HTML: &str = include_str!("../../../data/overlay/index.html");
-pub const DEFAULT_STYLE_CSS: &str = include_str!("../../../data/overlay/style.css");
-pub const DEFAULT_DASHBOARD_HTML: &str =
-    include_str!("../../../data/overlay/stats-dashboard.html");
-pub const DEFAULT_DASHBOARD_CSS: &str =
-    include_str!("../../../data/overlay/stats-dashboard.css");
-
-/// Arquivos escritos no bootstrap e reescritos pelo "restaurar padrões".
+/// Arquivos escritos no bootstrap e reescritos pelo "restaurar padrões" —
+/// e também a cópia de segurança consultada pelo loader do
+/// [`render`](super::render) quando o arquivo some do disco.
 ///
-/// Os nomes usam `/` como separador; `ensure_dir` cria os subdiretórios.
+/// Os nomes usam `/` como separador (é o que o minijinja espera em nome de
+/// template, inclusive no Windows); `ensure_dir` cria os subdiretórios.
+///
+/// A ordem é a de leitura: o README primeiro, depois o esqueleto e as
+/// macros, as peças, as páginas que montam as peças e por fim os assets.
 /// Os SVGs de raça são os mesmos que a UI nativa usa (`assets/race/`), para
 /// o overlay e o app falarem a mesma língua visual.
-const DEFAULTS: &[(&str, &str)] = &[
-    ("index.html", DEFAULT_INDEX_HTML),
-    ("style.css", DEFAULT_STYLE_CSS),
-    ("stats-dashboard.html", DEFAULT_DASHBOARD_HTML),
-    ("stats-dashboard.css", DEFAULT_DASHBOARD_CSS),
+///
+/// Tudo aqui entra no "restaurar padrões", inclusive o README — senão uma
+/// cópia antiga sobreviveria descrevendo templates que não existem mais.
+pub const DEFAULTS: &[(&str, &str)] = &[
+    ("README.md", include_str!("../../../data/overlay/README.md")),
+    // Esqueleto e helpers.
+    ("base.html", include_str!("../../../data/overlay/base.html")),
+    ("macros.html", include_str!("../../../data/overlay/macros.html")),
+    // Peças.
+    (
+        "partials/nickname-hint.html",
+        include_str!("../../../data/overlay/partials/nickname-hint.html"),
+    ),
+    (
+        "partials/session-inline.html",
+        include_str!("../../../data/overlay/partials/session-inline.html"),
+    ),
+    (
+        "partials/session-card.html",
+        include_str!("../../../data/overlay/partials/session-card.html"),
+    ),
+    (
+        "partials/last-game-inline.html",
+        include_str!("../../../data/overlay/partials/last-game-inline.html"),
+    ),
+    (
+        "partials/last-game-card.html",
+        include_str!("../../../data/overlay/partials/last-game-card.html"),
+    ),
+    (
+        "partials/form-strip.html",
+        include_str!("../../../data/overlay/partials/form-strip.html"),
+    ),
+    (
+        "partials/race-grid.html",
+        include_str!("../../../data/overlay/partials/race-grid.html"),
+    ),
+    (
+        "partials/live-versus.html",
+        include_str!("../../../data/overlay/partials/live-versus.html"),
+    ),
+    // Páginas.
+    ("index.html", include_str!("../../../data/overlay/index.html")),
+    (
+        "stats-dashboard.html",
+        include_str!("../../../data/overlay/stats-dashboard.html"),
+    ),
+    (
+        "live-players.html",
+        include_str!("../../../data/overlay/live-players.html"),
+    ),
+    // Estilos: tokens e componentes valem para toda página, inclusive as
+    // que o usuário escrever; os outros três são só o arranjo de cada uma.
+    ("tokens.css", include_str!("../../../data/overlay/tokens.css")),
+    (
+        "components.css",
+        include_str!("../../../data/overlay/components.css"),
+    ),
+    ("style.css", include_str!("../../../data/overlay/style.css")),
+    (
+        "stats-dashboard.css",
+        include_str!("../../../data/overlay/stats-dashboard.css"),
+    ),
+    (
+        "live-players.css",
+        include_str!("../../../data/overlay/live-players.css"),
+    ),
     ("race/terran.svg", include_str!("../../../assets/race/terran.svg")),
     ("race/protoss.svg", include_str!("../../../assets/race/protoss.svg")),
     ("race/zerg.svg", include_str!("../../../assets/race/zerg.svg")),
     ("race/random.svg", include_str!("../../../assets/race/random.svg")),
 ];
+
+/// Cópia embutida de um arquivo padrão, pelo nome que o template usa.
+///
+/// É o que permite ao render se recuperar de um arquivo apagado: com a
+/// página quebrada em peças pequenas, perder uma delas passou a ser fácil
+/// demais para virar tela em branco no meio da transmissão.
+pub fn embedded(name: &str) -> Option<&'static str> {
+    DEFAULTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, contents)| *contents)
+}
 
 /// Template servido em `/` quando o usuário não tem um `index.html`.
 pub const INDEX_TEMPLATE: &str = "index.html";
@@ -105,6 +178,48 @@ pub fn restore_defaults() -> Result<PathBuf, String> {
         fs::write(&path, contents).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
     Ok(dir)
+}
+
+/// Arquivos `.html` da raiz que **não** são views: o esqueleto renderiza
+/// uma página vazia e as macros renderizam nada. Listá-los como se fossem
+/// overlays só renderia fonte do OBS em branco.
+const NON_VIEW_TEMPLATES: &[&str] = &["base.html", "macros.html"];
+
+/// Rotas das views disponíveis, em ordem de exibição: `/` primeiro, o resto
+/// alfabético.
+///
+/// "View" aqui é o que faz sentido colar numa fonte Navegador do OBS: todo
+/// `.html` na **raiz** da pasta, incluindo os que o usuário criou. As peças
+/// em `partials/` ficam de fora de propósito — elas renderizam sozinhas
+/// (e o README explica como usá-las assim), mas oito linhas de blocos
+/// soltos enterrariam as três views de verdade.
+///
+/// Toca no disco: chame em evento (janela abrindo, aba trocando), nunca por
+/// frame.
+pub fn list_views(dir: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut views: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| {
+            name.to_ascii_lowercase().ends_with(".html")
+                && !NON_VIEW_TEMPLATES.contains(&name.as_str())
+        })
+        .map(|name| {
+            if name == INDEX_TEMPLATE {
+                // A rota canônica do index é a raiz — é a URL que o botão
+                // "Copiar URL" sempre deu e que o usuário já tem no OBS.
+                "/".to_string()
+            } else {
+                format!("/{name}")
+            }
+        })
+        .collect();
+    views.sort();
+    views
 }
 
 /// `true` quando a rota deve ser renderizada como template em vez de
@@ -274,6 +389,10 @@ pub fn content_type(path: &Path) -> &'static str {
         "ogg" => "audio/ogg",
         "wav" => "audio/wav",
         "txt" => "text/plain; charset=utf-8",
+        // `text/markdown` seria mais correto, mas o browser baixa em vez de
+        // exibir. O único .md aqui é o README de customização, e o ponto dele
+        // é ser lido — inclusive em `http://127.0.0.1:<porta>/README.md`.
+        "md" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -281,7 +400,17 @@ pub fn content_type(path: &Path) -> &'static str {
 /// Fixture usada nos testes de render do template padrão.
 #[cfg(test)]
 pub fn fixture() -> super::data::OverlayData {
-    use super::data::{Game, OverlayData, OverlayPlayer, RaceRecord, SessionStats};
+    use super::data::{
+        Game, LiveGame, LivePlayer, OverlayData, OverlayPlayer, RaceRecord, SessionStats,
+    };
+
+    fn live(name: &str, race: &str, letter: &str) -> LivePlayer {
+        LivePlayer {
+            name: name.into(),
+            race: race.into(),
+            race_letter: letter.into(),
+        }
+    }
 
     fn race(race: &str, letter: &str, wins: usize, losses: usize) -> RaceRecord {
         let games = wins + losses;
@@ -346,6 +475,16 @@ pub fn fixture() -> super::data::OverlayData {
         },
         last_game: Some(last.clone()),
         recent_games: vec![last],
+        // Partida em andamento, para os testes de render exercitarem o
+        // caminho "em jogo" do template ao vivo.
+        live: LiveGame {
+            connected: true,
+            in_game: true,
+            players: vec![
+                live("Kerrigan", "Zerg", "Z"),
+                live("Raynor", "Terran", "T"),
+            ],
+        },
     }
 }
 
@@ -417,8 +556,47 @@ mod tests {
         assert_eq!(content_type(Path::new("a.PNG")), "image/png");
         assert_eq!(content_type(Path::new("a.woff2")), "font/woff2");
         assert_eq!(content_type(Path::new("a.css")), "text/css; charset=utf-8");
+        // O README de customização precisa abrir no browser, não baixar.
+        assert_eq!(content_type(Path::new("README.md")), "text/plain; charset=utf-8");
         assert_eq!(content_type(Path::new("noext")), "application/octet-stream");
         assert_eq!(content_type(Path::new("a.zzz")), "application/octet-stream");
+    }
+
+    #[test]
+    fn lists_the_pages_and_not_the_plumbing() {
+        let dir = std::env::temp_dir().join("sc2ru-overlay-views");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("partials")).unwrap();
+        for name in [
+            "index.html",
+            "stats-dashboard.html",
+            "live-players.html",
+            "base.html",
+            "macros.html",
+            "style.css",
+            "README.md",
+        ] {
+            fs::write(dir.join(name), "x").unwrap();
+        }
+        fs::write(dir.join("partials").join("form-strip.html"), "x").unwrap();
+        // Página que o usuário criou: precisa aparecer sem o app saber dela.
+        fs::write(dir.join("mine.html"), "x").unwrap();
+
+        assert_eq!(
+            list_views(&dir),
+            [
+                "/",
+                "/live-players.html",
+                "/mine.html",
+                "/stats-dashboard.html"
+            ]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn listing_a_folder_that_is_not_there_is_empty_and_not_a_panic() {
+        assert!(list_views(Path::new("no/such/dir")).is_empty());
     }
 
     #[test]

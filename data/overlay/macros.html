@@ -1,0 +1,36 @@
+{#
+  Small reusable snippets. Import them at the top of any template:
+
+      {% import "macros.html" as m %}
+      {{ m.race_icon(last_game.opponent.race) }}
+
+  An import is per-file — a partial that calls a macro imports it itself,
+  which is why you see the line repeated across partials/.
+#}
+
+{#
+  Race icon. `race` is the full name as the app reports it ("Terran"),
+  which lowercased is also the SVG filename. Anything unknown would 404,
+  so the four files in race/ are the whole vocabulary: Terran, Protoss,
+  Zerg, Random.
+#}
+{% macro race_icon(race, extra='') -%}
+<img class="race-icon {{ extra }}" src="/race/{{ race | lower }}.svg" alt="{{ race }}" />
+{%- endmacro %}
+
+{#
+  A number with an explicit sign, for MMR swings: 42 → +42, -18 → -18.
+  Zero keeps no sign — a flat day is not a gain.
+#}
+{% macro signed(value) -%}
+{{ '+' if value > 0 else '' }}{{ value }}
+{%- endmacro %}
+
+{#
+  The class name for a result: win / loss / undecided / (empty). Keeps the
+  four cases in one place — `result` is "" until you register a nickname,
+  and "Undecided" is real (A.I. games and disconnects report it).
+#}
+{% macro result_class(result) -%}
+{{ result | lower }}
+{%- endmacro %}

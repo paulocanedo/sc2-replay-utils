@@ -288,6 +288,7 @@ impl eframe::App for AppState {
         {
             let prev_effective_dir = self.config.effective_working_dir();
             let overlay_status = self.overlay_ui_status();
+            let prev_tab = self.settings_tab;
             let outcome = ui_settings::show(
                 &ctx,
                 &mut self.show_settings,
@@ -298,6 +299,15 @@ impl eframe::App for AppState {
                 /* force_initial */ false,
                 &overlay_status,
             );
+            // Entrar na aba de overlay revarre a pasta. É o gancho que faz a
+            // listagem estar em dia sem varrer o disco por frame; junto com
+            // o da abertura da janela (menu_bar) e o botão de recarregar da
+            // própria listagem, cobre todo caminho de chegar até ela.
+            if self.settings_tab != prev_tab
+                && self.settings_tab == ui_settings::SettingsTab::Overlay
+            {
+                self.refresh_overlay_views();
+            }
             if outcome.saved {
                 match self.config.save() {
                     Ok(()) => self.set_toast(t("toast.settings_saved", lang).to_string()),
@@ -336,11 +346,13 @@ impl eframe::App for AppState {
             if outcome.overlay_apply
                 || outcome.overlay_open_folder
                 || outcome.overlay_restore_defaults
+                || outcome.overlay_refresh_views
             {
                 self.handle_overlay_actions(
                     outcome.overlay_apply,
                     outcome.overlay_open_folder,
                     outcome.overlay_restore_defaults,
+                    outcome.overlay_refresh_views,
                 );
                 // A linha de status foi montada antes do `show` deste
                 // frame; sem isto ela só atualizaria no próximo input.

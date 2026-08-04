@@ -1,0 +1,39 @@
+{#
+  Who is playing RIGHT NOW — name and race for both players.
+
+  The only piece fed by the StarCraft II client itself instead of your
+  replay folder, so it fills in the moment a match starts and empties when
+  it ends. Everything else in the overlay describes games that already
+  finished.
+
+  Carries its own out-of-game states, so you can drop it anywhere:
+
+      live.in_game      a 1v1 between two humans is on screen
+      live.connected    false when StarCraft II is not running
+
+  `live.in_game` is deliberately narrow — games against the A.I., FFA, 2v2
+  and replay playback all read as "not in a game". The client API cannot
+  tell ladder from custom, so a 1v1 against a friend does count here.
+
+  The player names come from the client and are unrelated to your
+  configured nicknames; `me`/`opponent` exist only on finished games.
+#}
+{% import "macros.html" as m %}
+{% if live.in_game %}
+<div class="versus">
+  {% for p in live.players %}
+  {# The race name doubles as the icon filename and the CSS modifier:
+     Terran / Protoss / Zerg / Random, lowercased. #}
+  <div class="player {{ p.race | lower }}">
+    {{ m.race_icon(p.race) }}
+    <span class="name">{{ p.name }}</span>
+  </div>
+  {% if not loop.last %}
+  <div class="vs">VS</div>
+  {% endif %} {% endfor %}
+</div>
+{% else %}
+<div class="card idle">
+  {% if live.connected %}Not in a game{% else %}StarCraft II is not running{% endif %}
+</div>
+{% endif %}

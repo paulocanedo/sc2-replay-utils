@@ -1,0 +1,54 @@
+{#
+  ────────────────────────────────────────────────────────────────────────
+  sc2-replay-utils — page skeleton
+  ────────────────────────────────────────────────────────────────────────
+
+  Every shipped page starts from this file. Yours can too:
+
+      {% extends "base.html" %}
+      {% block title %}My overlay{% endblock %}
+      {% block content %}
+        {% include "partials/session-inline.html" %}
+        {% include "partials/live-versus.html" %}
+      {% endblock %}
+
+  Save that as anything.html in this folder and it is live at
+  /anything.html — styled, and reloading by itself. The blocks you can
+  fill in:
+
+      title        the browser tab / OBS source title
+      styles       extra <link> or <style> for this page only
+      body_class   a class on <body>, if your CSS needs one
+      content      the page itself
+
+  What you get for free by extending this file:
+
+    · tokens.css     the palette and the transparent background
+    · components.css the styling of everything in partials/
+    · the live-reload pair below — the page reloads itself when a game
+      ends or a new one starts. Forgetting those two lines is the classic
+      "my overlay is frozen" bug; here you cannot forget them.
+
+  Full guide: README.md, right next to this file.
+#}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{% block title %}SC2 Overlay{% endblock %}</title>
+    <link rel="stylesheet" href="/tokens.css" />
+    <link rel="stylesheet" href="/components.css" />
+    {% block styles %}{% endblock %}
+  </head>
+  <body class="{% block body_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+
+    <!-- Live reload. The first line tells the script which revision this
+         page was rendered with, so an update landing while the page loads
+         is not missed. -->
+    <script>
+      window.__overlayRev = {{ revision }};
+    </script>
+    <script src="/_overlay/live.js"></script>
+  </body>
+</html>
